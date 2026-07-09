@@ -55,21 +55,21 @@
       copies into its .tpkg, otherwise type identity collides with the host-provided
       assemblies and DI registrations get duplicated.
     -->
-    <PackageReference Include="redb.Route.Core" Version="3.3.1" />
-    <PackageReference Include="redb.Route.Redis" Version="3.3.1" />
-    <PackageReference Include="redb.Route.Mail" Version="3.3.1" />
+    <PackageReference Include="redb.Route.Core" Version="3.3.0" />
+    <PackageReference Include="redb.Route.Redis" Version="3.3.0" />
+    <PackageReference Include="redb.Route.Mail" Version="3.3.0" />
     <!-- W1: outbound HTTP transport for webhook delivery. Tsak ships
          redb.Route.Http in Libs/shared/ (mounted into the Default ALC by the
          HTTP facade module), so we reference it compile-only with
          Private=false to avoid bundling a private copy that would clash. -->
-    <PackageReference Include="redb.Route.Http" Version="3.3.1" />
+    <PackageReference Include="redb.Route.Http" Version="3.3.0" />
     <!--
       Tsak host SPI (IModuleHealthContributor lives in redb.Tsak.Core, HealthStatus in
       redb.Tsak.Contracts). Identity ships these as compile-time references only — the
       Tsak host is the source of truth for both assemblies at runtime.
     -->
-    <PackageReference Include="redb.Tsak.Core" Version="3.3.1" />
-    <PackageReference Include="redb.Tsak.Contracts" Version="3.3.1" />
+    <PackageReference Include="redb.Tsak.Core" Version="3.3.0" />
+    <PackageReference Include="redb.Tsak.Contracts" Version="3.3.0" />
   </ItemGroup>
 
   <ItemGroup>
