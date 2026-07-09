@@ -1,0 +1,102 @@
+@inject Microsoft.Extensions.Options.IOptions<redb.Identity.Web.Configuration.IdentityWebOptions> IdentityOptions
+@inject IJSRuntime JS
+@inject ToastService Toast
+
+@*
+    ApplicationProvisioningTab — read-only info surface for SCIM 2.0.
+
+    Sections:
+      1. Inbound provisioning — the application can push users / groups into
+         redb.Identity via the standard SCIM 2.0 endpoints. We don't store
+         per-app provisioning credentials because SCIM auth rides the same
+         OAuth scope (identity:users.manage) as the rest of the admin API.
+      2. Outbound provisioning — deliberately empty. We don't push our users
+         to external systems today. Documented in
+         doc/FEATURE_GAPS_VS_WSO2_IS_7X.md A.2 (Deferred to Batch 3+).
+*@
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Inbound provisioning (SCIM 2.0)</h3>
+    <p class="text-secondary" style="margin: 0 0 var(--space-4); font-size: var(--font-size-sm);">
+        Any client authenticated with the
+        <code>identity:users.manage</code> scope (or the master
+        <code>identity:manage</code>) can provision users and groups via
+        the SCIM 2.0 endpoints below. There is no per-application setup —
+        the standard admin OAuth flow already gates access.
+    </p>
+
+    <dl class="app-detail__kv app-detail__endpoints">
+        @foreach (var ep in BuildScimEndpoints())
+        {
+            <dt>@ep.Label</dt>
+            <dd>
+                <div class="app-detail__input-cluster">
+                    <input type="text"
+                           readonly
+                           class="app-detail__input app-detail__input--mono app-detail__input--readonly"
+                           value="@ep.Url" />
+                    <button class="btn btn-sm btn-ghost"
+                            title="Copy"
+                            @onclick="@(() => CopyAsync(ep.Url))">
+                        <RdbIcon Name="copy" Size="14" />
+                    </button>
+                </div>
+            </dd>
+        }
+    </dl>
+
+    <p class="text-secondary" style="margin: var(--space-4) 0 0; font-size: var(--font-size-xs);">
+        SCIM 2.0 spec: <a href="https://datatracker.ietf.org/doc/html/rfc7644" target="_blank" rel="noopener">RFC 7644</a>.
+        Service Provider Configuration is exposed at
+        <code>/scim2/ServiceProviderConfig</code> per
+        <a href="https://datatracker.ietf.org/doc/html/rfc7643#section-5" target="_blank" rel="noopener">RFC 7643 §5</a>.
+    </p>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Outbound provisioning</h3>
+    <p class="text-secondary" style="margin: 0; font-size: var(--font-size-sm);">
+        redb.Identity does not currently push users / groups out to external
+        systems. WSO2 IS 7.x supports outbound provisioners (SCIM, SPML,
+        Google) — see
+        <code>doc/FEATURE_GAPS_VS_WSO2_IS_7X.md</code> §A.2 for the rationale
+        and the rough effort estimate (80–120 h).
+    </p>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public ApplicationResponse App { get; set; } = default!;
+
+    private List<EndpointInfo> BuildScimEndpoints()
+    {
+        var authority = (IdentityOptions.Value.Authority ?? string.Empty).TrimEnd('/');
+        string Url(string path) => string.IsNullOrEmpty(authority) ? "" : authority + path;
+
+        return new List<EndpointInfo>
+        {
+            new("Users",   Url("/scim2/Users")),
+            new("Groups",  Url("/scim2/Groups")),
+            new("Me",      Url("/scim2/Me")),
+            new("Schemas", Url("/scim2/Schemas")),
+            new("Bulk",    Url("/scim2/Bulk")),
+            new("ServiceProviderConfig", Url("/scim2/ServiceProviderConfig")),
+            new("ResourceTypes", Url("/scim2/ResourceTypes")),
+        };
+    }
+
+    private async Task CopyAsync(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", value);
+            Toast.Success("Copied");
+        }
+        catch
+        {
+            Toast.Error("Copy to clipboard failed");
+        }
+    }
+
+    private sealed record EndpointInfo(string Label, string Url);
+}

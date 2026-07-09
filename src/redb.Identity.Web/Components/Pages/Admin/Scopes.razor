@@ -1,0 +1,179 @@
+@page "/admin/scopes"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+<RdbPageHeader Title="Scopes" Description="OIDC/OAuth scopes." />
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">All scopes</span>
+        <button class="btn btn-primary" @onclick="OpenCreate">
+            <RdbIcon Name="zap" Size="14" /> <span>New scope</span>
+        </button>
+    </div>
+
+    @if (_loading) { <p class="text-secondary">Loading…</p> }
+    else if (_error is not null) { <p class="text-error">@_error</p> }
+    else if (_items.Count == 0) { <p class="text-secondary">No scopes.</p> }
+    else
+    {
+        <table class="data-table">
+            <thead><tr><th>Name</th><th>Display name</th><th>Resources</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var s in _items)
+                {
+                    <tr>
+                        <td><strong>@s.Name</strong></td>
+                        <td>@s.DisplayName</td>
+                        <td class="text-secondary">@string.Join(", ", s.Resources ?? Array.Empty<string>())</td>
+                        <td style="display:flex; gap: var(--space-1);">
+                            <button class="btn btn-sm" @onclick="() => OpenEdit(s)">Edit</button>
+                            <button class="btn btn-sm btn-danger" @onclick="() => Delete(s)">Delete</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <div style="display:flex; gap: var(--space-2); margin-top: var(--space-3); align-items:center;">
+            <button class="btn btn-sm" @onclick="PrevPage" disabled="@(_offset == 0)">&laquo; Prev</button>
+            <span class="text-secondary">@(_offset + 1)–@(_offset + _items.Count) of @_total</span>
+            <button class="btn btn-sm" @onclick="NextPage" disabled="@(_offset + _items.Count >= _total)">Next &raquo;</button>
+        </div>
+    }
+</div>
+
+@if (_editing is not null)
+{
+    <div class="modal-backdrop" @onclick="CloseModal">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h3>@(_isNew ? "New scope" : $"Edit {_editing.Name}")</h3>
+            <label>Name <input @bind="_form.Name" disabled="@(!_isNew)" /></label>
+            <label>Display name <input @bind="_form.DisplayName" /></label>
+            <label>Description <input @bind="_form.Description" /></label>
+            <label>Resources (one per line) <textarea rows="3" @bind="_form.Resources"></textarea></label>
+            @if (_modalError is not null) { <p class="text-error">@_modalError</p> }
+            <div class="modal-actions">
+                <button class="btn btn-secondary" @onclick="CloseModal">Cancel</button>
+                <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">
+                    @(_saving ? "Saving…" : "Save")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private readonly List<ScopeResponse> _items = new();
+    private int _offset, _total;
+    private const int PageSize = 25;
+    private bool _loading = true;
+    private string? _error;
+
+    private ScopeResponse? _editing;
+    private bool _isNew;
+    private FormState _form = new();
+    private bool _saving;
+    private string? _modalError;
+
+    private sealed class FormState
+    {
+        public string Name = "";
+        public string? DisplayName, Description;
+        public string Resources = "";
+    }
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            var page = await Client.ListScopesAsync(_offset, PageSize);
+            _items.Clear(); _items.AddRange(page.Items);
+            _total = page.Total;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private Task PrevPage() { _offset = Math.Max(0, _offset - PageSize); return LoadAsync(); }
+    private Task NextPage() { _offset += PageSize; return LoadAsync(); }
+
+    private void OpenCreate()
+    {
+        _editing = new ScopeResponse();
+        _isNew = true;
+        _form = new FormState();
+        _modalError = null;
+    }
+
+    private void OpenEdit(ScopeResponse s)
+    {
+        _editing = s;
+        _isNew = false;
+        _form = new FormState
+        {
+            Name = s.Name ?? "",
+            DisplayName = s.DisplayName,
+            Description = s.Description,
+            Resources = string.Join("\n", s.Resources ?? Array.Empty<string>()),
+        };
+        _modalError = null;
+    }
+
+    private void CloseModal() { _editing = null; _modalError = null; }
+
+    private static string[] SplitLines(string s)
+        => string.IsNullOrWhiteSpace(s)
+            ? Array.Empty<string>()
+            : s.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private async Task SaveAsync()
+    {
+        if (_editing is null) return;
+        _saving = true; _modalError = null;
+        try
+        {
+            if (_isNew)
+            {
+                await Client.CreateScopeAsync(new CreateScopeRequest
+                {
+                    Name = _form.Name,
+                    DisplayName = _form.DisplayName,
+                    Description = _form.Description,
+                    Resources = SplitLines(_form.Resources),
+                });
+                Toast.Success("Scope created");
+            }
+            else
+            {
+                await Client.UpdateScopeAsync(_editing.Id, new UpdateScopeRequest
+                {
+                    Id = _editing.Id,
+                    DisplayName = _form.DisplayName,
+                    Description = _form.Description,
+                    Resources = SplitLines(_form.Resources),
+                    ConcurrencyToken = _editing.ConcurrencyToken,
+                });
+                Toast.Success("Scope updated");
+            }
+            CloseModal();
+            await LoadAsync();
+        }
+        catch (Exception ex) { _modalError = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task Delete(ScopeResponse s)
+    {
+        try
+        {
+            await Client.DeleteScopeAsync(s.Id);
+            Toast.Success($"Scope {s.Name} deleted");
+            await LoadAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+}

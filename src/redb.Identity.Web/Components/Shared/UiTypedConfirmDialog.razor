@@ -1,0 +1,157 @@
+@*
+    UiTypedConfirmDialog — hard-delete confirmation modal that requires the
+    user to TYPE the resource's name before the destructive button enables.
+
+    Mirrors the GitHub / DigitalOcean / Linear pattern: friction-by-typing
+    means a one-click misclick can never destroy data — the user has to
+    look at the name, read it, type it correctly, then click. The longer
+    the name, the more friction; for short names the typing is fast.
+
+    Usage:
+        <UiTypedConfirmDialog @ref="_typedConfirm" />
+
+        @code {
+            private UiTypedConfirmDialog? _typedConfirm;
+
+            private async Task DeleteAsync(ApplicationDto app)
+            {
+                if (_typedConfirm is null) return;
+
+                var ok = await _typedConfirm.ShowAsync(
+                    title: "Delete application",
+                    message: $"This permanently deletes the application " +
+                             $"'{app.Name}' and revokes all its tokens. " +
+                             $"This action cannot be undone.",
+                    expectedText: app.Name,
+                    confirmLabel: "Delete this application");
+
+                if (ok) await _client.DeleteAsync(app.Id);
+            }
+        }
+
+    Visuals:
+        - Same overlay / dialog box layout as RdbConfirmDialog.
+        - One additional input row above the buttons:
+              "Type '{expectedText}' to confirm:"
+              [____________________]
+        - Confirm button is disabled until typed text === expectedText
+          (case-sensitive — typing 'myapp' when name is 'MyApp' won't enable
+          the button).
+
+    For SOFT operations (disable, archive, hide) — prefer the UndoToast
+    pattern instead; this dialog is reserved for non-reversible deletes.
+*@
+
+@if (_visible)
+{
+    <div class="confirm-overlay" @onclick="Cancel">
+        <div class="confirm-dialog" @onclick:stopPropagation="true">
+            <div class="confirm-header">
+                <RdbIcon Name="alert-triangle" Size="20" />
+                <span class="font-semibold">@Title</span>
+            </div>
+            <p class="confirm-message">@Message</p>
+
+            <div class="ui-typed-confirm__input-row">
+                <label class="ui-typed-confirm__label" for="ui-typed-confirm-input">
+                    Type
+                    <code class="ui-typed-confirm__expected">@_expectedText</code>
+                    to confirm:
+                </label>
+                <input id="ui-typed-confirm-input"
+                       type="text"
+                       class="ui-typed-confirm__input"
+                       value="@_typed"
+                       autocomplete="off"
+                       autocapitalize="off"
+                       autocorrect="off"
+                       spellcheck="false"
+                       @oninput="OnInput"
+                       @onkeydown="OnKeyDown" />
+            </div>
+
+            <div class="confirm-actions">
+                <button class="btn btn-secondary btn-sm" @onclick="Cancel">Cancel</button>
+                <button class="btn btn-danger btn-sm"
+                        disabled="@(!IsMatch)"
+                        @onclick="Confirm">
+                    @_confirmLabel
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _visible;
+    private string _expectedText = "";
+    private string _confirmLabel = "Delete";
+    private string _typed = "";
+    private TaskCompletionSource<bool>? _tcs;
+
+    /// <summary>
+    /// Modal heading. Stays in place after Show — caller can pre-set it as
+    /// a parameter or pass it via ShowAsync per-call.
+    /// </summary>
+    [Parameter] public string Title { get; set; } = "Confirm destructive action";
+
+    /// <summary>
+    /// Body paragraph above the typed-confirm row. Should explain what is
+    /// being deleted and that the action is irreversible.
+    /// </summary>
+    [Parameter] public string Message { get; set; } = "This action cannot be undone.";
+
+    private bool IsMatch =>
+        !string.IsNullOrEmpty(_expectedText) &&
+        string.Equals(_typed, _expectedText, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Display the modal and wait for the user's verdict.
+    /// Returns true if they typed the expected text and clicked Confirm;
+    /// false if they clicked Cancel or dismissed via overlay click.
+    /// </summary>
+    public Task<bool> ShowAsync(
+        string expectedText,
+        string? message = null,
+        string? title = null,
+        string? confirmLabel = null)
+    {
+        _expectedText = expectedText;
+        _confirmLabel = confirmLabel ?? "Delete";
+        _typed = "";
+        if (message is not null) Message = message;
+        if (title is not null) Title = title;
+        _tcs = new TaskCompletionSource<bool>();
+        _visible = true;
+        InvokeAsync(StateHasChanged);
+        return _tcs.Task;
+    }
+
+    private void OnInput(ChangeEventArgs e)
+    {
+        _typed = e.Value?.ToString() ?? string.Empty;
+    }
+
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && IsMatch) Confirm();
+        else if (e.Key == "Escape") Cancel();
+    }
+
+    private void Confirm()
+    {
+        // Defence in depth — UI keeps the button disabled until match, but a
+        // determined user could still trip the handler via keyboard tabbing.
+        if (!IsMatch) return;
+        _visible = false;
+        _tcs?.TrySetResult(true);
+        StateHasChanged();
+    }
+
+    private void Cancel()
+    {
+        _visible = false;
+        _tcs?.TrySetResult(false);
+        StateHasChanged();
+    }
+}

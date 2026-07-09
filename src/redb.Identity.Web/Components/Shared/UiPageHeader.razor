@@ -1,0 +1,120 @@
+@*
+    UiPageHeader — reusable detail-page header in the WSO2 IS 7.x style.
+
+    Layout:
+        ← {BackLabel}                                    {Actions}
+        [Avatar] {Title}
+                 {Badges}
+                 {Subtitle}
+
+    Usage:
+        <UiPageHeader
+            BackLink="/admin/applications"
+            BackLabel="Go back to Applications"
+            Title="@app.Name"
+            Avatar="@app.Name[..1].ToUpperInvariant()">
+            <Badges>
+                <RdbBadge Text="Standard-Based Application" Variant="info" />
+            </Badges>
+            <Actions>
+                <button class="btn btn-ghost">Settings</button>
+            </Actions>
+        </UiPageHeader>
+
+    Slots:
+        Badges  — under the title, badge row (optional).
+        Actions — right side of the title row, for context-actions (optional).
+
+    Notes:
+        Avatar variants map to the existing app.css badge/accent palette;
+        keep it monochrome for now — we can fold in user-chosen colours
+        once Branding emits per-app accent tokens (see batch 2).
+*@
+
+<header class="ui-page-header">
+    @if (!string.IsNullOrEmpty(BackLink))
+    {
+        <NavLink class="ui-page-header__back" href="@BackLink">
+            <RdbIcon Name="arrow-left" Size="14" />
+            <span>@BackLabel</span>
+        </NavLink>
+    }
+
+    <div class="ui-page-header__row">
+        @if (!string.IsNullOrEmpty(Avatar))
+        {
+            <div class="ui-page-header__avatar ui-page-header__avatar--@AvatarVariant.ToLowerInvariant()">
+                @Avatar
+            </div>
+        }
+
+        <div class="ui-page-header__body">
+            <h1 class="ui-page-header__title">@Title</h1>
+
+            @if (Badges is not null)
+            {
+                <div class="ui-page-header__badges">
+                    @Badges
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(Subtitle))
+            {
+                <p class="ui-page-header__subtitle">@Subtitle</p>
+            }
+        </div>
+
+        @if (Actions is not null)
+        {
+            <div class="ui-page-header__actions">
+                @Actions
+            </div>
+        }
+    </div>
+</header>
+
+@code {
+    /// <summary>
+    /// Href for the inline back-link rendered above the title row. When null or empty
+    /// the back-link is omitted entirely.
+    /// </summary>
+    [Parameter] public string? BackLink { get; set; }
+
+    /// <summary>
+    /// Visible text for the back-link. Defaults to "Back".
+    /// </summary>
+    [Parameter] public string BackLabel { get; set; } = "Back";
+
+    /// <summary>
+    /// Main page title. Required.
+    /// </summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+
+    /// <summary>
+    /// Optional one-line subtitle rendered under the badge row.
+    /// </summary>
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>
+    /// Short label (typically one or two characters) shown inside the avatar disc.
+    /// Empty / null hides the avatar; the title moves left to take its place.
+    /// </summary>
+    [Parameter] public string? Avatar { get; set; }
+
+    /// <summary>
+    /// Avatar accent variant — maps to a colour token. Allowed:
+    /// "default" (neutral grey), "primary" (accent blue), "secondary" (muted),
+    /// "warning" (amber), "danger" (red). Defaults to "primary".
+    /// </summary>
+    [Parameter] public string AvatarVariant { get; set; } = "primary";
+
+    /// <summary>
+    /// Badge row slot rendered under the title.
+    /// </summary>
+    [Parameter] public RenderFragment? Badges { get; set; }
+
+    /// <summary>
+    /// Right-side actions slot — for context-actions (settings dropdown, delete, …).
+    /// </summary>
+    [Parameter] public RenderFragment? Actions { get; set; }
+}

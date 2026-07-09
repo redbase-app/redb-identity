@@ -1,0 +1,88 @@
+@page "/"
+
+<AuthorizeView>
+    <Authorized>
+        <RdbPageHeader Title="redb.Identity" Description="Identity admin & self-service portal." />
+
+        @if (Info == "verify_email_sent")
+        {
+            <div class="login-error" role="alert" aria-live="polite" style="background:#0f2a18;border-color:#1a5b32;margin-bottom:var(--space-4);">
+                <RdbIcon Name="mail" Size="16" />
+                <span>Verification link sent. Check your inbox (and spam folder).</span>
+            </div>
+        }
+
+        @if (!IsEmailVerified(context.User))
+        {
+            <RdbCard Title="Verify your e-mail" Icon="alert-circle">
+                <p>Your e-mail address has not been confirmed yet. Click below to receive a verification link.</p>
+                <form method="post" action="/api/auth/account/verify-email/send" style="margin-top: var(--space-3);">
+                    <AntiforgeryToken />
+                    <button type="submit" class="btn btn-primary">
+                        <RdbIcon Name="mail" Size="16" />
+                        <span>Send verification e-mail</span>
+                    </button>
+                </form>
+            </RdbCard>
+        }
+
+        <div class="grid grid-cols-2" style="gap: var(--space-4);">
+            <RdbCard Title="Welcome" Icon="info">
+                <p>Signed in as <strong>@context.User.Identity?.Name</strong>.</p>
+                <p><a class="btn btn-primary" href="/admin">
+                    <RdbIcon Name="dashboard" Size="16" />
+                    <span>Open dashboard</span>
+                </a></p>
+            </RdbCard>
+            <RdbCard Title="Quick links" Icon="zap">
+                <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:var(--space-2);">
+                    <li><a href="/admin/users">Manage users</a></li>
+                    <li><a href="/admin/applications">Manage applications</a></li>
+                    <li><a href="/admin/audit">Audit log</a></li>
+                </ul>
+            </RdbCard>
+        </div>
+    </Authorized>
+    <NotAuthorized>
+        <div class="login-backdrop">
+            <div class="login-card">
+                <div class="login-brand">
+                    <RdbIcon Name="shield" Size="28" />
+                    <span class="login-brand-name">redb.Identity</span>
+                </div>
+
+                <h2 class="login-title">Sign In</h2>
+                <p class="login-subtitle">Identity admin &amp; self-service portal</p>
+
+                <p class="text-secondary text-sm" style="margin: var(--space-4) 0;">
+                    Sign in with your administrator credentials to access the admin dashboard.
+                </p>
+
+                <div class="login-actions">
+                    <a class="btn btn-primary login-btn" href="/login">
+                        <RdbIcon Name="key" Size="16" />
+                        <span>Sign In</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    [CascadingParameter] public HttpContext? HttpContext { get; set; }
+    [SupplyParameterFromQuery] public string? Info { get; set; }
+
+    /// <summary>
+    /// N4-6: returns <c>true</c> when the OIDC <c>email_verified</c> claim is present
+    /// and equals <c>true</c>. Defaults to <c>true</c> (hide the badge) when the claim
+    /// is absent so deployments that have not enabled e-mail verification do not show
+    /// a confusing prompt.
+    /// </summary>
+    private static bool IsEmailVerified(System.Security.Claims.ClaimsPrincipal user)
+    {
+        var claim = user.FindFirst("email_verified")?.Value;
+        if (string.IsNullOrEmpty(claim)) return true;
+        return bool.TryParse(claim, out var verified) ? verified : true;
+    }
+}

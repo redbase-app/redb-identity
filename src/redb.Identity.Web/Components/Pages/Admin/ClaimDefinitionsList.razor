@@ -1,0 +1,354 @@
+@page "/admin/claim-definitions"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+<RdbPageHeader Title="Claim definitions"
+               Description="Declarative schema for custom claims. Required + type + regex validated on user create/update; per-app gate + per-destination control enforced at token issuance." />
+
+<div class="card" style="margin-bottom: var(--space-4);">
+    <div class="card-header" style="gap: var(--space-3); flex-wrap: wrap;">
+        <div style="display:flex; gap: var(--space-3); align-items:center; flex:1;">
+            <select class="app-detail__input" style="max-width: 180px;" @bind="_scopeFilter" @bind:after="LoadAsync">
+                <option value="">All scopes</option>
+                <option value="global">Global</option>
+                <option value="application">Per-application</option>
+            </select>
+            <span class="text-secondary" style="font-size: var(--font-size-sm);">
+                @if (_total <= PageSize)
+                {
+                    @($"{_total} definition{(_total == 1 ? "" : "s")}")
+                }
+                else
+                {
+                    @($"Showing {_offset + 1}-{Math.Min(_offset + PageSize, _total)} of {_total}")
+                }
+            </span>
+        </div>
+        <div style="display:flex; gap: var(--space-2);">
+            <button class="btn" disabled="@(_offset == 0)" @onclick="PrevPage">‹ Prev</button>
+            <button class="btn" disabled="@(_offset + PageSize >= _total)" @onclick="NextPage">Next ›</button>
+            <button class="btn btn-primary" @onclick="OpenCreate">
+                <RdbIcon Name="zap" Size="14" /> New definition
+            </button>
+        </div>
+    </div>
+
+    @if (_loading) { <p class="text-secondary" style="padding: var(--space-4);">Loading…</p> }
+    else if (_loadError is not null) { <p class="text-error" style="padding: var(--space-4);">@_loadError</p> }
+    else if (_items.Count == 0)
+    {
+        <UiEmptyState Variant="inline"
+                      Title="No claim definitions yet"
+                      Description="Create one to require / type / regex-validate a custom claim across all users (global) or for a specific application." />
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Claim</th>
+                    <th>Type</th>
+                    <th>Scope</th>
+                    <th>Required</th>
+                    <th>Default</th>
+                    <th>Destinations</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var d in _items)
+                {
+                    <tr>
+                        <td>
+                            <strong><code>@d.ClaimName</code></strong>
+                            @if (!string.IsNullOrEmpty(d.DisplayName))
+                            {
+                                <div class="text-secondary" style="font-size: var(--font-size-sm); margin-top: var(--space-1);">@d.DisplayName</div>
+                            }
+                        </td>
+                        <td><RdbBadge Text="@d.Type" Variant="info" /></td>
+                        <td>
+                            @if (d.Scope == "global") { <RdbBadge Text="global" Variant="online" /> }
+                            else
+                            {
+                                <div>
+                                    <RdbBadge Text="application" Variant="info" />
+                                    <div class="text-secondary" style="font-size: var(--font-size-xs); margin-top: var(--space-1);">id @d.ApplicationId</div>
+                                </div>
+                            }
+                        </td>
+                        <td>
+                            @if (d.Required) { <RdbBadge Text="required" Variant="error" /> }
+                            else { <span class="text-secondary">optional</span> }
+                        </td>
+                        <td>
+                            @if (!string.IsNullOrEmpty(d.DefaultValue))
+                            {
+                                <code>@d.DefaultValue</code>
+                            }
+                            else { <span class="text-secondary">—</span> }
+                        </td>
+                        <td>
+                            @if (d.EmitOnAccessToken) { <RdbBadge Text="AT" Variant="online" /> }
+                            @if (d.EmitOnIdToken) { <RdbBadge Text="IT" Variant="online" /> }
+                        </td>
+                        <td style="display:flex; gap: var(--space-1); justify-content:flex-end;">
+                            <button class="btn btn-sm" @onclick="() => OpenEdit(d)">Edit</button>
+                            <button class="btn btn-sm btn-danger" @onclick="() => Delete(d)">Delete</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@if (_editing is not null)
+{
+    <div class="modal-backdrop" @onclick="CloseModal">
+        <div class="modal" @onclick:stopPropagation="true" style="max-width: 640px;">
+            <h3>@(_editing.Id == 0 ? "New claim definition" : $"Edit: {_editing.ClaimName}")</h3>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+                <label>
+                    Claim name *
+                    @if (_editing.Id == 0)
+                    {
+                        <input class="app-detail__input app-detail__input--mono" placeholder="e.g. external_user_id"
+                               value="@_form.ClaimName"
+                               @oninput="@(e => _form.ClaimName = e.Value?.ToString() ?? string.Empty)" />
+                    }
+                    else
+                    {
+                        <input class="app-detail__input app-detail__input--mono" value="@_editing.ClaimName" disabled
+                               title="Claim name is immutable — delete + re-create to rename." />
+                    }
+                </label>
+                <label>
+                    Type
+                    <select class="app-detail__input" @bind="_form.Type">
+                        <option value="string">string</option>
+                        <option value="int">int</option>
+                        <option value="long">long</option>
+                        <option value="bool">bool</option>
+                        <option value="datetime">datetime</option>
+                        <option value="url">url</option>
+                        <option value="email">email</option>
+                    </select>
+                </label>
+            </div>
+
+            <label>
+                Display name
+                <input class="app-detail__input" value="@_form.DisplayName"
+                       @oninput="@(e => _form.DisplayName = e.Value?.ToString() ?? string.Empty)" />
+            </label>
+            <label>
+                Description
+                <input class="app-detail__input" value="@_form.Description"
+                       @oninput="@(e => _form.Description = e.Value?.ToString() ?? string.Empty)" />
+            </label>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+                <label>
+                    Scope
+                    @if (_editing.Id == 0)
+                    {
+                        <select class="app-detail__input" @bind="_form.Scope">
+                            <option value="global">global</option>
+                            <option value="application">per-application</option>
+                        </select>
+                    }
+                    else
+                    {
+                        <input class="app-detail__input" value="@_editing.Scope" disabled
+                               title="Scope is immutable — delete + re-create to re-scope." />
+                    }
+                </label>
+                @if (_editing.Id == 0 && _form.Scope == "application")
+                {
+                    <label>
+                        Application id *
+                        <input type="number" class="app-detail__input" value="@_form.ApplicationId"
+                               @oninput="@(e => OnApplicationIdChanged(e.Value?.ToString()))" />
+                    </label>
+                }
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+                <label>
+                    Default value
+                    <input class="app-detail__input app-detail__input--mono" value="@_form.DefaultValue"
+                           @oninput="@(e => _form.DefaultValue = e.Value?.ToString() ?? string.Empty)" />
+                </label>
+                <label>
+                    Validation pattern (regex)
+                    <input class="app-detail__input app-detail__input--mono" placeholder="^[A-Z]{3}-[0-9]+$"
+                           value="@_form.ValidationPattern"
+                           @oninput="@(e => _form.ValidationPattern = e.Value?.ToString() ?? string.Empty)" />
+                </label>
+            </div>
+
+            <label style="display:flex; gap: var(--space-2); align-items:center; margin-top: var(--space-3);">
+                <input type="checkbox" @bind="_form.Required" /> Required — fail user create / update if absent
+            </label>
+            <label style="display:flex; gap: var(--space-2); align-items:center;">
+                <input type="checkbox" @bind="_form.EmitOnAccessToken" /> Emit on access_token
+            </label>
+            <label style="display:flex; gap: var(--space-2); align-items:center;">
+                <input type="checkbox" @bind="_form.EmitOnIdToken" /> Emit on id_token
+            </label>
+
+            @if (_modalError is not null) { <p class="text-error" style="margin-top: var(--space-3);">@_modalError</p> }
+
+            <div class="modal-actions">
+                <button class="btn btn-secondary" @onclick="CloseModal">Cancel</button>
+                <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">
+                    @(_saving ? "Saving…" : "Save")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private const int PageSize = 25;
+
+    private readonly List<ClaimDefinitionResponse> _items = new();
+    private bool _loading = true;
+    private string? _loadError;
+    private int _total;
+    private int _offset;
+    private string _scopeFilter = "";
+
+    private ClaimDefinitionResponse? _editing;
+    private FormState _form = new();
+    private bool _saving;
+    private string? _modalError;
+
+    private sealed class FormState
+    {
+        public string ClaimName = "";
+        public string? DisplayName, Description, DefaultValue, ValidationPattern;
+        public string Type = "string";
+        public bool Required;
+        public string Scope = "global";
+        public long? ApplicationId;
+        public bool EmitOnAccessToken = true;
+        public bool EmitOnIdToken = true;
+    }
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _loadError = null;
+        try
+        {
+            var page = await Client.ListClaimDefinitionsAsync(
+                offset: _offset,
+                count: PageSize,
+                scope: string.IsNullOrEmpty(_scopeFilter) ? null : _scopeFilter);
+            _items.Clear();
+            _items.AddRange(page.Items);
+            _total = page.Total;
+        }
+        catch (Exception ex) { _loadError = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private Task PrevPage() { _offset = Math.Max(0, _offset - PageSize); return LoadAsync(); }
+    private Task NextPage() { _offset += PageSize; return LoadAsync(); }
+
+    private void OnApplicationIdChanged(string? raw)
+    {
+        _form.ApplicationId = long.TryParse(raw, out var v) ? v : null;
+    }
+
+    private void OpenCreate()
+    {
+        _editing = new ClaimDefinitionResponse { Id = 0 };
+        _form = new FormState();
+        _modalError = null;
+    }
+
+    private void OpenEdit(ClaimDefinitionResponse d)
+    {
+        _editing = d;
+        _form = new FormState
+        {
+            ClaimName = d.ClaimName,
+            DisplayName = d.DisplayName,
+            Description = d.Description,
+            Type = d.Type,
+            Required = d.Required,
+            DefaultValue = d.DefaultValue,
+            ValidationPattern = d.ValidationPattern,
+            Scope = d.Scope,
+            ApplicationId = d.ApplicationId,
+            EmitOnAccessToken = d.EmitOnAccessToken,
+            EmitOnIdToken = d.EmitOnIdToken,
+        };
+        _modalError = null;
+    }
+
+    private void CloseModal() { _editing = null; }
+
+    private async Task SaveAsync()
+    {
+        _saving = true; _modalError = null;
+        try
+        {
+            if (_editing!.Id == 0)
+            {
+                await Client.CreateClaimDefinitionAsync(new CreateClaimDefinitionRequest
+                {
+                    ClaimName = _form.ClaimName.Trim(),
+                    DisplayName = string.IsNullOrWhiteSpace(_form.DisplayName) ? null : _form.DisplayName,
+                    Description = string.IsNullOrWhiteSpace(_form.Description) ? null : _form.Description,
+                    Type = _form.Type,
+                    Required = _form.Required,
+                    DefaultValue = string.IsNullOrWhiteSpace(_form.DefaultValue) ? null : _form.DefaultValue,
+                    ValidationPattern = string.IsNullOrWhiteSpace(_form.ValidationPattern) ? null : _form.ValidationPattern,
+                    Scope = _form.Scope,
+                    ApplicationId = _form.Scope == "application" ? _form.ApplicationId : null,
+                    EmitOnAccessToken = _form.EmitOnAccessToken,
+                    EmitOnIdToken = _form.EmitOnIdToken,
+                });
+                Toast.Show("Created.", "online");
+            }
+            else
+            {
+                await Client.UpdateClaimDefinitionAsync(_editing.Id, new UpdateClaimDefinitionRequest
+                {
+                    Id = _editing.Id,
+                    DisplayName = string.IsNullOrWhiteSpace(_form.DisplayName) ? null : _form.DisplayName,
+                    Description = string.IsNullOrWhiteSpace(_form.Description) ? null : _form.Description,
+                    Type = _form.Type,
+                    Required = _form.Required,
+                    DefaultValue = _form.DefaultValue,
+                    ValidationPattern = _form.ValidationPattern,
+                    EmitOnAccessToken = _form.EmitOnAccessToken,
+                    EmitOnIdToken = _form.EmitOnIdToken,
+                });
+                Toast.Show("Saved.", "online");
+            }
+            CloseModal();
+            await LoadAsync();
+        }
+        catch (Exception ex) { _modalError = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task Delete(ClaimDefinitionResponse d)
+    {
+        try
+        {
+            await Client.DeleteClaimDefinitionAsync(d.Id);
+            Toast.Show("Deleted.", "online");
+            await LoadAsync();
+        }
+        catch (Exception ex) { Toast.Show(ex.Message, "error"); }
+    }
+}

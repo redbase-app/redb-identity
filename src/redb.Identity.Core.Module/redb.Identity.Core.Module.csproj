@@ -1,0 +1,77 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>redb.Identity.Core.Module</AssemblyName>
+    <RootNamespace>redb.Identity.Core.Module</RootNamespace>
+
+    <!--
+      Force NuGet PackageReference assemblies (OpenIddict, Konscious.Argon2,
+      Fido2, Otp.NET, MyCSharp.HttpUserAgentParser, …) to be copied into bin/
+      so the packaging script can sweep them into the .tpkg as companions.
+      Without this, library-SDK projects only emit their own DLL plus
+      ProjectReference outputs.
+    -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Thin Tsak entry-point package wrapper around redb.Identity.Core.
+
+      This project produces a tiny ~10 KB DLL that contains nothing but the
+      InitRoute discovered by Tsak. It is the ONLY assembly listed in
+      manifest.EntryPoints so it is the only one loaded into the per-package
+      isolated ALC (pkg:redb.Identity.Core.Module).
+
+      redb.Identity.Core.dll itself, redb.Identity.Contracts.dll and every
+      transitive NuGet runtime DLL (OpenIddict, Konscious.Argon2, Fido2, …)
+      are shipped as COMPANION DLLs inside the same .tpkg. Tsak loads
+      companions into the Default ALC via LoadedAssemblyTracker, which makes
+      them visible — by single Assembly identity — to every other .tpkg whose
+      manifest declares this package in `Dependencies`. That is exactly the
+      mechanism redb.Identity.Http (and any future facade: gRPC, MQTT, SignalR,
+      …) uses to obtain types like HttpFacadeRouteBuilder, RedbIdentityOptions,
+      DataProtection key store, etc.
+    -->
+
+    <!-- Core ships INTO this package as a companion DLL — Private=true so it lands in bin. -->
+    <ProjectReference Include="..\redb.Identity.Core\redb.Identity.Core.csproj" />
+
+    <!--
+      LDAP integration (Variant B): always shipped inside Core.Module, opt-in
+      via "Identity:Ldap:Enabled = true" in the merged context configuration.
+      See src/redb.Identity.Ldap/PACKAGING.md for the rationale and the path
+      to a standalone .tpkg if independent deployment is needed later.
+    -->
+    <ProjectReference Include="..\redb.Identity.Ldap\redb.Identity.Ldap.csproj" />
+
+    <!--
+      Tsak host SPI references — must NOT be carried into the .tpkg (the host
+      already provides redb.Tsak.Core.dll and redb.Route.* in its own Default
+      ALC).
+    -->
+    <PackageReference Include="redb.Tsak.Core" Version="3.3.1" />
+    <PackageReference Include="redb.Route" Version="3.3.1" />
+    <PackageReference Include="redb.Route.Core" Version="3.3.1" />
+    <!-- W1: outbound HTTP transport for webhook delivery via redb.Route. The
+         host (Tsak.Worker) already ships redb.Route.Http; compile-time only. -->
+    <PackageReference Include="redb.Route.Http" Version="3.3.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Module artifacts (Tsak Layer 4). Both files ship inside the .tpkg next to
+      the assembly: manifest.json declares EntryPoints/Dependencies; the config
+      provides the default Identity options. Naming convention: filename equals
+      the package name so Tsak can discover {moduleName}.config.json by name.
+    -->
+    <None Update="Module\manifest.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="redb.Identity.Core.Module.config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
+

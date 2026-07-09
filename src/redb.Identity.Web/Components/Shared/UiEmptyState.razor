@@ -1,0 +1,91 @@
+@*
+    UiEmptyState — the "zero data" block on list pages.
+
+    Layout:
+        ┌────────────────────────────────────────┐
+        │                                        │
+        │            [Illustration]              │   ← optional, RenderFragment slot
+        │                                        │
+        │            {Title}                     │   ← required heading
+        │            {Description}               │   ← optional paragraph
+        │                                        │
+        │            [+ New Application]         │   ← optional CTA slot
+        │            [secondary link]            │
+        │                                        │
+        └────────────────────────────────────────┘
+
+    Usage:
+        <UiEmptyState
+            Title="There are no applications available"
+            Description="Add a new application to start managing access for your users.">
+            <Illustration>
+                <RdbIcon Name="package" Size="48" />
+            </Illustration>
+            <Actions>
+                <NavLink class="btn btn-primary" href="/admin/applications/new">
+                    + New Application
+                </NavLink>
+            </Actions>
+        </UiEmptyState>
+
+    Notes:
+        Default rendering centres the block vertically inside its parent up to
+        a Max-height cap of 480px so a tall empty list doesn't dominate the
+        viewport. Set Variant="inline" for table / drawer contexts where the
+        empty state should be tighter.
+*@
+
+<div class="ui-empty-state ui-empty-state--@Variant.ToLowerInvariant()">
+    @if (Illustration is not null)
+    {
+        <div class="ui-empty-state__illustration">
+            @Illustration
+        </div>
+    }
+
+    <h2 class="ui-empty-state__title">@Title</h2>
+
+    @if (!string.IsNullOrEmpty(Description))
+    {
+        <p class="ui-empty-state__description">@Description</p>
+    }
+
+    @if (Actions is not null)
+    {
+        <div class="ui-empty-state__actions">
+            @Actions
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// Main heading — required. Should be a complete sentence in user-friendly
+    /// English ("There are no applications available", not "Empty list").
+    /// </summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+
+    /// <summary>
+    /// Optional explanatory paragraph under the heading.
+    /// </summary>
+    [Parameter] public string? Description { get; set; }
+
+    /// <summary>
+    /// Visual variant. "block" (default) — large centred state for full-page
+    /// empty lists. "inline" — tighter padding for empty rows inside tables or
+    /// drawers.
+    /// </summary>
+    [Parameter] public string Variant { get; set; } = "block";
+
+    /// <summary>
+    /// Illustration slot — typically a large icon (48–96 px) or an &lt;img&gt;
+    /// to an SVG asset.
+    /// </summary>
+    [Parameter] public RenderFragment? Illustration { get; set; }
+
+    /// <summary>
+    /// Action slot under the description — typically one primary CTA and
+    /// optionally a secondary text link.
+    /// </summary>
+    [Parameter] public RenderFragment? Actions { get; set; }
+}

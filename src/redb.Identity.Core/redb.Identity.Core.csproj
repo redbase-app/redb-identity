@@ -1,0 +1,116 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>redb.Identity.Core</AssemblyName>
+    <RootNamespace>redb.Identity.Core</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OpenIddict.Core" Version="6.3.0" />
+    <PackageReference Include="OpenIddict.Server" Version="6.3.0" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="9.0.4" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.4.0" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.3" />
+    <PackageReference Include="OpenIddict.Validation" Version="6.3.0" />
+    <PackageReference Include="OpenIddict.Validation.DataProtection" Version="6.3.0" />
+    <PackageReference Include="OpenIddict.Validation.ServerIntegration" Version="6.3.0" />
+    <PackageReference Include="Otp.NET" Version="1.4.0" />
+    <!--
+      C12: Argon2id primary password hasher (OWASP 2023 recommended: m=64MB, t=3, p=4).
+      Konscious.Security.Cryptography.Argon2 is a pure-managed Argon2 implementation
+      that exposes Argon2i / Argon2d / Argon2id with control over MemorySize / Iterations
+      / DegreeOfParallelism. No native binaries, cross-platform.
+    -->
+    <PackageReference Include="Konscious.Security.Cryptography.Argon2" Version="1.3.1" />
+    <!--
+      Device auto-fill (H3-SSO §6): fast zero-deps user-agent parser. ~940 ns / 48 B cold,
+      kills the alternatives (UAParser ~9 ms / 11 MB) on perf. MIT license, actively
+      maintained on .NET 9/10. The .MemoryCache sub-package brings bounded IMemoryCache
+      for parse-result reuse across logins.
+    -->
+    <PackageReference Include="MyCSharp.HttpUserAgentParser" Version="3.1.6" />
+    <PackageReference Include="MyCSharp.HttpUserAgentParser.MemoryCache" Version="3.1.6" />
+    <!--
+      MFA-3 (WebAuthn / FIDO2 / Passkeys): Fido2NetLib v4.0.1, MIT, by passwordless-lib /
+      passwordless.dev maintainers. Battle-tested .NET FIDO2 server-side library used
+      by Microsoft.AspNetCore.Identity samples and many open-source IdPs. Provides:
+      COSE key parsing, attestation-statement verification (packed/tpm/android-key/
+      fido-u2f/none/apple-anonymous), CBOR codec, FIDO MDS3 metadata-service plumbing
+      (opt-in via IdentityWebAuthnOptions.UseFidoMetadataService) and assertion
+      verification with sign-counter rollback detection. Fido2.Models is a transitive
+      dependency carrying the wire-format DTOs (CredentialCreateOptions, AssertionOptions,
+      AuthenticatorAttestationRawResponse, …).
+    -->
+    <PackageReference Include="Fido2" Version="4.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\redb.Identity.Contracts\redb.Identity.Contracts.csproj" />
+    <ProjectReference Include="..\redb.Identity.DataProtection\redb.Identity.DataProtection.csproj" />
+    <PackageReference Include="redb.Core" Version="3.3.0" />
+    <!--
+      Tsak ships these connectors and their transitive dependencies (StackExchange.Redis,
+      Pipelines.Sockets.Unofficial, …) in Libs/shared/ and loads them into the host
+      Default ALC. The Identity module is built against them but MUST NOT carry private
+      copies into its .tpkg, otherwise type identity collides with the host-provided
+      assemblies and DI registrations get duplicated.
+    -->
+    <PackageReference Include="redb.Route.Core" Version="3.3.1" />
+    <PackageReference Include="redb.Route.Redis" Version="3.3.1" />
+    <PackageReference Include="redb.Route.Mail" Version="3.3.1" />
+    <!-- W1: outbound HTTP transport for webhook delivery. Tsak ships
+         redb.Route.Http in Libs/shared/ (mounted into the Default ALC by the
+         HTTP facade module), so we reference it compile-only with
+         Private=false to avoid bundling a private copy that would clash. -->
+    <PackageReference Include="redb.Route.Http" Version="3.3.1" />
+    <!--
+      Tsak host SPI (IModuleHealthContributor lives in redb.Tsak.Core, HealthStatus in
+      redb.Tsak.Contracts). Identity ships these as compile-time references only — the
+      Tsak host is the source of truth for both assemblies at runtime.
+    -->
+    <PackageReference Include="redb.Tsak.Core" Version="3.3.1" />
+    <PackageReference Include="redb.Tsak.Contracts" Version="3.3.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Audit log DDL — read at module startup by
+      IdentityAuditLogTableInitListener and executed via redb.Context.
+      Embedded so the .tpkg ships them and no separate migration step is
+      required; idempotent CREATE ... IF NOT EXISTS keeps re-runs safe.
+    -->
+    <EmbeddedResource Include="sql/audit/pg_create_table.sql" />
+    <EmbeddedResource Include="sql/audit/mssql_create_table.sql" />
+    <EmbeddedResource Include="sql/audit/sqlite_create_table.sql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="redb.Identity.Http" />
+    <!--
+      The thin Tsak-entry-point project (redb.Identity.Core.Module) consumes
+      InitRoute helpers from this assembly:
+        - IdentityModuleConfigBinder
+        - IdentityModuleHost / ChildHostDisposeListener
+        - IdentitySchemaInitListener / IdentityUniqueIndexesInitListener
+        - RedbXmlRepositoryInitListener / SigningKeyInitListener
+      All are intentionally kept `internal` to discourage app-level use, so
+      the Module project needs IVT here. It does NOT introduce a new public
+      surface — only crosses the assembly boundary for the bootstrap shim.
+    -->
+    <InternalsVisibleTo Include="redb.Identity.Core.Module" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      NOTE — the Tsak entry-point assets (Module/manifest.json,
+      redb.Identity.Core.config.json, the InitRoute class) live in the sibling
+      project `redb.Identity.Core.Module`. That project produces a tiny
+      ~10 KB DLL that Tsak treats as the .tpkg entry point, while
+      redb.Identity.Core.dll itself ships as a COMPANION inside the same
+      package — making its types available to every facade .tpkg (Http, gRPC,
+      MQTT, …) via Tsak's LoadedAssemblyTracker.
+    -->
+  </ItemGroup>
+
+</Project>
+

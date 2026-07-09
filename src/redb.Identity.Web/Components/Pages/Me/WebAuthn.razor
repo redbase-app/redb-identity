@@ -1,0 +1,249 @@
+@page "/me/webauthn"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject IJSRuntime JS
+
+<RdbPageHeader Title="Security keys (WebAuthn)" Description="Hardware security keys and platform authenticators." />
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Registered credentials</span>
+        <button class="btn btn-sm btn-secondary" @onclick="LoadAsync" disabled="@_busy">Refresh</button>
+    </div>
+
+    @if (_loading) { <p class="text-secondary">Loading…</p> }
+    else if (_error is not null) { <p class="text-error">@_error</p> }
+    else if (_items.Count == 0) { <p class="text-secondary">No security keys registered.</p> }
+    else
+    {
+        <table class="data-table">
+            <thead><tr><th>Name</th><th>Key</th><th>Registered</th><th>Last used</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var c in _items)
+                {
+                    var key = GetStr(c, "key") ?? "";
+                    var name = GetStr(c, "display_name") ?? "(unnamed)";
+                    var registered = GetStr(c, "registered_at") ?? "—";
+                    var lastUsed = GetStr(c, "last_used_at") ?? "—";
+                    <tr>
+                        <td><strong>@name</strong></td>
+                        <td class="text-secondary" style="font-family: var(--font-mono); font-size: var(--font-size-xs);">@Truncate(key, 24)</td>
+                        <td class="text-secondary">@registered</td>
+                        <td class="text-secondary">@lastUsed</td>
+                        <td>
+                            <button class="btn btn-sm btn-secondary" @onclick="() => StartRename(key, name)" disabled="@_busy">Rename</button>
+                            <button class="btn btn-sm btn-danger" @onclick="() => Delete(key)" disabled="@(_busy || string.IsNullOrEmpty(key))">Delete</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+<div class="card" style="margin-top: var(--space-4);">
+    <div class="card-header">
+        <span class="card-title">Register a new key</span>
+    </div>
+    <div class="form-grid">
+        <div class="form-field">
+            <label for="newKeyName">Friendly name</label>
+            <input id="newKeyName" class="form-input" @bind="_newName" placeholder="e.g. YubiKey 5C / Touch ID" disabled="@_busy" />
+        </div>
+    </div>
+    <div style="margin-top: var(--space-3); display: flex; gap: var(--space-2); align-items: center;">
+        <button class="btn btn-primary" @onclick="RegisterAsync" disabled="@_busy">
+            @(_busy ? "Working…" : "Register security key")
+        </button>
+        @if (_registerError is not null) { <span class="text-error">@_registerError</span> }
+    </div>
+    <p class="text-secondary" style="margin-top: var(--space-3);">
+        Your browser will prompt for a security key, fingerprint, or Windows Hello / Touch ID.
+    </p>
+</div>
+
+@if (_recoveryCodes is { Length: > 0 })
+{
+    <div class="card" style="margin-top: var(--space-4); border-color: var(--color-warning);">
+        <div class="card-header">
+            <span class="card-title">Recovery codes — save these now</span>
+            <button class="btn btn-sm btn-secondary" @onclick="DismissRecoveryCodes">I saved them</button>
+        </div>
+        <p class="text-secondary">
+            These one-time codes can be used to sign in if you lose access to your authenticators.
+            They are shown only once.
+        </p>
+        <pre style="background: var(--color-surface-2); padding: var(--space-3); border-radius: var(--radius-sm);">@string.Join("\n", _recoveryCodes)</pre>
+    </div>
+}
+
+@if (_renameKey is not null)
+{
+    <div class="modal-backdrop" @onclick="CancelRename">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h3>Rename credential</h3>
+            <label>New name <input @bind="_renameValue" /></label>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" @onclick="CancelRename">Cancel</button>
+                <button class="btn btn-primary" @onclick="ConfirmRename" disabled="@string.IsNullOrWhiteSpace(_renameValue)">Save</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private readonly List<JsonElement> _items = new();
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string? _registerError;
+    private string _newName = "";
+    private string[]? _recoveryCodes;
+
+    private string? _renameKey;
+    private string _renameValue = "";
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null; _items.Clear();
+        try
+        {
+            var doc = await Client.ListMyWebAuthnCredentialsAsync();
+            JsonElement arr = doc;
+            if (doc.ValueKind == JsonValueKind.Object && doc.TryGetProperty("credentials", out var creds))
+                arr = creds;
+            else if (doc.ValueKind == JsonValueKind.Object && doc.TryGetProperty("items", out var items))
+                arr = items;
+            if (arr.ValueKind == JsonValueKind.Array)
+                foreach (var c in arr.EnumerateArray()) _items.Add(c.Clone());
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task RegisterAsync()
+    {
+        _registerError = null;
+        _recoveryCodes = null;
+        _busy = true;
+        try
+        {
+            // 1) Server: begin ceremony — get options + setup_token.
+            var beginResp = await Client.BeginMyWebAuthnRegistrationAsync(new Dictionary<string, object?>
+            {
+                ["display_name"] = string.IsNullOrWhiteSpace(_newName) ? null : _newName.Trim()
+            });
+
+            if (!beginResp.TryGetProperty("options", out var optionsEl)
+                || !beginResp.TryGetProperty("setup_token", out var setupTokenEl))
+            {
+                _registerError = "Server did not return WebAuthn options.";
+                return;
+            }
+
+            // 2) Browser: hand options to navigator.credentials.create() via JS interop.
+            var optionsJson = optionsEl.GetRawText();
+            var attestation = await JS.InvokeAsync<JsonElement>(
+                "redbWebAuthn.createCredential",
+                JsonSerializer.Deserialize<JsonElement>(optionsJson));
+
+            // 3) Server: complete ceremony with browser attestation.
+            var completeResp = await Client.CompleteMyWebAuthnRegistrationAsync(new Dictionary<string, object?>
+            {
+                ["setup_token"] = setupTokenEl.GetString(),
+                ["attestation"] = JsonSerializer.Deserialize<Dictionary<string, object?>>(attestation.GetRawText()),
+                ["display_name"] = string.IsNullOrWhiteSpace(_newName) ? null : _newName.Trim()
+            });
+
+            if (completeResp.TryGetProperty("error", out var err))
+            {
+                _registerError = err.GetString() ?? "Registration failed.";
+                return;
+            }
+
+            if (completeResp.TryGetProperty("recovery_codes", out var codesEl)
+                && codesEl.ValueKind == JsonValueKind.Array && codesEl.GetArrayLength() > 0)
+            {
+                _recoveryCodes = codesEl.EnumerateArray()
+                    .Select(x => x.GetString() ?? "")
+                    .Where(s => !string.IsNullOrEmpty(s))
+                    .ToArray();
+            }
+
+            Toast.Success("Security key registered.");
+            _newName = "";
+            await LoadAsync();
+        }
+        catch (JSException jsEx)
+        {
+            // Browser-side ceremony error (NotAllowedError, abort, no authenticator, etc.).
+            _registerError = $"Browser ceremony failed: {jsEx.Message}";
+        }
+        catch (Exception ex)
+        {
+            _registerError = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task Delete(string key)
+    {
+        if (string.IsNullOrEmpty(key)) return;
+        _busy = true;
+        try
+        {
+            await Client.DeleteMyWebAuthnCredentialAsync(key);
+            Toast.Success("Credential deleted.");
+            await LoadAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+        finally { _busy = false; }
+    }
+
+    private void StartRename(string key, string currentName)
+    {
+        _renameKey = key;
+        _renameValue = currentName == "(unnamed)" ? "" : currentName;
+    }
+
+    private void CancelRename()
+    {
+        _renameKey = null;
+        _renameValue = "";
+    }
+
+    private async Task ConfirmRename()
+    {
+        if (string.IsNullOrEmpty(_renameKey) || string.IsNullOrWhiteSpace(_renameValue)) return;
+        var key = _renameKey;
+        var newName = _renameValue.Trim();
+        _busy = true;
+        try
+        {
+            await Client.RenameMyWebAuthnCredentialAsync(key, new Dictionary<string, object?>
+            {
+                ["key"] = key,
+                ["display_name"] = newName
+            });
+            Toast.Success("Credential renamed.");
+            CancelRename();
+            await LoadAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+        finally { _busy = false; }
+    }
+
+    private void DismissRecoveryCodes() => _recoveryCodes = null;
+
+    private static string? GetStr(JsonElement e, string p)
+        => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(p, out var v) && v.ValueKind == JsonValueKind.String
+            ? v.GetString() : null;
+
+    private static string Truncate(string s, int n) => s.Length > n ? s[..n] + "…" : s;
+}

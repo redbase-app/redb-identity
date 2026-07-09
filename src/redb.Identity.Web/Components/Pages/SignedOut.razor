@@ -1,0 +1,41 @@
+@page "/signed-out"
+@attribute [AllowAnonymous]
+
+<PageTitle>Signed out — redb.Identity</PageTitle>
+
+<div class="login-backdrop">
+    <div class="login-card">
+        <div class="login-brand">
+            <RdbIcon Name="shield" Size="28" />
+            <span class="login-brand-name">redb.Identity</span>
+        </div>
+
+        <h2 class="login-title">You're signed out</h2>
+        <p class="login-subtitle">Your session has ended.</p>
+
+        @if (FrontChannelPending == "true")
+        {
+            <div class="login-error" role="alert" aria-live="polite" style="--bg:transparent;">
+                <RdbIcon Name="alert-circle" Size="16" />
+                <span>Note: backchannel logout to other sessions could not be confirmed.
+                      You may still need to sign out of other applications manually.</span>
+            </div>
+        }
+
+        <div class="login-actions" style="margin-top:var(--space-4);">
+            <a class="btn btn-primary login-btn" href="/login">
+                <RdbIcon Name="key" Size="16" />
+                <span>Sign in again</span>
+            </a>
+        </div>
+
+        <p style="margin-top:var(--space-4); font-size:0.875rem;">
+            <a href="/">Return to home</a>
+        </p>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "front_channel_pending")]
+    public string? FrontChannelPending { get; set; }
+}

@@ -1,0 +1,239 @@
+@page "/admin/sessions"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+<RdbPageHeader Title="Sessions" Description="Browse and revoke all active user sessions." />
+
+<div class="card" style="margin-bottom: var(--space-4);">
+    <div class="card-header" style="gap: var(--space-3); flex-wrap: wrap;">
+        <div style="display:flex; gap: var(--space-2); align-items:center; flex:1; min-width: 280px;">
+            <RdbIcon Name="search" Size="14" />
+            <div style="flex:1; min-width: 200px;">
+                <UserPickerInput @bind-Value="_userId" Placeholder="Filter by user (optional)…" />
+            </div>
+        </div>
+        <div style="display:flex; gap: var(--space-2);">
+            <button class="btn btn-primary" @onclick="ApplyFilter"
+                    disabled="@(string.IsNullOrEmpty(_userId) || !long.TryParse(_userId, out _))">Apply</button>
+            <button class="btn" @onclick="ClearFilter" disabled="@(!_userFiltered)">Clear</button>
+            @if (_userFiltered)
+            {
+                <button class="btn btn-danger" @onclick="RevokeAll">
+                    <RdbIcon Name="alert-triangle" Size="14" /> Revoke all for user
+                </button>
+            }
+        </div>
+    </div>
+
+    @if (_loading) { <p class="text-secondary" style="padding: var(--space-4);">Loading…</p> }
+    else if (_error is not null) { <p class="text-error" style="padding: var(--space-4);">@_error</p> }
+    else
+    {
+        var items = _sessions.ValueKind == System.Text.Json.JsonValueKind.Array
+            ? _sessions.EnumerateArray().ToList()
+            : (_sessions.ValueKind == System.Text.Json.JsonValueKind.Object && _sessions.TryGetProperty("items", out var arr)
+                ? arr.EnumerateArray().ToList()
+                : new System.Collections.Generic.List<System.Text.Json.JsonElement>());
+
+        @if (items.Count == 0)
+        {
+            <UiEmptyState Variant="inline"
+                          Title="@(_userFiltered ? "No sessions for this user" : "No active sessions")"
+                          Description="@(_userFiltered
+                              ? "The selected user has no active sessions right now."
+                              : "Nobody is signed in. Sessions appear here as soon as users log in.")" />
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Session ID</th>
+                        @if (!_userFiltered) { <th>User</th> }
+                        <th>Application</th>
+                        <th>Created</th>
+                        <th>Last active</th>
+                        <th>IP</th>
+                        <th>Device</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in items)
+                    {
+                        var sid = JsonValueAsString(s, "sessionId") ?? JsonValueAsString(s, "id") ?? "—";
+                        var uidStr = JsonValueAsString(s, "userId") ?? "—";
+                        var uLogin = JsonValueAsString(s, "userLogin");
+                        var appName = JsonValueAsString(s, "applicationName")
+                            ?? JsonValueAsString(s, "clientId") ?? "—";
+                        var created = JsonValueAsString(s, "createdAt") ?? "—";
+                        var lastActive = JsonValueAsString(s, "lastAccessedAt")
+                            ?? JsonValueAsString(s, "lastActiveAt") ?? "—";
+                        var ip = JsonValueAsString(s, "ipAddress") ?? "—";
+                        var ua = JsonValueAsString(s, "deviceLabel")
+                            ?? JsonValueAsString(s, "userAgent") ?? "—";
+                        <tr>
+                            <td><code>@sid</code></td>
+                            @if (!_userFiltered)
+                            {
+                                <td>
+                                    @if (!string.IsNullOrEmpty(uLogin))
+                                    {
+                                        <div>@uLogin</div>
+                                        <div class="text-secondary" style="font-size: var(--font-size-xs);">id #@uidStr</div>
+                                    }
+                                    else
+                                    {
+                                        <code>@uidStr</code>
+                                    }
+                                </td>
+                            }
+                            <td class="text-secondary">@appName</td>
+                            <td class="text-secondary">@FormatTimestamp(created)</td>
+                            <td class="text-secondary">@FormatTimestamp(lastActive)</td>
+                            <td>@ip</td>
+                            <td class="text-secondary" style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">@ua</td>
+                            <td>
+                                @if (sid is not null && long.TryParse(sid, out var sidLong))
+                                {
+                                    <button class="btn btn-sm btn-danger" @onclick="() => RevokeSession(sidLong)">Revoke</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            @if (!_userFiltered && _sessions.TryGetProperty("total", out var totalEl)
+                 && totalEl.ValueKind == System.Text.Json.JsonValueKind.Number)
+            {
+                <div style="display:flex; justify-content:space-between; align-items:center; padding: var(--space-3);
+                            border-top: 1px solid var(--border-color); margin-top: var(--space-3);">
+                    <span class="text-secondary">
+                        Showing @items.Count of @totalEl.GetInt32() active sessions.
+                    </span>
+                    <div style="display:flex; gap: var(--space-2);">
+                        <button class="btn" disabled="@(_offset == 0)" @onclick="PrevPage">← Prev</button>
+                        <button class="btn" disabled="@(_offset + items.Count >= totalEl.GetInt32())"
+                                @onclick="NextPage">Next →</button>
+                    </div>
+                </div>
+            }
+        }
+    }
+</div>
+
+@code {
+    private const int PageSize = 25;
+
+    private string? _userId;
+    private bool _loading;
+    private bool _userFiltered;
+    private int _offset;
+    private string? _error;
+    private System.Text.Json.JsonElement _sessions;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAllAsync();
+    }
+
+    /// <summary>
+    /// Default view: paginated browse of every active session across all users.
+    /// Mirrors WSO2 IS 7.x's Session admin landing — operator sees who's
+    /// online before having to pick a target.
+    /// </summary>
+    private async Task LoadAllAsync()
+    {
+        _loading = true; _error = null; _userFiltered = false;
+        try { _sessions = await Client.ListAllSessionsAsync(_offset, PageSize); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task ApplyFilter()
+    {
+        if (!long.TryParse(_userId, out var uid)) return;
+        _loading = true; _error = null; _userFiltered = true; _offset = 0;
+        try { _sessions = await Client.ListSessionsAsync(uid); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task ClearFilter()
+    {
+        _userId = null;
+        _offset = 0;
+        await LoadAllAsync();
+    }
+
+    private async Task PrevPage()
+    {
+        _offset = Math.Max(0, _offset - PageSize);
+        await LoadAllAsync();
+    }
+
+    private async Task NextPage()
+    {
+        _offset += PageSize;
+        await LoadAllAsync();
+    }
+
+    private async Task RevokeSession(long sessionId)
+    {
+        try
+        {
+            await Client.RevokeSessionAsync(sessionId);
+            Toast.Show("Session revoked.", "online");
+            if (_userFiltered) await ApplyFilter();
+            else await LoadAllAsync();
+        }
+        catch (Exception ex) { Toast.Show(ex.Message, "error"); }
+    }
+
+    private async Task RevokeAll()
+    {
+        if (!long.TryParse(_userId, out var uid)) return;
+        try
+        {
+            await Client.RevokeAllUserSessionsAsync(uid);
+            Toast.Show("All sessions revoked.", "online");
+            await ApplyFilter();
+        }
+        catch (Exception ex) { Toast.Show(ex.Message, "error"); }
+    }
+
+    /// <summary>
+    /// Resilient JsonElement → string. Returns null when the property is
+    /// missing or Null; renders Number / Boolean as their canonical text.
+    /// GetString() on non-String elements throws, which is what was
+    /// triggering the "requires String, has Number" page error on
+    /// session_id-as-number rows.
+    /// </summary>
+    private static string? JsonValueAsString(System.Text.Json.JsonElement obj, string property)
+    {
+        if (!obj.TryGetProperty(property, out var v)) return null;
+        return v.ValueKind switch
+        {
+            System.Text.Json.JsonValueKind.String => v.GetString(),
+            System.Text.Json.JsonValueKind.Number => v.GetRawText(),
+            System.Text.Json.JsonValueKind.True => "true",
+            System.Text.Json.JsonValueKind.False => "false",
+            System.Text.Json.JsonValueKind.Null or System.Text.Json.JsonValueKind.Undefined => null,
+            _ => v.GetRawText()
+        };
+    }
+
+    /// <summary>
+    /// Format an ISO-8601 timestamp as YYYY-MM-DD HH:mm for table density.
+    /// Falls back to the raw value when parsing fails.
+    /// </summary>
+    private static string FormatTimestamp(string raw)
+    {
+        if (string.IsNullOrEmpty(raw) || raw == "—") return raw;
+        return DateTimeOffset.TryParse(raw, out var dt)
+            ? dt.ToString("yyyy-MM-dd HH:mm")
+            : raw;
+    }
+}

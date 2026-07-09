@@ -1,0 +1,240 @@
+@page "/admin/roles/new"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    B.3 — 2-step Create Role wizard (matches WSO2 IS 7.x pattern).
+    Step 1 (Basic Details): name + audience + (when application) assigned app.
+    Step 2 (Permission Selection): placeholder — permissions = bound claim
+        scopes (existing ClaimScopeProps wiring); the operator picks scopes
+        AFTER role creation on the role detail page so we don't lock the
+        wizard with the deeper picker.
+*@
+
+<div style="margin-bottom: var(--space-3);">
+    <NavLink href="/admin/roles" class="btn btn-ghost" style="padding: 0; color: var(--accent-primary);">
+        ← Go back
+    </NavLink>
+</div>
+
+<h1>Create Role</h1>
+<p class="text-secondary">Create a new role in the system.</p>
+
+<div class="card" style="margin-top: var(--space-4);">
+    <section class="app-detail__section" style="display:flex; gap: var(--space-3); align-items: flex-start;">
+        <div style="display:flex; flex-direction:column; align-items:center; gap: var(--space-2);">
+            <div style="width: 32px; height: 32px; border-radius: 50%; display:flex; align-items:center; justify-content:center;
+                        background: @(_step == 1 ? "var(--bg-tertiary)" : "var(--accent-primary)");
+                        color: @(_step == 1 ? "var(--text-secondary)" : "#fff");">
+                @if (_step > 1) { <RdbIcon Name="copy" Size="14" /> } else { @("1") }
+            </div>
+            <div style="width: 1px; flex: 1; min-height: 80px; background: var(--border-color);"></div>
+        </div>
+        <div style="flex: 1;">
+            <h3 class="app-detail__section-title" style="border:0; padding: 0;">Basic Details</h3>
+            @if (_step == 1)
+            {
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Role Name *</span>
+                    <input class="app-detail__input" placeholder="Enter Role name"
+                           value="@_form.Name"
+                           @oninput="@(e => _form.Name = e.Value?.ToString() ?? string.Empty)" />
+                </label>
+
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Display name</span>
+                    <input class="app-detail__input"
+                           value="@_form.DisplayName"
+                           @oninput="@(e => _form.DisplayName = e.Value?.ToString() ?? string.Empty)" />
+                </label>
+
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Description</span>
+                    <input class="app-detail__input"
+                           value="@_form.Description"
+                           @oninput="@(e => _form.Description = e.Value?.ToString() ?? string.Empty)" />
+                </label>
+
+                <div class="app-detail__field">
+                    <span class="app-detail__field-label">Select the role audience *</span>
+                    <label style="display:flex; gap: var(--space-2); margin-top: var(--space-2);">
+                        <input type="radio" name="aud" value="application"
+                               checked="@(_form.Audience == "application")"
+                               @onchange="@(() => _form.Audience = "application")" />
+                        Application
+                    </label>
+                    <label style="display:flex; gap: var(--space-2);">
+                        <input type="radio" name="aud" value="organization"
+                               checked="@(_form.Audience == "organization")"
+                               @onchange="@(() => _form.Audience = "organization")" />
+                        Organization
+                    </label>
+                    <span class="app-detail__field-hint">
+                        <RdbIcon Name="info" Size="12" />
+                        Set the audience of the role. <strong>Note that audience of the role cannot be changed.</strong>
+                    </span>
+                </div>
+
+                @if (_form.Audience == "application")
+                {
+                    <div class="app-detail__field">
+                        <span class="app-detail__field-label">Assigned application *</span>
+                        @if (_form.ApplicationId is { } aid)
+                        {
+                            <div style="display:flex; gap: var(--space-2); align-items: center;">
+                                <RdbBadge Text="@(_form.ApplicationLabel ?? $"#{aid}")" Variant="info" />
+                                <button class="btn btn-sm btn-ghost" @onclick="ClearApp">Clear</button>
+                            </div>
+                        }
+                        else
+                        {
+                            <input type="text" class="app-detail__input"
+                                   placeholder="Select application to assign the role"
+                                   value="@_appSearch"
+                                   @oninput="OnAppSearchChanged" />
+                            @if (_appResults.Count > 0)
+                            {
+                                <div style="border: 1px solid var(--border-color); border-radius: var(--border-radius); max-height: 200px; overflow-y: auto; margin-top: var(--space-2);">
+                                    @foreach (var a in _appResults)
+                                    {
+                                        <div style="padding: var(--space-2); cursor:pointer; border-bottom: 1px solid var(--border-color);"
+                                             @onclick="@(() => PickApp(a))">
+                                            <strong>@a.ClientId</strong>
+                                            @if (!string.IsNullOrEmpty(a.DisplayName))
+                                            {
+                                                <span class="text-secondary" style="margin-left: var(--space-2);">— @a.DisplayName</span>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+                            <span class="app-detail__field-hint">
+                                <RdbIcon Name="info" Size="12" />
+                                Assign an application for this role. Cannot be edited after the role is created.
+                            </span>
+                        }
+                    </div>
+                }
+
+                @if (_error is not null) { <p class="text-error">@_error</p> }
+
+                <div style="margin-top: var(--space-4);">
+                    <button class="btn btn-primary" @onclick="@SaveAsync"
+                            disabled="@(_saving || string.IsNullOrWhiteSpace(_form.Name) || (_form.Audience == "application" && _form.ApplicationId is null))">
+                        @(_saving ? "Saving…" : "Next")
+                    </button>
+                </div>
+            }
+        </div>
+    </section>
+
+    <section class="app-detail__section" style="display:flex; gap: var(--space-3); align-items: flex-start; margin-top: var(--space-4);">
+        <div style="display:flex; flex-direction:column; align-items:center; gap: var(--space-2);">
+            <div style="width: 32px; height: 32px; border-radius: 50%; display:flex; align-items:center; justify-content:center;
+                        background: var(--bg-tertiary);
+                        color: var(--text-secondary);">
+                @("2")
+            </div>
+        </div>
+        <div style="flex: 1;">
+            <h3 class="app-detail__section-title" style="border:0; padding: 0;">Permission Selection</h3>
+            <p class="text-secondary" style="font-size: var(--font-size-sm);">
+                <RdbIcon Name="info" Size="12" />
+                After the role is created you can attach scopes / claim mappers on the role detail page. The link to scope-bound permissions reuses the existing
+                <NavLink href="/admin/claim-scopes">Claim scopes</NavLink> infrastructure — no separate permission registry to bootstrap.
+            </p>
+        </div>
+    </section>
+</div>
+
+@code {
+    private int _step = 1;
+    private FormState _form = new();
+    private bool _saving;
+    private string? _error;
+
+    // App picker
+    private string _appSearch = "";
+    private readonly List<ApplicationResponse> _appResults = new();
+    private System.Threading.Timer? _appDebounce;
+
+    private sealed class FormState
+    {
+        public string Name = "";
+        public string? DisplayName, Description;
+        public string Audience = "application";
+        public long? ApplicationId;
+        public string? ApplicationLabel;
+    }
+
+    public void Dispose() => _appDebounce?.Dispose();
+
+    private void OnAppSearchChanged(ChangeEventArgs e)
+    {
+        _appSearch = e.Value?.ToString() ?? "";
+        _appDebounce?.Dispose();
+        _appDebounce = new System.Threading.Timer(async _ =>
+        {
+            if (string.IsNullOrWhiteSpace(_appSearch))
+            {
+                _appResults.Clear();
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+            try
+            {
+                // Server caps at 100 — first page across the full catalogue is fine
+                // for a wizard's narrow lookup.
+                var page = await Client.ListApplicationsAsync(0, 100);
+                var hit = page.Items
+                    .Where(a => (a.ClientId?.Contains(_appSearch, StringComparison.OrdinalIgnoreCase) ?? false)
+                             || (a.DisplayName?.Contains(_appSearch, StringComparison.OrdinalIgnoreCase) ?? false))
+                    .Take(20)
+                    .ToList();
+                _appResults.Clear();
+                _appResults.AddRange(hit);
+            }
+            catch { /* swallow */ }
+            await InvokeAsync(StateHasChanged);
+        }, null, 250, System.Threading.Timeout.Infinite);
+    }
+
+    private void PickApp(ApplicationResponse a)
+    {
+        _form.ApplicationId = long.TryParse(a.Id, out var aid) ? aid : null;
+        _form.ApplicationLabel = a.DisplayName ?? a.ClientId;
+        _appSearch = "";
+        _appResults.Clear();
+    }
+
+    private void ClearApp()
+    {
+        _form.ApplicationId = null;
+        _form.ApplicationLabel = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_saving) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            var created = await Client.CreateRoleAsync(new CreateRoleRequest
+            {
+                Name = _form.Name.Trim(),
+                DisplayName = string.IsNullOrWhiteSpace(_form.DisplayName) ? null : _form.DisplayName,
+                Description = string.IsNullOrWhiteSpace(_form.Description) ? null : _form.Description,
+                Audience = _form.Audience,
+                ApplicationId = _form.Audience == "application" ? _form.ApplicationId : null
+            });
+            Toast.Success($"Role '{created.Name}' created");
+            // Operator continues on detail page where permissions / assignments are picked.
+            Nav.NavigateTo($"/admin/roles/{created.Id}");
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+}

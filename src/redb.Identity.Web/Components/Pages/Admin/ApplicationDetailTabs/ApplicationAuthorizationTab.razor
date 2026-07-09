@@ -1,0 +1,214 @@
+@inject IIdentityClient Client
+@inject ToastService Toast
+@using redb.Identity.Contracts.ClaimMappers
+
+@*
+    Application > Authorization tab — claim-scope assignments.
+
+    A claim-scope describes a set of claims that get emitted when the client
+    requests its scope name. Each application has a set of assigned scopes;
+    the authorization endpoint compares the requested scopes against this set
+    before issuing tokens.
+
+    The previous monolithic Applications.razor exposed this inline as part of
+    the edit modal. Splitting it into its own tab gives it room to breathe and
+    matches the WSO2 IS 7.x convention of a dedicated "Authorization" tab.
+*@
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Assigned claim-scopes</h3>
+
+    @if (_loading)
+    {
+        <p class="text-secondary">Loading…</p>
+    }
+    else if (_error is not null)
+    {
+        <p class="text-error">@_error</p>
+    }
+    else if (_allScopes.Count == 0)
+    {
+        @* No claim-scopes globally — short-circuit. No point talking about
+           "assignments" when the catalogue is empty; send the user to create
+           one first. *@
+        <UiEmptyState Variant="inline"
+                      Title="No claim-scopes exist yet">
+            <Actions>
+                <NavLink class="btn btn-primary" href="/admin/claim-scopes">
+                    Go to Claim Scopes
+                </NavLink>
+            </Actions>
+        </UiEmptyState>
+    }
+    else
+    {
+        @if (_assignments.Count == 0)
+        {
+            <UiEmptyState Variant="inline"
+                          Title="No claim-scopes assigned"
+                          Description="Pick a scope below to grant this application the claims it carries." />
+        }
+        else
+        {
+            <ul class="app-detail__assignment-list">
+                @foreach (var sid in _assignments)
+                {
+                    var scope = _allScopes.FirstOrDefault(s => s.Id == sid);
+                    <li class="app-detail__assignment-row">
+                        <div class="app-detail__assignment-info">
+                            <strong>@(scope?.Name ?? sid)</strong>
+                            @if (!string.IsNullOrEmpty(scope?.Description))
+                            {
+                                <p class="text-secondary">@scope.Description</p>
+                            }
+                        </div>
+                        <button class="btn btn-sm btn-danger"
+                                @onclick="@(() => UnassignAsync(sid))"
+                                disabled="@_mutating">
+                            Remove
+                        </button>
+                    </li>
+                }
+            </ul>
+        }
+
+        @* Add-scope row — only shows the scopes the application doesn't already have. *@
+        var unassigned = _allScopes.Where(s => !_assignments.Contains(s.Id)).ToList();
+        if (unassigned.Count > 0)
+        {
+            <div class="app-detail__assignment-add">
+                <select class="app-detail__input"
+                        value="@_scopeToAssign"
+                        @onchange="@(e => _scopeToAssign = e.Value?.ToString() ?? string.Empty)">
+                    <option value="">— pick a scope to add —</option>
+                    @foreach (var s in unassigned)
+                    {
+                        <option value="@s.Id">@(s.Name ?? s.Id)</option>
+                    }
+                </select>
+                <button class="btn btn-primary"
+                        @onclick="AssignAsync"
+                        disabled="@(string.IsNullOrEmpty(_scopeToAssign) || _mutating)">
+                    Assign
+                </button>
+            </div>
+        }
+        else
+        {
+            <p class="text-secondary" style="margin-top: var(--space-3);">
+                All available claim-scopes are already assigned.
+            </p>
+        }
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public ApplicationResponse App { get; set; } = default!;
+    [Parameter] public EventCallback OnRefresh { get; set; }
+
+    private readonly List<string> _assignments = new();
+    private readonly List<ClaimScopeResponse> _allScopes = new();
+    private string _scopeToAssign = "";
+    private bool _loading = true;
+    private bool _mutating;
+    private string? _error;
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        _assignments.Clear();
+
+        try
+        {
+            // Pull the catalogue once — paged to 200 since claim-scope sets
+            // are typically tiny (one digit, rarely two digits).
+            if (_allScopes.Count == 0)
+            {
+                var page = await Client.ListClaimScopesAsync(0, 200);
+                _allScopes.AddRange(page.Items);
+            }
+
+            var doc = await Client.ListClaimScopeAssignmentsAsync(App.Id);
+            // The endpoint returns either { items: [...] } or a bare array.
+            // We tolerate both shapes — there's a single-line normaliser below.
+            if (doc.ValueKind == JsonValueKind.Object &&
+                doc.TryGetProperty("items", out var arr) &&
+                arr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in arr.EnumerateArray()) AddIfScope(el);
+            }
+            else if (doc.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in doc.EnumerateArray()) AddIfScope(el);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void AddIfScope(JsonElement el)
+    {
+        if (el.TryGetProperty("scopeId", out var sid) && sid.ValueKind == JsonValueKind.String)
+        {
+            _assignments.Add(sid.GetString()!);
+        }
+    }
+
+    private async Task AssignAsync()
+    {
+        if (string.IsNullOrEmpty(_scopeToAssign) || _mutating) return;
+        _mutating = true;
+        try
+        {
+            await Client.AssignClaimScopeAsync(new AssignClaimScopeRequest
+            {
+                ApplicationId = App.Id,
+                ScopeId = _scopeToAssign,
+            });
+            var assigned = _scopeToAssign;
+            _scopeToAssign = "";
+            Toast.Success("Scope assigned");
+            await LoadAsync();
+            await OnRefresh.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _mutating = false;
+        }
+    }
+
+    private async Task UnassignAsync(string scopeId)
+    {
+        if (_mutating) return;
+        _mutating = true;
+        try
+        {
+            await Client.UnassignClaimScopeAsync(App.Id, scopeId);
+            Toast.Success("Scope removed");
+            await LoadAsync();
+            await OnRefresh.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _mutating = false;
+        }
+    }
+}

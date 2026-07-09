@@ -1,0 +1,129 @@
+@page "/register"
+@attribute [AllowAnonymous]
+
+<PageTitle>Create Account — redb.Identity</PageTitle>
+
+@*
+    N-3 (sub-step N3-7): browser-driven self-service account registration.
+    The page is statically rendered (interactivity off) and submits a classic
+    antiforgery-protected POST to /api/auth/register, which proxies to the
+    Identity host's /api/v1/identity/account/register endpoint and \u2014 on
+    success \u2014 auto-signs the user in via ROPC before redirecting to /.
+    Unlike the password-recovery flow, this surface is NOT anti-enumeration:
+    duplicate logins, duplicate e-mails and weak passwords are surfaced as
+    actionable error codes so the user can correct the offending field.
+*@
+
+<div class="login-backdrop">
+    <div class="login-card">
+        <div class="login-brand">
+            <RdbIcon Name="shield" Size="28" />
+            <span class="login-brand-name">redb.Identity</span>
+        </div>
+
+        <h2 class="login-title">Create Account</h2>
+        <p class="login-subtitle">Sign up for redb.Identity self-service portal</p>
+
+        @if (!string.IsNullOrEmpty(Error))
+        {
+            <div class="login-error" role="alert" aria-live="polite" id="register-error">
+                <RdbIcon Name="alert-circle" Size="16" />
+                <span>
+                    @ErrorMessage
+                    @if (!string.IsNullOrEmpty(ErrorDetail))
+                    {
+                        <br /><small style="opacity:0.8;">@ErrorDetail</small>
+                    }
+                </span>
+            </div>
+        }
+
+        <form method="post" action="/api/auth/register" class="login-form"
+              aria-describedby="@(string.IsNullOrEmpty(Error) ? null : "register-error")">
+            <AntiforgeryToken />
+
+            <div class="float-field">
+                <input id="login" name="login" type="text" placeholder=" "
+                       autocomplete="username" autofocus required
+                       value="@Login"
+                       aria-invalid="@(IsLoginError ? "true" : "false")"
+                       aria-describedby="@(string.IsNullOrEmpty(Error) ? null : "register-error")" />
+                <label for="login">Login</label>
+            </div>
+
+            <div class="float-field">
+                <input id="email" name="email" type="email" placeholder=" "
+                       autocomplete="email" required
+                       value="@Email"
+                       aria-invalid="@(IsEmailError ? "true" : "false")"
+                       aria-describedby="@(string.IsNullOrEmpty(Error) ? null : "register-error")" />
+                <label for="email">E-mail</label>
+            </div>
+
+            <div class="float-field">
+                <input id="displayName" name="displayName" type="text" placeholder=" "
+                       autocomplete="name"
+                       value="@DisplayName" />
+                <label for="displayName">Display name (optional)</label>
+            </div>
+
+            <div class="float-field">
+                <input id="password" name="password" type="password" placeholder=" "
+                       autocomplete="new-password" required minlength="8"
+                       aria-invalid="@(IsPasswordError ? "true" : "false")"
+                       aria-describedby="@(string.IsNullOrEmpty(Error) ? null : "register-error")" />
+                <label for="password">Password</label>
+            </div>
+
+            <div class="float-field">
+                <input id="confirmPassword" name="confirmPassword" type="password" placeholder=" "
+                       autocomplete="new-password" required minlength="8"
+                       aria-invalid="@(IsPasswordError ? "true" : "false")"
+                       aria-describedby="@(string.IsNullOrEmpty(Error) ? null : "register-error")" />
+                <label for="confirmPassword">Confirm password</label>
+            </div>
+
+            <div class="login-actions">
+                <button type="submit" class="btn btn-primary login-btn">
+                    <RdbIcon Name="user-plus" Size="16" />
+                    <span>Create account</span>
+                </button>
+            </div>
+        </form>
+
+        <div class="login-actions" style="margin-top:8px;">
+            <a href="/login" class="login-link">Already have an account? Sign in</a>
+        </div>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] public HttpContext? HttpContext { get; set; }
+    [SupplyParameterFromQuery] public string? Error { get; set; }
+    [SupplyParameterFromQuery(Name = "error_detail")] public string? ErrorDetail { get; set; }
+    // Round-tripped form fields so we do not lose user input on validation failure.
+    // Password fields are intentionally NOT round-tripped \u2014 the user must re-enter
+    // them, and they never appear in the URL.
+    [SupplyParameterFromQuery] public string? Login { get; set; }
+    [SupplyParameterFromQuery] public string? Email { get; set; }
+    [SupplyParameterFromQuery(Name = "displayName")] public string? DisplayName { get; set; }
+
+    private bool IsLoginError => Error is "invalid_login" or "duplicate" or "validation_error";
+    private bool IsEmailError => Error is "invalid_email" or "duplicate" or "validation_error";
+    private bool IsPasswordError => Error is "weak_password" or "password_mismatch";
+
+    private string ErrorMessage => Error switch
+    {
+        "missing_fields" => "Please fill in all required fields.",
+        "password_mismatch" => "Password and confirmation do not match.",
+        "duplicate" => "An account with this login or e-mail already exists.",
+        "weak_password" => "Password does not meet the complexity policy.",
+        "invalid_email" => "Please enter a valid e-mail address.",
+        "invalid_login" => "Login contains invalid characters.",
+        "validation_error" => "One or more fields contain invalid values.",
+        "registration_disabled" => "Self-service registration is currently disabled. Please contact an administrator.",
+        "rate_limited" => "Too many sign-up attempts. Please wait a minute and try again.",
+        "registration_failed" => "Account registration failed. Please try again later.",
+        _ => "Account registration failed. Please try again.",
+    };
+}

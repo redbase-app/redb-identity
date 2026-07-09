@@ -1,0 +1,53 @@
+@inherits LayoutComponentBase
+@inject ToastService Toast
+@implements IDisposable
+
+<AuthorizeView>
+    <Authorized>
+        <div class="shell">
+            <IdentitySidebar />
+            <div class="shell-main">
+                <IdentityTopBar />
+                <ImpersonationBanner />
+                <main class="shell-content">
+                    <RdbErrorBoundary>
+                        @Body
+                    </RdbErrorBoundary>
+                </main>
+                <SiteFooter />
+            </div>
+        </div>
+        <RdbToast @ref="_toast" />
+        <UiUndoToast />
+    </Authorized>
+    <NotAuthorized>
+        <div class="login-shell">
+            <main class="login-content">
+                <RdbErrorBoundary>
+                    @Body
+                </RdbErrorBoundary>
+            </main>
+            <SiteFooter />
+        </div>
+    </NotAuthorized>
+</AuthorizeView>
+<CookieBanner />
+
+@code {
+    private RdbToast? _toast;
+
+    protected override void OnInitialized()
+    {
+        Toast.OnShow += OnToast;
+    }
+
+    private void OnToast(string message, string level, int durationMs)
+    {
+        _toast?.Show(message, level, durationMs);
+    }
+
+    public void Dispose()
+    {
+        Toast.OnShow -= OnToast;
+    }
+}

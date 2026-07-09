@@ -1,0 +1,245 @@
+@page "/admin/groups"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    Groups list — paginated, searchable, type-filtered flat list across the
+    entire hierarchy. WSO2 IS 7.x pattern: operators want to FIND a single
+    group by name across a deep tree without expanding nodes. Detail / tree
+    operations live on the per-group page (GroupDetail.razor).
+*@
+
+<RdbPageHeader Title="Groups"
+               Description="Create and manage hierarchical groups, assign users to them." />
+
+<div class="card" style="margin-bottom: var(--space-4);">
+    <div class="card-header" style="gap: var(--space-3); flex-wrap: wrap;">
+        <div style="display: flex; gap: var(--space-2); align-items: center; flex: 1; min-width: 280px;">
+            <RdbIcon Name="search" Size="14" />
+            <input type="text"
+                   class="app-detail__input"
+                   placeholder="Search by group name"
+                   value="@_searchInput"
+                   @oninput="OnSearchInputChanged"
+                   @onkeyup="OnSearchKey"
+                   style="flex: 1; min-width: 200px;" />
+            <select class="app-detail__input" style="max-width: 180px;"
+                    @bind="_typeFilter" @bind:after="ReloadAsync">
+                <option value="">All types</option>
+                <option value="team">Team</option>
+                <option value="organization">Organization</option>
+                <option value="department">Department</option>
+            </select>
+        </div>
+        <div style="display: flex; gap: var(--space-2); align-items: center;">
+            <span class="text-secondary" style="font-size: var(--font-size-sm);">
+                @if (_total <= PageSize)
+                {
+                    @($"{_total} group{(_total == 1 ? "" : "s")}")
+                }
+                else
+                {
+                    @($"Showing {_offset + 1}-{Math.Min(_offset + PageSize, _total)} of {_total}")
+                }
+            </span>
+            <button class="btn" disabled="@(_offset == 0 || _loading)" @onclick="PrevPage">‹ Prev</button>
+            <button class="btn" disabled="@(_offset + PageSize >= _total || _loading)" @onclick="NextPage">Next ›</button>
+            <button class="btn btn-primary" @onclick="OpenCreate">
+                <RdbIcon Name="zap" Size="14" /> New Group
+            </button>
+        </div>
+    </div>
+
+    @if (_loading) { <p class="text-secondary" style="padding: var(--space-4);">Loading…</p> }
+    else if (_error is not null) { <p class="text-error" style="padding: var(--space-4);">@_error</p> }
+    else if (_items.Count == 0)
+    {
+        <UiEmptyState Variant="inline"
+                      Title="@(string.IsNullOrEmpty(_search) ? "No groups yet" : "No groups match the filter")"
+                      Description="@(string.IsNullOrEmpty(_search) ? "Create your first group to start organising users." : "Try a different name or clear the type filter.")" />
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="width: 40px;"></th>
+                    <th>Name</th>
+                    <th style="width: 120px;">Type</th>
+                    <th style="width: 100px;">Members</th>
+                    <th style="width: 180px;">Last modified</th>
+                    <th style="width: 90px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var g in _items)
+                {
+                    <tr style="cursor: pointer;" @onclick="@(() => OpenDetail(g.Id))">
+                        <td>
+                            <div class="apps-list__avatar">@InitialOf(g.Name)</div>
+                        </td>
+                        <td>
+                            <strong>@g.Name</strong>
+                            @if (!string.IsNullOrEmpty(g.Description))
+                            {
+                                <div class="text-secondary" style="font-size: var(--font-size-sm); margin-top: var(--space-1);">@g.Description</div>
+                            }
+                            @if (g.ParentId is { } pid)
+                            {
+                                <div class="text-tertiary" style="font-size: var(--font-size-xs); margin-top: var(--space-1);">child of #@pid</div>
+                            }
+                        </td>
+                        <td>
+                            @if (!string.IsNullOrEmpty(g.GroupType))
+                            {
+                                <RdbBadge Text="@g.GroupType" Variant="info" />
+                            }
+                            else
+                            {
+                                <span class="text-secondary">—</span>
+                            }
+                        </td>
+                        <td>
+                            <span class="apps-list__chip">@(g.MemberCount ?? 0)</span>
+                        </td>
+                        <td class="text-secondary" style="font-size: var(--font-size-sm);">
+                            @if (g.ModifiedAt is { } m)
+                            {
+                                @m.LocalDateTime.ToString("yyyy-MM-dd HH:mm")
+                            }
+                            else if (g.CreatedAt is { } c)
+                            {
+                                @c.LocalDateTime.ToString("yyyy-MM-dd HH:mm")
+                            }
+                            else
+                            {
+                                @("—")
+                            }
+                        </td>
+                        <td style="display:flex; gap: var(--space-1); justify-content:flex-end;">
+                            <button class="btn btn-sm" title="Edit"
+                                    @onclick:stopPropagation="true" @onclick="@(() => OpenDetail(g.Id))">
+                                <RdbIcon Name="copy" Size="14" />
+                            </button>
+                            <button class="btn btn-sm btn-danger" title="Delete"
+                                    @onclick:stopPropagation="true" @onclick="@(() => Delete(g))">
+                                <RdbIcon Name="alert-triangle" Size="14" />
+                            </button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@if (_creating)
+{
+    <GroupCreateWizard OnClose="@(() => { _creating = false; })"
+                       OnCreated="@OnGroupCreated" />
+}
+
+@code {
+    private const int PageSize = 25;
+    private const int SearchDebounceMs = 250;
+
+    private readonly List<GroupResponse> _items = new();
+    private int _offset;
+    private int _total;
+    private string _search = "";
+    private string _searchInput = "";
+    private string _typeFilter = "";
+    private bool _loading = true;
+    private string? _error;
+    private bool _creating;
+
+    // Debounce timer for free-typing search
+    private System.Threading.Timer? _debounce;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    public void Dispose() => _debounce?.Dispose();
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var page = await Client.SearchGroupsAsync(
+                query: string.IsNullOrEmpty(_search) ? null : _search,
+                groupType: string.IsNullOrEmpty(_typeFilter) ? null : _typeFilter,
+                offset: _offset,
+                count: PageSize);
+            _items.Clear();
+            _items.AddRange(page.Items);
+            _total = page.Total;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private void OnSearchInputChanged(ChangeEventArgs e)
+    {
+        _searchInput = e.Value?.ToString() ?? "";
+        _debounce?.Dispose();
+        _debounce = new System.Threading.Timer(async _ =>
+        {
+            _search = _searchInput;
+            _offset = 0;
+            await InvokeAsync(ReloadAsync);
+            await InvokeAsync(StateHasChanged);
+        }, null, SearchDebounceMs, System.Threading.Timeout.Infinite);
+    }
+
+    private async Task OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            _debounce?.Dispose();
+            _search = _searchInput;
+            _offset = 0;
+            await ReloadAsync();
+        }
+    }
+
+    private Task PrevPage()
+    {
+        _offset = Math.Max(0, _offset - PageSize);
+        return ReloadAsync();
+    }
+
+    private Task NextPage()
+    {
+        _offset += PageSize;
+        return ReloadAsync();
+    }
+
+    private void OpenCreate() => _creating = true;
+
+    private async Task OnGroupCreated(GroupResponse g)
+    {
+        _creating = false;
+        Toast.Success($"Group '{g.Name}' created");
+        _offset = 0;
+        await ReloadAsync();
+    }
+
+    private void OpenDetail(long id) => Nav.NavigateTo($"/admin/groups/{id}");
+
+    private async Task Delete(GroupResponse g)
+    {
+        try
+        {
+            await Client.DeleteGroupAsync(g.Id);
+            Toast.Success($"Group '{g.Name}' deleted");
+            await ReloadAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+
+    private static string InitialOf(string? name)
+        => string.IsNullOrEmpty(name) ? "?" : char.ToUpperInvariant(name[0]).ToString();
+}

@@ -1,0 +1,6 @@
+{
+  "Name": "redb.Identity.Http",
+  "Version": "1.0.0",
+  "EntryPoints": ["redb.Identity.Http.dll"],
+  "Dependencies": ["redb.Identity.Core.Module"]
+}

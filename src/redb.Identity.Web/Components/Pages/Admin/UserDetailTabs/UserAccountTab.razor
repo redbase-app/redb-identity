@@ -1,0 +1,253 @@
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject UndoToastService UndoToast
+
+@*
+    User > Account tab — admin-only flags + lifecycle actions.
+
+    Sections:
+      1. Status & verification — account status (active/disabled/locked) +
+         email_verified + phone_number_verified flags. Save reuses
+         UpdateUserAsync (single PATCH body).
+      2. Password — admin override; sends the user a temporary or
+         self-chosen password via ChangeUserPasswordAsync.
+      3. Danger zone — hard delete with typed-confirm.
+
+    Soft-disable (status=disabled) uses the UndoToast pattern so an
+    accidental flip can be reverted within 8 s without a server round-trip.
+*@
+
+@if (_dirty)
+{
+    <div class="app-detail__dirty-banner">
+        <RdbIcon Name="alert-triangle" Size="14" />
+        <span>You have unsaved changes.</span>
+        <button class="btn btn-sm btn-ghost" @onclick="Reset" disabled="@_saving">Discard</button>
+    </div>
+}
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Status &amp; verification</h3>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Account status</span>
+        <select class="app-detail__input"
+                value="@_status"
+                @onchange="@(e => { _status = e.Value?.ToString() ?? "active"; _dirty = true; })"
+                disabled="@_saving">
+            <option value="active">active — user may sign in</option>
+            <option value="blocked">blocked — sign-in rejected, account preserved</option>
+            <option value="pending">pending — awaiting first-time verification</option>
+        </select>
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            <code>blocked</code> is a manual admin block that rejects every grant
+            type until cleared. <code>pending</code> is the state a freshly
+            registered user sits in until they complete the initial verification
+            flow (typically email).
+        </span>
+    </div>
+
+    <label class="app-detail__checkbox">
+        <input type="checkbox"
+               checked="@_emailVerified"
+               @onchange="@(e => { _emailVerified = (bool)(e.Value ?? false); _dirty = true; })" />
+        <span>Email is verified (sets the <code>email_verified</code> claim)</span>
+    </label>
+    <span class="app-detail__field-hint" style="margin-top: var(--space-2);">
+        <RdbIcon Name="info" Size="12" />
+        Skipping the verification flow is an admin override — useful when the
+        operator vouches for the user's email out-of-band.
+    </span>
+
+    <label class="app-detail__checkbox" style="margin-top: var(--space-3);">
+        <input type="checkbox"
+               checked="@_phoneVerified"
+               @onchange="@(e => { _phoneVerified = (bool)(e.Value ?? false); _dirty = true; })" />
+        <span>Phone number is verified (sets the <code>phone_number_verified</code> claim)</span>
+    </label>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Password</h3>
+    <p class="text-secondary" style="margin: 0 0 var(--space-3); font-size: var(--font-size-sm); line-height: 1.6;">
+        Admin override — no <code>OldPassword</code> challenge (operator's
+        admin scope is the authorization). All existing sessions for this
+        user are revoked immediately on success; the user must sign in again
+        with the new password.
+    </p>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">New password</span>
+        <input type="password"
+               class="app-detail__input"
+               value="@_newPassword"
+               @oninput="@(e => _newPassword = e.Value?.ToString() ?? string.Empty)"
+               autocomplete="new-password"
+               placeholder="At least 12 characters" />
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            Server-side complexity policy applies (length, banned list, password
+            history). Communicate the new value out-of-band — the user is not
+            notified automatically.
+        </span>
+    </div>
+
+    <button class="btn btn-secondary"
+            @onclick="ResetPasswordAsync"
+            disabled="@(string.IsNullOrEmpty(_newPassword) || _resettingPassword)">
+        @(_resettingPassword ? "Resetting…" : "Reset password")
+    </button>
+</section>
+
+<section class="app-detail__danger-zone">
+    <h3>Danger zone</h3>
+    <div class="app-detail__danger-row">
+        <div class="app-detail__danger-row-text">
+            <strong>Delete this user</strong>
+            <p>
+                Permanently removes the user, revokes all their sessions, drops
+                MFA factors and federation links, and clears their audit history
+                pointers. This action cannot be undone.
+            </p>
+        </div>
+        <button class="btn btn-danger btn-sm" @onclick="DeleteAsync" disabled="@_deleting">
+            @(_deleting ? "Deleting…" : "Delete user")
+        </button>
+    </div>
+</section>
+
+<div class="app-detail__submit-row">
+    <button class="btn btn-primary" @onclick="SaveStatusAsync" disabled="@(!_dirty || _saving)">
+        @(_saving ? "Saving…" : "Update")
+    </button>
+    @if (_dirty)
+    {
+        <button class="btn btn-secondary" @onclick="Reset" disabled="@_saving">Discard</button>
+    }
+    @if (_error is not null)
+    {
+        <span class="text-error">@_error</span>
+    }
+</div>
+
+<UiTypedConfirmDialog @ref="_deleteConfirm" />
+
+@code {
+    [Parameter, EditorRequired] public UserResponse User { get; set; } = default!;
+    [Parameter] public EventCallback OnRefresh { get; set; }
+    [Parameter] public EventCallback OnDeleted { get; set; }
+
+    private string _status = "active";
+    private bool _emailVerified;
+    private bool _phoneVerified;
+    private string _newPassword = "";
+
+    private bool _dirty;
+    private bool _saving;
+    private bool _deleting;
+    private bool _resettingPassword;
+    private string? _error;
+
+    private UiTypedConfirmDialog? _deleteConfirm;
+
+    protected override void OnParametersSet() => Reset();
+
+    private void Reset()
+    {
+        _status = User.Status ?? "active";
+        _emailVerified = User.EmailVerified;
+        _phoneVerified = User.PhoneNumberVerified;
+        _dirty = false;
+        _error = null;
+    }
+
+    private async Task SaveStatusAsync()
+    {
+        if (!_dirty || _saving) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            await Client.UpdateUserAsync(User.Id, new UpdateUserRequest
+            {
+                Id = User.Id,
+                Status = _status,
+                EmailVerified = _emailVerified,
+                PhoneNumberVerified = _phoneVerified,
+            });
+            Toast.Success("Account flags updated");
+            _dirty = false;
+            await OnRefresh.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task ResetPasswordAsync()
+    {
+        if (string.IsNullOrEmpty(_newPassword) || _resettingPassword) return;
+        _resettingPassword = true;
+        try
+        {
+            await Client.AdminResetUserPasswordAsync(User.Id, new AdminResetPasswordRequest
+            {
+                Id = User.Id,
+                NewPassword = _newPassword,
+            });
+            Toast.Success("Password reset — all sessions revoked");
+            _newPassword = "";
+        }
+        catch (Exception ex)
+        {
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _resettingPassword = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_deleteConfirm is null || _deleting) return;
+
+        var name = User.DisplayName ?? User.Login ?? string.Empty;
+        if (string.IsNullOrEmpty(name))
+        {
+            Toast.Error("User has no display name or login — refusing to delete without a confirm target.");
+            return;
+        }
+
+        var ok = await _deleteConfirm.ShowAsync(
+            expectedText: User.Login ?? name,
+            title: "Delete user",
+            message: $"This permanently deletes user '{name}' and revokes all their sessions, MFA factors, and federation links. " +
+                     $"This action cannot be undone.",
+            confirmLabel: "Delete this user");
+
+        if (!ok) return;
+
+        _deleting = true;
+        try
+        {
+            await Client.DeleteUserAsync(User.Id.ToString());
+            await OnDeleted.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _deleting = false;
+        }
+    }
+}

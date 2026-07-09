@@ -1,0 +1,58 @@
+@inject IJSRuntime JS
+
+<header class="topbar">
+    <div class="topbar-left">
+        <button class="btn btn-icon btn-ghost" @onclick="ToggleSidebar" title="Toggle sidebar" aria-label="Toggle sidebar">
+            <RdbIcon Name="menu" Size="18" />
+        </button>
+        <h1 class="topbar-title">redb.Identity</h1>
+    </div>
+    <div class="topbar-right">
+        <button class="btn btn-icon btn-ghost" @onclick="ToggleTheme" title="Toggle theme" aria-label="Toggle theme">
+            <RdbIcon Name="@_themeIcon" Size="18" />
+        </button>
+        <AuthorizeView>
+            <Authorized>
+                <span class="text-sm text-secondary">@(context.User.Identity?.Name ?? "—")</span>
+                <RdbBadge Text="signed in" Variant="online" ShowDot="false" />
+                <form method="post" action="/api/auth/logout" style="display:inline;">
+                    <button type="submit" class="btn btn-ghost btn-sm">
+                        <RdbIcon Name="logout" Size="16" />
+                        <span>Logout</span>
+                    </button>
+                </form>
+            </Authorized>
+        </AuthorizeView>
+    </div>
+</header>
+
+@code {
+    private string _themeIcon = "moon";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                var theme = await JS.InvokeAsync<string>("rdbTheme.get");
+                _themeIcon = theme == "dark" ? "sun" : "moon";
+                StateHasChanged();
+            }
+            catch { /* JS not loaded yet — ignore */ }
+        }
+    }
+
+    private async Task ToggleTheme()
+    {
+        var newTheme = await JS.InvokeAsync<string>("rdbTheme.toggle");
+        _themeIcon = newTheme == "dark" ? "sun" : "moon";
+    }
+
+    private async Task ToggleSidebar()
+    {
+        // Fire-and-forget — the JS side updates <html> class and persists in localStorage.
+        // No Blazor state to refresh; CSS reacts to the html.rdb-sidebar-collapsed selector.
+        try { await JS.InvokeVoidAsync("rdbSidebar.toggle"); } catch { /* JS not loaded yet — ignore */ }
+    }
+}

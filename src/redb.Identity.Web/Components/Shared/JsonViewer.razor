@@ -1,0 +1,31 @@
+@* JSON viewer: renders a pre-formatted JSON block with optional collapse support. *@
+
+<div class="json-viewer">
+    <pre class="json-pre">@_formatted</pre>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Json { get; set; } = "";
+
+    private string _formatted = "";
+
+    protected override void OnParametersSet()
+    {
+        _formatted = PrettyPrint(Json);
+    }
+
+    private static string PrettyPrint(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return raw;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(raw);
+            return System.Text.Json.JsonSerializer.Serialize(doc.RootElement,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return raw;
+        }
+    }
+}

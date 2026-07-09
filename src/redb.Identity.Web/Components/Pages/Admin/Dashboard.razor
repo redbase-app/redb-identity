@@ -1,0 +1,56 @@
+@page "/admin"
+@attribute [Authorize]
+@inject IIdentityClient Client
+
+<RdbPageHeader Title="Dashboard" Description="Overview of your Identity tenant." />
+
+<div class="grid grid-cols-3" style="gap: var(--space-4); margin-bottom: var(--space-4);">
+    <RdbCard Title="Users" Icon="server" Value="@Fmt(_users)" />
+    <RdbCard Title="Applications" Icon="package" Value="@Fmt(_apps)" />
+    <RdbCard Title="Scopes" Icon="zap" Value="@Fmt(_scopes)" />
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Welcome</span>
+        <RdbIcon Name="info" Size="18" />
+    </div>
+    <p>Signed in as <strong>@(_userName ?? "—")</strong>.</p>
+    @if (_error is not null)
+    {
+        <p class="text-error">@_error</p>
+    }
+    <p class="text-secondary">Use the sidebar to manage users, groups, applications, and scopes.</p>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    private string? _userName;
+    private int? _users, _apps, _scopes;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState is not null)
+        {
+            var s = await AuthState;
+            _userName = s.User.Identity?.Name;
+        }
+
+        try
+        {
+            var users = await Client.ListUsersAsync(0, 1);
+            var apps = await Client.ListApplicationsAsync(0, 1);
+            var scopes = await Client.ListScopesAsync(0, 1);
+            _users = users.Total;
+            _apps = apps.Total;
+            _scopes = scopes.Total;
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load metrics: {ex.Message}";
+        }
+    }
+
+    private static string Fmt(int? n) => n?.ToString("N0") ?? "—";
+}

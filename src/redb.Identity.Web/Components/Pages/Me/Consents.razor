@@ -1,0 +1,85 @@
+@page "/me/consents"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+<RdbPageHeader Title="My consents" Description="Applications you have authorized to access your data." />
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Granted consents</span>
+        <button class="btn btn-sm btn-secondary" @onclick="LoadAsync">Refresh</button>
+    </div>
+
+    @if (_loading) { <p class="text-secondary">Loading…</p> }
+    else if (_error is not null) { <p class="text-error">@_error</p> }
+    else if (_items.Count == 0) { <p class="text-secondary">You have not granted any permanent consents.</p> }
+    else
+    {
+        <table class="data-table">
+            <thead><tr><th>Client</th><th>Scopes</th><th>Granted</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var c in _items)
+                {
+                    var clientId = GetStr(c, "clientId") ?? GetStr(c, "client_id") ?? "—";
+                    <tr>
+                        <td><strong>@(GetStr(c, "displayName") ?? clientId)</strong>
+                            <div class="text-secondary" style="font-size: var(--font-size-xs);">@clientId</div>
+                        </td>
+                        <td class="text-secondary">@FormatScopes(c)</td>
+                        <td class="text-secondary">@(GetStr(c, "createdAt") ?? GetStr(c, "grantedAt") ?? "—")</td>
+                        <td>
+                            <button class="btn btn-sm btn-danger" @onclick="() => Revoke(clientId)">Revoke</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    private readonly List<JsonElement> _items = new();
+    private bool _loading = true;
+    private string? _error;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null; _items.Clear();
+        try
+        {
+            var doc = await Client.ListMyConsentsAsync();
+            JsonElement arr = doc;
+            if (doc.ValueKind == JsonValueKind.Object && doc.TryGetProperty("items", out var items))
+                arr = items;
+            if (arr.ValueKind == JsonValueKind.Array)
+                foreach (var c in arr.EnumerateArray()) _items.Add(c.Clone());
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task Revoke(string clientId)
+    {
+        try
+        {
+            await Client.RevokeMyConsentAsync(clientId);
+            Toast.Success($"Consent for {clientId} revoked");
+            await LoadAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+
+    private static string FormatScopes(JsonElement c)
+    {
+        if (c.TryGetProperty("scopes", out var s) && s.ValueKind == JsonValueKind.Array)
+            return string.Join(", ", s.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()));
+        return "—";
+    }
+
+    private static string? GetStr(JsonElement e, string p)
+        => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(p, out var v) && v.ValueKind == JsonValueKind.String
+            ? v.GetString() : null;
+}

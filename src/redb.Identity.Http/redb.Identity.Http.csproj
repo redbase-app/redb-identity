@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>redb.Identity.Http</AssemblyName>
+    <RootNamespace>redb.Identity.Http</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Phase 8: Http facade is project-reference-isolated from Core. Core/Http exchange
+      runs purely over `direct-vm://identity-*` brokered messages whose DTOs live in
+      `redb.Identity.Contracts`. See docs/PHASE-8-FACADE-ISOLATION-PLAN-RU.md.
+    -->
+    <ProjectReference Include="..\redb.Identity.Contracts\redb.Identity.Contracts.csproj" />
+    <!--
+      Phase 9a/9b: Http facade gets its own redb-backed DataProtection key-ring via the
+      shared `redb.Identity.DataProtection` project. The XML repository is bridged to
+      the host's IServiceScopeFactory by `IdentityHttpModuleHost`, so the Http context
+      shares the cluster-wide key-ring with Core without referencing it.
+    -->
+    <ProjectReference Include="..\redb.Identity.DataProtection\redb.Identity.DataProtection.csproj" />
+    <PackageReference Include="redb.Core" Version="3.3.0" />
+    <PackageReference Include="redb.Route.Http" Version="3.3.1" />
+    <PackageReference Include="redb.Route.Controllers" Version="3.3.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      OpenIddict.Abstractions is the lightweight contracts package needed by the
+      post-logout-redirect handler (`IOpenIddictApplicationManager`). Resolved per-exchange
+      from the host SP; we do not own the OpenIddict server stack here (Core does).
+    -->
+    <PackageReference Include="OpenIddict.Abstractions" Version="6.3.0" />
+    <!-- Phase 9b: AddDataProtection() lives in this package; needed by IdentityHttpModuleHost. -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="9.0.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Module config template (Tsak Layer 4). Tsak loads this file by name
+      "{Namespace}.config.json" alongside the assembly (or from inside the .tpkg
+      package). Copying to output ensures it ships next to the DLL for both
+      bare-DLL hot-reload and .tpkg packaging.
+    -->
+    <None Update="redb.Identity.Http.config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
+

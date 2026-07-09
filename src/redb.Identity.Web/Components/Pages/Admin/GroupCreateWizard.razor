@@ -1,0 +1,357 @@
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+@*
+    B.2 — WSO2-style 2-step Create Group wizard.
+
+    Step 1 (Basic Details): name, type, description, optional parent group
+        (picker filters by name across the entire hierarchy via SearchGroups).
+    Step 2 (Add Users): user picker — search + checkbox list. Members are
+        added with role='member' in a single bulk batch after the group is
+        created. Failures don't roll back the group itself — that's the WSO2
+        contract too (operator can retry membership separately).
+
+    Roles assignment lives on the dedicated /admin/roles + the per-user
+    profile tab; this wizard intentionally stays focused on the group +
+    initial membership.
+*@
+
+<div class="modal-backdrop" @onclick="OnCloseClicked">
+    <div class="modal" @onclick:stopPropagation="true" style="max-width: 720px; max-height: 90vh; overflow:hidden; display:flex; flex-direction:column;">
+        <div style="padding: var(--space-4); border-bottom: 1px solid var(--border-color);">
+            <h3 style="margin: 0;">Create Group</h3>
+            <p class="text-secondary" style="margin: var(--space-1) 0 0;">Create a new group and add users to it.</p>
+        </div>
+
+        @* Wizard stepper *@
+        <div style="padding: var(--space-4); display:flex; justify-content:center; gap: var(--space-6); border-bottom: 1px solid var(--border-color);">
+            <div style="display:flex; flex-direction:column; align-items:center; gap: var(--space-1);">
+                <div style="width: 36px; height: 36px; border-radius: 50%; display:flex; align-items:center; justify-content:center;
+                            background: @(_step >= 1 ? "var(--accent-primary)" : "var(--bg-tertiary)");
+                            color: @(_step >= 1 ? "#fff" : "var(--text-secondary)");">
+                    @if (_step > 1) { <RdbIcon Name="copy" Size="16" /> }
+                    else { <RdbIcon Name="alert-triangle" Size="16" /> }
+                </div>
+                <div style="font-size: var(--font-size-xs); color: @(_step == 1 ? "var(--accent-primary)" : "var(--text-secondary)"); font-weight: 600;">
+                    Basic Details
+                </div>
+            </div>
+            <div style="display:flex; align-items:center; color: var(--text-tertiary);">- - - -</div>
+            <div style="display:flex; flex-direction:column; align-items:center; gap: var(--space-1);">
+                <div style="width: 36px; height: 36px; border-radius: 50%; display:flex; align-items:center; justify-content:center;
+                            background: @(_step >= 2 ? "var(--accent-primary)" : "var(--bg-tertiary)");
+                            color: @(_step >= 2 ? "#fff" : "var(--text-secondary)");">
+                    <RdbIcon Name="cluster" Size="16" />
+                </div>
+                <div style="font-size: var(--font-size-xs); color: @(_step == 2 ? "var(--accent-primary)" : "var(--text-secondary)"); font-weight: 600;">
+                    Add Users
+                </div>
+            </div>
+        </div>
+
+        <div style="padding: var(--space-4); flex: 1; overflow-y: auto;">
+            @if (_step == 1)
+            {
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Group Name *</span>
+                    <input class="app-detail__input" value="@_form.Name"
+                           placeholder="e.g. engineering"
+                           @oninput="@(e => _form.Name = e.Value?.ToString() ?? string.Empty)" />
+                    <span class="app-detail__field-hint">
+                        <RdbIcon Name="info" Size="12" />
+                        Name must be 3-30 characters, no spaces. Used as the
+                        emitted `groups` claim value.
+                    </span>
+                </label>
+
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Group Type</span>
+                    <select class="app-detail__input" @bind="_form.GroupType">
+                        <option value="">(none)</option>
+                        <option value="team">team</option>
+                        <option value="organization">organization</option>
+                        <option value="department">department</option>
+                    </select>
+                </label>
+
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Description</span>
+                    <input class="app-detail__input" value="@_form.Description"
+                           @oninput="@(e => _form.Description = e.Value?.ToString() ?? string.Empty)" />
+                </label>
+
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Parent group (optional)</span>
+                    @if (_form.ParentGroupId is { } pid)
+                    {
+                        <div style="display:flex; gap: var(--space-2); align-items: center;">
+                            <RdbBadge Text="@(_form.ParentName ?? $"#{pid}")" Variant="info" />
+                            <button class="btn btn-sm btn-ghost" @onclick="ClearParent">Clear</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <input type="text" class="app-detail__input"
+                               placeholder="Type to search…"
+                               value="@_parentSearch"
+                               @oninput="OnParentSearchChanged" />
+                        @if (_parentSearchResults.Count > 0)
+                        {
+                            <div style="border: 1px solid var(--border-color); border-radius: var(--border-radius); max-height: 200px; overflow-y: auto; margin-top: var(--space-2);">
+                                @foreach (var p in _parentSearchResults)
+                                {
+                                    <div style="padding: var(--space-2); cursor: pointer; border-bottom: 1px solid var(--border-color);"
+                                         @onclick="@(() => PickParent(p))">
+                                        <strong>@p.Name</strong>
+                                        @if (!string.IsNullOrEmpty(p.GroupType))
+                                        {
+                                            <span class="text-secondary" style="margin-left: var(--space-2);">@p.GroupType</span>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    }
+                </label>
+
+                <h4 style="margin-top: var(--space-5);">Add Users</h4>
+                <p class="text-secondary" style="font-size: var(--font-size-sm); margin: 0 0 var(--space-3);">
+                    <RdbIcon Name="info" Size="12" />
+                    Select users to add them to the group. Search by login; selected users join with role <code>member</code> on Finish.
+                </p>
+
+                <input type="text" class="app-detail__input"
+                       placeholder="Search users by login"
+                       value="@_userSearch"
+                       @oninput="OnUserSearchChanged" />
+
+                @if (_userSearching)
+                {
+                    <p class="text-secondary" style="font-size: var(--font-size-sm); margin: var(--space-2) 0;">Searching…</p>
+                }
+
+                @if (_userSearchResults.Count > 0)
+                {
+                    <div style="border: 1px solid var(--border-color); border-radius: var(--border-radius); max-height: 200px; overflow-y: auto; margin-top: var(--space-2);">
+                        @foreach (var u in _userSearchResults)
+                        {
+                            <label style="display:flex; align-items:center; gap: var(--space-2); padding: var(--space-2); cursor:pointer; border-bottom: 1px solid var(--border-color);">
+                                <input type="checkbox"
+                                       checked="@_selectedUserIds.Contains(u.Id)"
+                                       @onchange="@(e => ToggleUser(u, (bool)(e.Value ?? false)))" />
+                                <span>@u.Login</span>
+                                @if (!string.IsNullOrEmpty(u.DisplayName) && u.DisplayName != u.Login)
+                                {
+                                    <span class="text-secondary">— @u.DisplayName</span>
+                                }
+                            </label>
+                        }
+                    </div>
+                }
+
+                @if (_selectedUserIds.Count > 0)
+                {
+                    <p class="text-secondary" style="font-size: var(--font-size-sm); margin-top: var(--space-2);">
+                        @_selectedUserIds.Count selected
+                    </p>
+                }
+            }
+            else if (_step == 2)
+            {
+                @* Reserved for future "Assign Roles" step. Currently
+                   placeholder — roles registry lands on /admin/roles. *@
+                <p class="text-secondary" style="font-size: var(--font-size-sm);">
+                    <RdbIcon Name="info" Size="12" />
+                    Role assignment is managed separately on the
+                    <NavLink href="/admin/roles">Roles page</NavLink>. After
+                    the group is created, open its detail view to attach
+                    roles or wire it to a claim mapper.
+                </p>
+            }
+
+            @if (_error is not null) { <p class="text-error" style="margin-top: var(--space-3);">@_error</p> }
+        </div>
+
+        @* Footer *@
+        <div style="padding: var(--space-4); border-top: 1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
+            <button class="btn btn-ghost" style="color: var(--accent-primary);" @onclick="OnCloseClicked">Cancel</button>
+            <div style="display:flex; gap: var(--space-2);">
+                @if (_step > 1)
+                {
+                    <button class="btn btn-secondary" @onclick="@(() => _step--)">← Previous</button>
+                }
+                @if (_step == 1)
+                {
+                    <button class="btn btn-primary" @onclick="@FinishAsync"
+                            disabled="@(_saving || string.IsNullOrWhiteSpace(_form.Name) || _form.Name.Trim().Length < 3)">
+                        @(_saving ? "Saving…" : "Finish")
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<GroupResponse> OnCreated { get; set; }
+
+    private int _step = 1;
+    private FormState _form = new();
+    private bool _saving;
+    private string? _error;
+
+    // Parent picker
+    private string _parentSearch = "";
+    private readonly List<GroupResponse> _parentSearchResults = new();
+    private System.Threading.Timer? _parentDebounce;
+
+    // User picker
+    private string _userSearch = "";
+    private readonly List<UserResponse> _userSearchResults = new();
+    private readonly HashSet<long> _selectedUserIds = new();
+    private bool _userSearching;
+    private System.Threading.Timer? _userDebounce;
+
+    private sealed class FormState
+    {
+        public string Name = "";
+        public string? GroupType, Description;
+        public long? ParentGroupId;
+        public string? ParentName;
+    }
+
+    public void Dispose()
+    {
+        _parentDebounce?.Dispose();
+        _userDebounce?.Dispose();
+    }
+
+    private async Task OnCloseClicked()
+    {
+        Dispose();
+        await OnClose.InvokeAsync();
+    }
+
+    private void OnParentSearchChanged(ChangeEventArgs e)
+    {
+        _parentSearch = e.Value?.ToString() ?? "";
+        _parentDebounce?.Dispose();
+        _parentDebounce = new System.Threading.Timer(async _ =>
+        {
+            if (string.IsNullOrWhiteSpace(_parentSearch))
+            {
+                _parentSearchResults.Clear();
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+            try
+            {
+                var page = await Client.SearchGroupsAsync(_parentSearch, count: 10);
+                _parentSearchResults.Clear();
+                _parentSearchResults.AddRange(page.Items);
+            }
+            catch { /* swallow — empty list */ }
+            await InvokeAsync(StateHasChanged);
+        }, null, 250, System.Threading.Timeout.Infinite);
+    }
+
+    private void PickParent(GroupResponse g)
+    {
+        _form.ParentGroupId = g.Id;
+        _form.ParentName = g.Name;
+        _parentSearch = "";
+        _parentSearchResults.Clear();
+    }
+
+    private void ClearParent()
+    {
+        _form.ParentGroupId = null;
+        _form.ParentName = null;
+    }
+
+    private void OnUserSearchChanged(ChangeEventArgs e)
+    {
+        _userSearch = e.Value?.ToString() ?? "";
+        _userDebounce?.Dispose();
+        _userDebounce = new System.Threading.Timer(async _ =>
+        {
+            if (string.IsNullOrWhiteSpace(_userSearch))
+            {
+                _userSearchResults.Clear();
+                _userSearching = false;
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+            _userSearching = true;
+            await InvokeAsync(StateHasChanged);
+            try
+            {
+                var page = await Client.SearchUsersPagedAsync(_userSearch, count: 25);
+                _userSearchResults.Clear();
+                _userSearchResults.AddRange(page.Items);
+            }
+            catch { /* swallow */ }
+            finally { _userSearching = false; }
+            await InvokeAsync(StateHasChanged);
+        }, null, 250, System.Threading.Timeout.Infinite);
+    }
+
+    private void ToggleUser(UserResponse u, bool selected)
+    {
+        if (selected) _selectedUserIds.Add(u.Id);
+        else _selectedUserIds.Remove(u.Id);
+    }
+
+    private async Task FinishAsync()
+    {
+        if (_saving) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            // Create the group (root or child)
+            GroupResponse created;
+            if (_form.ParentGroupId is { } pid)
+            {
+                created = await Client.CreateChildGroupAsync(pid, new CreateGroupRequest
+                {
+                    Name = _form.Name.Trim(),
+                    GroupType = string.IsNullOrWhiteSpace(_form.GroupType) ? null : _form.GroupType,
+                    Description = string.IsNullOrWhiteSpace(_form.Description) ? null : _form.Description,
+                });
+            }
+            else
+            {
+                created = await Client.CreateGroupAsync(new CreateGroupRequest
+                {
+                    Name = _form.Name.Trim(),
+                    GroupType = string.IsNullOrWhiteSpace(_form.GroupType) ? null : _form.GroupType,
+                    Description = string.IsNullOrWhiteSpace(_form.Description) ? null : _form.Description,
+                });
+            }
+
+            // Add selected members (best-effort — failures don't roll back
+            // the group itself; operator can retry on the detail page).
+            foreach (var uid in _selectedUserIds)
+            {
+                try
+                {
+                    await Client.AddGroupMemberAsync(created.Id, new AddMemberRequest
+                    {
+                        UserId = uid,
+                        Role = "member"
+                    });
+                }
+                catch (Exception memberEx)
+                {
+                    Toast.Error($"Couldn't add user {uid}: {memberEx.Message}");
+                }
+            }
+
+            await OnCreated.InvokeAsync(created);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+}

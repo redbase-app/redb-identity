@@ -1,0 +1,220 @@
+@page "/admin/claim-mappers"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+<RdbPageHeader Title="Claim mappers" Description="Rules that emit claims into tokens." />
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">All claim mappers</span>
+        <button class="btn btn-primary" @onclick="OpenCreate">
+            <RdbIcon Name="zap" Size="14" /> New mapper
+        </button>
+    </div>
+
+    @if (_loading) { <p class="text-secondary">Loading…</p> }
+    else if (_error is not null) { <p class="text-error">@_error</p> }
+    else if (_items.Count == 0) { <p class="text-secondary">No claim mappers defined.</p> }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr><th>Name</th><th>Claim type</th><th>Source</th><th>Destinations</th><th>Owner</th><th>Enabled</th><th></th></tr>
+            </thead>
+            <tbody>
+                @foreach (var m in _items)
+                {
+                    <tr>
+                        <td><strong>@m.Name</strong></td>
+                        <td><code>@m.ClaimType</code></td>
+                        <td><span class="badge">@m.SourceKind</span>@(m.SourcePath is not null ? $" → {m.SourcePath}" : m.ConstantValue is not null ? $" = \"{m.ConstantValue}\"" : "")</td>
+                        <td class="text-secondary">@string.Join(", ", m.Destinations ?? [])</td>
+                        <td class="text-secondary">@m.Owner</td>
+                        <td><RdbBadge Text="@(m.Enabled ? "on" : "off")" Variant="@(m.Enabled ? "online" : "offline")" /></td>
+                        <td style="display:flex; gap: var(--space-1);">
+                            <button class="btn btn-sm" @onclick="() => OpenEdit(m)">Edit</button>
+                            <button class="btn btn-sm btn-danger" @onclick="() => Delete(m)">Delete</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <div style="display:flex; gap: var(--space-2); margin-top: var(--space-3); align-items:center;">
+            <button class="btn btn-sm" @onclick="PrevPage" disabled="@(_offset == 0)">&laquo; Prev</button>
+            <span class="text-secondary">@(_offset + 1)–@(_offset + _items.Count) of @_total</span>
+            <button class="btn btn-sm" @onclick="NextPage" disabled="@(_offset + _items.Count >= _total)">Next &raquo;</button>
+        </div>
+    }
+</div>
+
+@if (_editing is not null)
+{
+    <div class="modal-backdrop" @onclick="CloseModal">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h3>@(_editing.Id == "" ? "New claim mapper" : $"Edit: {_editing.Name}")</h3>
+
+            <label>Name * <input @bind="_form.Name" /></label>
+            <label>Claim type * <input @bind="_form.ClaimType" placeholder="e.g. email, groups" /></label>
+
+            <label>Source kind *
+                <select @bind="_form.SourceKind">
+                    <option value="Constant">Constant</option>
+                    <option value="UserProps">User property</option>
+                    <option value="CustomClaim">Custom claim</option>
+                </select>
+            </label>
+
+            @if (_form.SourceKind == "Constant")
+            {
+                <label>Constant value * <input @bind="_form.ConstantValue" /></label>
+            }
+            else
+            {
+                <label>Source path * <input @bind="_form.SourcePath" placeholder="@(_form.SourceKind == "UserProps" ? "Email, DisplayName, ..." : "custom-attr-key")" /></label>
+            }
+
+            <label>Destinations (comma-separated)
+                <input @bind="_form.Destinations" placeholder="access_token, id_token" />
+            </label>
+            <label>Required scopes (comma-separated) <input @bind="_form.RequiredScopes" /></label>
+            <label>Description <input @bind="_form.Description" /></label>
+            <label>Order <input type="number" @bind="_form.Order" /></label>
+
+            <label style="display:flex; gap: var(--space-2); align-items:center;">
+                <input type="checkbox" @bind="_form.Enabled" /> Enabled
+            </label>
+            <label style="display:flex; gap: var(--space-2); align-items:center;">
+                <input type="checkbox" @bind="_form.Required" /> Required (reject token if source missing)
+            </label>
+
+            @if (_modalError is not null) { <p class="text-error">@_modalError</p> }
+
+            <div class="modal-actions">
+                <button class="btn btn-secondary" @onclick="CloseModal">Cancel</button>
+                <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">@(_saving ? "Saving…" : "Save")</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private readonly List<ClaimMapperResponse> _items = new();
+    private int _offset, _total;
+    private const int PageSize = 25;
+    private bool _loading = true;
+    private string? _error;
+
+    private ClaimMapperResponse? _editing;
+    private FormState _form = new();
+    private bool _saving;
+    private string? _modalError;
+
+    private sealed class FormState
+    {
+        public string Name = "";
+        public string ClaimType = "";
+        public string SourceKind = "Constant";
+        public string? SourcePath, ConstantValue, Description;
+        public string Destinations = "access_token, id_token";
+        public string? RequiredScopes;
+        public int Order;
+        public bool Enabled = true;
+        public bool Required;
+    }
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            var page = await Client.ListClaimMappersAsync(offset: _offset, count: PageSize);
+            _items.Clear(); _items.AddRange(page.Items); _total = page.Total;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private void OpenCreate()
+    {
+        _editing = new ClaimMapperResponse { Id = "" };
+        _form = new FormState(); _modalError = null;
+    }
+
+    private void OpenEdit(ClaimMapperResponse m)
+    {
+        _editing = m;
+        _form = new FormState
+        {
+            Name = m.Name ?? "",
+            ClaimType = m.ClaimType ?? "",
+            SourceKind = m.SourceKind ?? "Constant",
+            SourcePath = m.SourcePath,
+            ConstantValue = m.ConstantValue,
+            Description = m.Description,
+            Destinations = string.Join(", ", m.Destinations ?? []),
+            RequiredScopes = string.Join(", ", m.RequiredScopes ?? []),
+            Order = m.Order,
+            Enabled = m.Enabled,
+            Required = m.Required,
+        };
+        _modalError = null;
+    }
+
+    private void CloseModal() { _editing = null; _modalError = null; }
+
+    private async Task SaveAsync()
+    {
+        _saving = true; _modalError = null;
+        try
+        {
+            var dest = _form.Destinations.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var reqScopes = string.IsNullOrWhiteSpace(_form.RequiredScopes)
+                ? null
+                : _form.RequiredScopes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            if (string.IsNullOrEmpty(_editing!.Id))
+            {
+                await Client.CreateClaimMapperAsync(new CreateClaimMapperRequest
+                {
+                    Name = _form.Name, ClaimType = _form.ClaimType, SourceKind = _form.SourceKind,
+                    SourcePath = _form.SourcePath, ConstantValue = _form.ConstantValue,
+                    Description = _form.Description, Destinations = dest, RequiredScopes = reqScopes,
+                    Order = _form.Order, Enabled = _form.Enabled, Required = _form.Required,
+                });
+            }
+            else
+            {
+                await Client.UpdateClaimMapperAsync(_editing.Id, new UpdateClaimMapperRequest
+                {
+                    Id = _editing.Id, Name = _form.Name, ClaimType = _form.ClaimType, SourceKind = _form.SourceKind,
+                    SourcePath = _form.SourcePath, ConstantValue = _form.ConstantValue,
+                    Description = _form.Description, Destinations = dest, RequiredScopes = reqScopes,
+                    Order = _form.Order, Enabled = _form.Enabled, Required = _form.Required,
+                });
+            }
+            Toast.Show("Saved.", "online");
+            CloseModal();
+            await LoadAsync();
+        }
+        catch (Exception ex) { _modalError = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task Delete(ClaimMapperResponse m)
+    {
+        try
+        {
+            await Client.DeleteClaimMapperAsync(m.Id);
+            Toast.Show("Deleted.", "online");
+            await LoadAsync();
+        }
+        catch (Exception ex) { Toast.Show(ex.Message, "error"); }
+    }
+
+    private async Task PrevPage() { _offset = Math.Max(0, _offset - PageSize); await LoadAsync(); }
+    private async Task NextPage() { _offset += PageSize; await LoadAsync(); }
+}

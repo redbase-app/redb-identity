@@ -1,0 +1,197 @@
+@inject IIdentityClient Client
+@inject ToastService Toast
+@using redb.Identity.Contracts.ClaimMappers
+
+@*
+    ApplicationUserAttributesTab — read-only "what the application gets in
+    issued tokens" view.
+
+    redb.Identity does not allow per-application attribute toggling (the
+    WSO2 IS 7.x "Select scopes, i.e. grouped user attributes" pattern).
+    Our claim emission is governed by claim mappers + scope assignment;
+    this tab visualises the result without offering a per-app override.
+
+    Three sections:
+      1. Standard OIDC scope → claim map (static; mirrors OIDC core §5).
+         Highlights which standard scopes this application has assigned.
+      2. Custom claim-scopes assigned to this application. Reuses the
+         same query as the Roles tab.
+      3. Subject identifier configuration. Public (sub = stable user id)
+         is the only mode we ship today; pairwise is on the roadmap
+         (doc/FEATURE_GAPS_VS_WSO2_IS_7X.md §C.6).
+*@
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Standard OIDC scopes</h3>
+    <p class="text-secondary" style="margin: 0 0 var(--space-4); font-size: var(--font-size-sm);">
+        Standard scopes from OIDC core §5. Claims are emitted into the
+        <code>id_token</code> and <code>/userinfo</code> when the application
+        requests the scope at <code>/authorize</code> and the user consents.
+        Scopes this application currently has assigned are highlighted.
+    </p>
+    <table class="apps-list__table">
+        <thead>
+            <tr>
+                <th>Scope</th>
+                <th>Standard claims</th>
+                <th style="width: 80px;">Assigned</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var s in StandardScopes)
+            {
+                var isAssigned = _appPermissions.Contains("scp:" + s.Name);
+                <tr class="apps-list__row">
+                    <td><strong>@s.Name</strong></td>
+                    <td class="text-secondary"><code>@string.Join(", ", s.Claims)</code></td>
+                    <td>
+                        @if (isAssigned)
+                        {
+                            <span class="apps-list__chip" style="background: var(--accent-light); color: var(--accent-text);">yes</span>
+                        }
+                        else
+                        {
+                            <span class="apps-list__chip">no</span>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Custom claim-scopes</h3>
+    @if (_loading)
+    {
+        <p class="text-secondary">Loading…</p>
+    }
+    else if (_assignedScopes.Count == 0)
+    {
+        <UiEmptyState Variant="inline"
+                      Title="No custom claim-scopes assigned"
+                      Description="Custom scopes (and the claims they emit) are managed on the Authorization tab." />
+    }
+    else
+    {
+        <ul class="app-detail__assignment-list">
+            @foreach (var s in _assignedScopes)
+            {
+                <li class="app-detail__assignment-row">
+                    <div class="app-detail__assignment-info">
+                        <strong>@(s.Name ?? s.Id)</strong>
+                        @if (!string.IsNullOrEmpty(s.Description))
+                        {
+                            <p class="text-secondary">@s.Description</p>
+                        }
+                    </div>
+                </li>
+            }
+        </ul>
+    }
+    <p class="text-secondary" style="margin: var(--space-3) 0 0; font-size: var(--font-size-sm);">
+        To define a new claim-scope or change which attributes a scope emits,
+        edit <NavLink href="/admin/claim-mappers">Claim Mappers</NavLink>
+        and <NavLink href="/admin/claim-scopes">Claim Scopes</NavLink>.
+    </p>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Subject identifier</h3>
+    <dl class="app-detail__kv">
+        <dt>Subject type</dt>
+        <dd>
+            <strong>Public</strong>
+            <p class="text-secondary" style="margin: var(--space-1) 0 0; font-size: var(--font-size-xs);">
+                The <code>sub</code> claim carries the user's stable internal id and is
+                identical across applications. Pairwise pseudonyms (one stable id per
+                application) are on the roadmap — see
+                <code>doc/FEATURE_GAPS_VS_WSO2_IS_7X.md</code> §C.6.
+            </p>
+        </dd>
+
+        <dt>Subject claim</dt>
+        <dd>
+            <code>sub</code>
+            <p class="text-secondary" style="margin: var(--space-1) 0 0; font-size: var(--font-size-xs);">
+                Always <code>sub</code> per OIDC core §2. WSO2's "alternate subject
+                identifier" feature is out of scope — we standardise on the canonical
+                claim name.
+            </p>
+        </dd>
+    </dl>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public ApplicationResponse App { get; set; } = default!;
+
+    private bool _loading = true;
+    private string? _error;
+    private readonly HashSet<string> _appPermissions = new(StringComparer.Ordinal);
+    private readonly List<ClaimScopeResponse> _assignedScopes = new();
+
+    private sealed record StandardScope(string Name, string[] Claims);
+
+    // OIDC core §5 standard scopes and their claim sets.
+    private static readonly StandardScope[] StandardScopes = new[]
+    {
+        new StandardScope("openid", new[] { "sub" }),
+        new StandardScope("profile", new[] { "name", "family_name", "given_name", "middle_name", "nickname",
+                                             "preferred_username", "profile", "picture", "website", "gender",
+                                             "birthdate", "zoneinfo", "locale", "updated_at" }),
+        new StandardScope("email", new[] { "email", "email_verified" }),
+        new StandardScope("address", new[] { "address" }),
+        new StandardScope("phone", new[] { "phone_number", "phone_number_verified" }),
+        new StandardScope("offline_access", new[] { "(grants refresh_token; no claims)" }),
+        new StandardScope("roles", new[] { "roles" }),
+        new StandardScope("groups", new[] { "groups" }),
+    };
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _appPermissions.Clear();
+        _assignedScopes.Clear();
+
+        foreach (var p in App.Permissions ?? Array.Empty<string>())
+            _appPermissions.Add(p);
+
+        try
+        {
+            var catalogue = await Client.ListClaimScopesAsync(0, 200);
+            var byId = catalogue.Items.ToDictionary(x => x.Id, x => x);
+            var doc = await Client.ListClaimScopeAssignmentsAsync(App.Id);
+
+            void Visit(JsonElement el)
+            {
+                if (el.TryGetProperty("scopeId", out var sid) && sid.ValueKind == JsonValueKind.String &&
+                    byId.TryGetValue(sid.GetString()!, out var scope))
+                {
+                    _assignedScopes.Add(scope);
+                }
+            }
+
+            if (doc.ValueKind == JsonValueKind.Object &&
+                doc.TryGetProperty("items", out var arr) &&
+                arr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in arr.EnumerateArray()) Visit(el);
+            }
+            else if (doc.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in doc.EnumerateArray()) Visit(el);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+}

@@ -1,0 +1,201 @@
+@*
+    UiInlineEdit — click-to-edit single-line text field.
+
+    Idle:  ┌─────────────────────┐
+           │ Display Name      ✎ │   ← hover reveals pencil
+           └─────────────────────┘
+
+    Active: ┌─────────────────────┐
+            │ Display Name_      │   ← input, focused, save-on-Enter/Tab
+            └─────────────────────┘
+            Enter / Tab → save · Escape → cancel · click-outside → save
+
+    Usage:
+        <UiInlineEdit Value="@app.Name"
+                      OnSave="HandleNameSaveAsync"
+                      Placeholder="Untitled application"
+                      MaxLength="120" />
+
+        private async Task HandleNameSaveAsync(string newValue)
+        {
+            await _client.UpdateApplicationAsync(app.Id, name: newValue);
+            app.Name = newValue;
+        }
+
+    States:
+        idle        — text + pencil-on-hover.
+        editing     — input visible, save/cancel via keyboard.
+        saving      — input disabled, spinner shown; OnSave is awaited.
+        error       — restores previous value, surfaces ErrorMessage to caller.
+*@
+
+<div class="ui-inline-edit @(_editing ? "ui-inline-edit--editing" : "") @(_saving ? "ui-inline-edit--saving" : "") @(Disabled ? "ui-inline-edit--disabled" : "")">
+    @if (_editing)
+    {
+        <input @ref="_inputRef"
+               type="text"
+               class="ui-inline-edit__input"
+               value="@_draft"
+               @oninput="@(e => _draft = e.Value?.ToString() ?? string.Empty)"
+               @onkeydown="OnKeyDownAsync"
+               @onblur="OnBlurAsync"
+               disabled="@_saving"
+               maxlength="@MaxLength"
+               placeholder="@Placeholder" />
+        @if (_saving)
+        {
+            <span class="ui-inline-edit__spinner" aria-label="Saving">⏳</span>
+        }
+    }
+    else
+    {
+        <button type="button"
+                class="ui-inline-edit__display"
+                @onclick="BeginEdit"
+                disabled="@Disabled"
+                title="@(Disabled ? null : "Click to edit")">
+            <span class="ui-inline-edit__value @(string.IsNullOrEmpty(Value) ? "ui-inline-edit__value--placeholder" : "")">
+                @(string.IsNullOrEmpty(Value) ? Placeholder : Value)
+            </span>
+            @if (!Disabled)
+            {
+                <RdbIcon Name="edit" Size="14" />
+            }
+        </button>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// Current persisted value shown when idle. Bind to the source-of-truth
+    /// property; never mutate it directly — wait for OnSave to confirm.
+    /// </summary>
+    [Parameter, EditorRequired] public string Value { get; set; } = "";
+
+    /// <summary>
+    /// Save handler — called when the user commits (Enter / Tab / blur). The
+    /// component awaits the returned Task and shows a spinner meanwhile. If
+    /// the task throws, the input restores to the previous value and the
+    /// component surfaces an inline error state.
+    /// </summary>
+    [Parameter] public EventCallback<string> OnSave { get; set; }
+
+    /// <summary>
+    /// Placeholder shown when Value is empty. Mirrors HTML &lt;input
+    /// placeholder&gt; semantics in edit mode AND a muted "click to add" affordance
+    /// in idle mode.
+    /// </summary>
+    [Parameter] public string Placeholder { get; set; } = "Click to edit";
+
+    /// <summary>
+    /// Maximum length for the input. Default 200 — most identity-name fields
+    /// in our schemas cap below that.
+    /// </summary>
+    [Parameter] public int MaxLength { get; set; } = 200;
+
+    /// <summary>
+    /// When true, the field renders read-only — no pencil icon, no click handler.
+    /// </summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>
+    /// Optional validation predicate — runs synchronously before OnSave is
+    /// dispatched. Return null to accept, or an error string to reject (the
+    /// input stays open with no save attempt).
+    /// </summary>
+    [Parameter] public Func<string, string?>? Validate { get; set; }
+
+    private bool _editing;
+    private bool _saving;
+    private string _draft = "";
+    private string _previousValue = "";
+    private ElementReference _inputRef;
+
+    private async Task BeginEdit()
+    {
+        if (Disabled || _editing) return;
+        _previousValue = Value;
+        _draft = Value;
+        _editing = true;
+        StateHasChanged();
+        // Focus + select on the next render cycle. The element is mounted by
+        // then; FocusAsync is a JS interop call so we can't issue it before
+        // the input is in the DOM.
+        await Task.Yield();
+        try { await _inputRef.FocusAsync(); }
+        catch { /* harmless — focus is best-effort. */ }
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (_saving) return;
+        switch (e.Key)
+        {
+            case "Enter":
+            case "Tab":
+                await CommitAsync();
+                break;
+            case "Escape":
+                Cancel();
+                break;
+        }
+    }
+
+    private async Task OnBlurAsync()
+    {
+        // Blur fires after Enter/Tab keydown handlers already kicked off Commit.
+        // Guard against double-save when the field is already saving / closed.
+        if (_saving || !_editing) return;
+        await CommitAsync();
+    }
+
+    private async Task CommitAsync()
+    {
+        if (string.Equals(_draft, _previousValue, StringComparison.Ordinal))
+        {
+            // No change — close cleanly without invoking the save callback.
+            _editing = false;
+            StateHasChanged();
+            return;
+        }
+
+        if (Validate is not null && Validate(_draft) is { } _)
+        {
+            // Validation rejected the draft. Stay in editing mode so the user
+            // can correct. We don't surface the error message ourselves yet —
+            // callers that want richer UX can wrap UiInlineEdit and render
+            // their own error label adjacent to it (RFC for batch 2).
+            return;
+        }
+
+        _saving = true;
+        StateHasChanged();
+        try
+        {
+            await OnSave.InvokeAsync(_draft);
+            // Caller is expected to update Value via its own state mutation
+            // (typically by binding to a model property the parent owns).
+            _editing = false;
+        }
+        catch
+        {
+            // Restore previous value on save failure so the field doesn't lie
+            // about persistence. Caller is responsible for surfacing the error
+            // (e.g. via ToastService or an inline alert).
+            _draft = _previousValue;
+            _editing = false;
+        }
+        finally
+        {
+            _saving = false;
+            StateHasChanged();
+        }
+    }
+
+    private void Cancel()
+    {
+        _draft = _previousValue;
+        _editing = false;
+        StateHasChanged();
+    }
+}

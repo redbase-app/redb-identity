@@ -1,0 +1,134 @@
+@page "/admin/webhooks"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    W1 — outbound webhook subscriptions admin. List + create modal +
+    row-click navigates to detail. HMAC secret is shown ONCE on creation
+    (and on rotate-secret); the list / detail responses never include it
+    again — the receiver MUST be configured at that moment.
+*@
+
+<RdbPageHeader Title="Webhooks"
+               Description="Outbound HTTP subscriptions. Identity events are POSTed to configured URLs with HMAC-SHA256 signatures." />
+
+<div class="card" style="margin-bottom: var(--space-4);">
+    <div class="card-header" style="gap: var(--space-3); flex-wrap: wrap;">
+        <span class="text-secondary" style="font-size: var(--font-size-sm); flex: 1;">
+            @if (_total <= PageSize)
+            {
+                @($"{_total} subscription{(_total == 1 ? "" : "s")}")
+            }
+            else
+            {
+                @($"Showing {_offset + 1}-{Math.Min(_offset + PageSize, _total)} of {_total}")
+            }
+        </span>
+        <div style="display:flex; gap: var(--space-2);">
+            <button class="btn" disabled="@(_offset == 0 || _loading)" @onclick="PrevPage">‹ Prev</button>
+            <button class="btn" disabled="@(_offset + PageSize >= _total || _loading)" @onclick="NextPage">Next ›</button>
+            <button class="btn btn-primary" @onclick="@(() => Nav.NavigateTo("/admin/webhooks/new"))">
+                <RdbIcon Name="zap" Size="14" /> New webhook
+            </button>
+        </div>
+    </div>
+
+    @if (_loading) { <p class="text-secondary" style="padding: var(--space-4);">Loading…</p> }
+    else if (_error is not null) { <p class="text-error" style="padding: var(--space-4);">@_error</p> }
+    else if (_items.Count == 0)
+    {
+        <UiEmptyState Variant="inline"
+                      Title="No webhooks yet"
+                      Description="Create your first subscription to receive identity events at an external URL." />
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>URL</th>
+                    <th style="width: 200px;">Event filter</th>
+                    <th style="width: 90px;">Enabled</th>
+                    <th style="width: 110px;">Retries</th>
+                    <th style="width: 100px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var w in _items)
+                {
+                    <tr style="cursor:pointer;" @onclick="@(() => Nav.NavigateTo($"/admin/webhooks/{w.Id}"))">
+                        <td>
+                            @if (!string.IsNullOrEmpty(w.DisplayName))
+                            {
+                                <strong>@w.DisplayName</strong>
+                                <div class="text-secondary" style="font-size: var(--font-size-sm); margin-top: var(--space-1);"><code>@w.Url</code></div>
+                            }
+                            else
+                            {
+                                <code>@w.Url</code>
+                            }
+                        </td>
+                        <td><code style="font-size: var(--font-size-xs);">@w.EventTypeFilter</code></td>
+                        <td>
+                            @if (w.Enabled) { <RdbBadge Text="on" Variant="online" /> } else { <RdbBadge Text="off" Variant="offline" /> }
+                        </td>
+                        <td class="text-secondary">@w.MaxAttempts × @w.TimeoutMs ms</td>
+                        <td style="display:flex; gap: var(--space-1); justify-content:flex-end;">
+                            <button class="btn btn-sm" title="Edit"
+                                    @onclick:stopPropagation="true"
+                                    @onclick="@(() => Nav.NavigateTo($"/admin/webhooks/{w.Id}"))">
+                                <RdbIcon Name="copy" Size="14" />
+                            </button>
+                            <button class="btn btn-sm btn-danger" title="Delete"
+                                    @onclick:stopPropagation="true"
+                                    @onclick="@(() => Delete(w))">
+                                <RdbIcon Name="alert-triangle" Size="14" />
+                            </button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    private const int PageSize = 25;
+    private readonly List<WebhookSubscriptionResponse> _items = new();
+    private int _offset;
+    private int _total;
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            var page = await Client.ListWebhooksAsync(_offset, PageSize);
+            _items.Clear();
+            _items.AddRange(page.Items);
+            _total = page.Total;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private Task PrevPage() { _offset = Math.Max(0, _offset - PageSize); return ReloadAsync(); }
+    private Task NextPage() { _offset += PageSize; return ReloadAsync(); }
+
+    private async Task Delete(WebhookSubscriptionResponse w)
+    {
+        try
+        {
+            await Client.DeleteWebhookAsync(w.Id);
+            Toast.Success("Deleted");
+            await ReloadAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+}

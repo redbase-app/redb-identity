@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/redb.Identity.Contracts/redb.Identity.Contracts.csproj" />
+    <Project Path="src/redb.Identity.Core/redb.Identity.Core.csproj" />
+    <Project Path="src/redb.Identity.Core.Module/redb.Identity.Core.Module.csproj" />
+    <Project Path="src/redb.Identity.DataProtection/redb.Identity.DataProtection.csproj" />
+    <Project Path="src/redb.Identity.Http/redb.Identity.Http.csproj" />
+    <Project Path="src/redb.Identity.Resource.Dpop/redb.Identity.Resource.Dpop.csproj" />
+    <Project Path="src/redb.Identity.Ldap/redb.Identity.Ldap.csproj" />
+    <Project Path="src/redb.Identity.Client/redb.Identity.Client.csproj" />
+    <Project Path="src/redb.Identity.Web/redb.Identity.Web.csproj" />
+  </Folder>
+</Solution>

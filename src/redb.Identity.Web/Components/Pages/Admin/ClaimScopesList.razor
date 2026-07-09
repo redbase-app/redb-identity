@@ -1,0 +1,187 @@
+@page "/admin/claim-scopes"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+<RdbPageHeader Title="Claim scopes" Description="Named bundles of claim mappers, assignable to applications." />
+
+<div style="display:flex; gap: var(--space-4);">
+
+    @* Left: scope list *@
+    <div class="card" style="flex:1;">
+        <div class="card-header">
+            <span class="card-title">Scopes</span>
+            <button class="btn btn-primary" @onclick="OpenCreate">
+                <RdbIcon Name="zap" Size="14" /> New scope
+            </button>
+        </div>
+
+        @if (_loading) { <p class="text-secondary">Loading…</p> }
+        else if (_loadError is not null) { <p class="text-error">@_loadError</p> }
+        else if (_scopes.Count == 0) { <p class="text-secondary">No claim scopes.</p> }
+        else
+        {
+            <table class="data-table">
+                <thead><tr><th>Name</th><th>Display name</th><th>Enabled</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var s in _scopes)
+                    {
+                        <tr class="@(_selected?.Id == s.Id ? "row-selected" : "")" @onclick="() => SelectScope(s)" style="cursor:pointer;">
+                            <td><strong>@s.Name</strong></td>
+                            <td>@s.DisplayName</td>
+                            <td><RdbBadge Text="@(s.Enabled ? "on" : "off")" Variant="@(s.Enabled ? "online" : "offline")" /></td>
+                            <td style="display:flex; gap:var(--space-1);">
+                                <button class="btn btn-sm" @onclick:stopPropagation="true" @onclick="() => OpenEdit(s)">Edit</button>
+                                <button class="btn btn-sm btn-danger" @onclick:stopPropagation="true" @onclick="() => DeleteScope(s)">Delete</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    @* Right: mappers for selected scope *@
+    @if (_selected is not null)
+    {
+        <div class="card" style="flex:1;">
+            <div class="card-header">
+                <span class="card-title">Mappers in "@_selected.Name"</span>
+            </div>
+
+            @if (_mappersLoading) { <p class="text-secondary">Loading mappers…</p> }
+            else if (_mappersError is not null) { <p class="text-error">@_mappersError</p> }
+            else if (_scopeMappers.Count == 0) { <p class="text-secondary">No mappers attached to this scope.</p> }
+            else
+            {
+                <table class="data-table">
+                    <thead><tr><th>Name</th><th>Claim type</th><th>Source</th></tr></thead>
+                    <tbody>
+                        @foreach (var m in _scopeMappers)
+                        {
+                            <tr>
+                                <td>@m.Name</td>
+                                <td><code>@m.ClaimType</code></td>
+                                <td><span class="badge">@m.SourceKind</span></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    }
+</div>
+
+@if (_editing is not null)
+{
+    <div class="modal-backdrop" @onclick="CloseModal">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h3>@(string.IsNullOrEmpty(_editing.Id) ? "New claim scope" : $"Edit: {_editing.Name}")</h3>
+
+            @if (string.IsNullOrEmpty(_editing.Id))
+            {
+                <label>Name * <input @bind="_form.Name" /></label>
+            }
+            else
+            {
+                <label>Name <input value="@_editing.Name" disabled /></label>
+            }
+            <label>Display name <input @bind="_form.DisplayName" /></label>
+            <label>Description <input @bind="_form.Description" /></label>
+            <label style="display:flex; gap:var(--space-2); align-items:center;">
+                <input type="checkbox" @bind="_form.Enabled" /> Enabled
+            </label>
+
+            @if (_modalError is not null) { <p class="text-error">@_modalError</p> }
+            <div class="modal-actions">
+                <button class="btn btn-secondary" @onclick="CloseModal">Cancel</button>
+                <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">@(_saving ? "Saving…" : "Save")</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private readonly List<ClaimScopeResponse> _scopes = new();
+    private readonly List<ClaimMapperResponse> _scopeMappers = new();
+    private bool _loading = true, _mappersLoading;
+    private string? _loadError, _mappersError;
+    private ClaimScopeResponse? _selected;
+
+    private ClaimScopeResponse? _editing;
+    private FormState _form = new();
+    private bool _saving;
+    private string? _modalError;
+
+    private sealed class FormState
+    {
+        public string Name = "";
+        public string? DisplayName, Description;
+        public bool Enabled = true;
+    }
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _loadError = null;
+        try
+        {
+            var page = await Client.ListClaimScopesAsync(count: 100);
+            _scopes.Clear(); _scopes.AddRange(page.Items);
+        }
+        catch (Exception ex) { _loadError = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task SelectScope(ClaimScopeResponse s)
+    {
+        _selected = s; _mappersLoading = true; _mappersError = null;
+        try
+        {
+            var page = await Client.ListClaimMappersAsync(owner: $"scope:{s.Id}", count: 100);
+            _scopeMappers.Clear(); _scopeMappers.AddRange(page.Items);
+        }
+        catch (Exception ex) { _mappersError = ex.Message; }
+        finally { _mappersLoading = false; }
+    }
+
+    private void OpenCreate()
+    {
+        _editing = new ClaimScopeResponse { Id = "" };
+        _form = new FormState(); _modalError = null;
+    }
+
+    private void OpenEdit(ClaimScopeResponse s)
+    {
+        _editing = s;
+        _form = new FormState { Name = s.Name ?? "", DisplayName = s.DisplayName, Description = s.Description, Enabled = s.Enabled };
+        _modalError = null;
+    }
+
+    private void CloseModal() { _editing = null; }
+
+    private async Task SaveAsync()
+    {
+        _saving = true; _modalError = null;
+        try
+        {
+            if (string.IsNullOrEmpty(_editing!.Id))
+                await Client.CreateClaimScopeAsync(new CreateClaimScopeRequest { Name = _form.Name, DisplayName = _form.DisplayName, Description = _form.Description, Enabled = _form.Enabled });
+            else
+                await Client.UpdateClaimScopeAsync(_editing.Id, new UpdateClaimScopeRequest { Id = _editing.Id, DisplayName = _form.DisplayName, Description = _form.Description, Enabled = _form.Enabled });
+
+            Toast.Show("Saved.", "online");
+            CloseModal();
+            await LoadAsync();
+        }
+        catch (Exception ex) { _modalError = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task DeleteScope(ClaimScopeResponse s)
+    {
+        try { await Client.DeleteClaimScopeAsync(s.Id); Toast.Show("Deleted.", "online"); await LoadAsync(); }
+        catch (Exception ex) { Toast.Show(ex.Message, "error"); }
+    }
+}

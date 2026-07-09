@@ -1,0 +1,250 @@
+@inject IIdentityClient Client
+@inject ToastService Toast
+@using redb.Identity.Contracts.Groups
+
+@*
+    ApplicationRolesTab — functional per-application access gate editor (β).
+
+    Manages ApplicationProps.AllowedGroups: when the whitelist is non-empty,
+    RestrictApplicationByGroupMembershipHandler rejects sign-in attempts from
+    users who are not a member of any listed group with access_denied.
+
+    Empty whitelist = any authenticated user may use the app (the default).
+
+    Note: stores group NAMES (matches operator mental model and how
+    RedbIdentityOptions.ScopeRequiredGroups already works). UI shows + saves
+    names; the server-side handler does the user→groups lookup at sign-in.
+*@
+
+@if (_dirty)
+{
+    <div class="app-detail__dirty-banner">
+        <RdbIcon Name="alert-triangle" Size="14" />
+        <span>You have unsaved changes.</span>
+        <button class="btn btn-sm btn-ghost" @onclick="Reset" disabled="@_saving">Discard</button>
+    </div>
+}
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Per-application access gate</h3>
+    <p class="text-secondary" style="margin: 0 0 var(--space-4); font-size: var(--font-size-sm); line-height: 1.6;">
+        When the whitelist below is empty (default), any authenticated user may
+        sign in to this application. When non-empty, only members of at least
+        one listed group may sign in — others are rejected with
+        <code>access_denied</code> at the token endpoint. Independent of and
+        OR'd against the global per-scope gate
+        (<code>RedbIdentityOptions.ScopeRequiredGroups</code>); both gates
+        must pass.
+    </p>
+
+    @if (_loading)
+    {
+        <p class="text-secondary">Loading…</p>
+    }
+    else
+    {
+        @if (_allowedGroups.Count == 0)
+        {
+            <UiEmptyState Variant="inline"
+                          Title="No group restrictions"
+                          Description="This application is open to any authenticated user. Add a group below to restrict access." />
+        }
+        else
+        {
+            <ul class="app-detail__assignment-list">
+                @foreach (var name in _allowedGroups)
+                {
+                    <li class="app-detail__assignment-row">
+                        <div class="app-detail__assignment-info">
+                            <strong>@name</strong>
+                            @{
+                                var resolved = _groupCatalogue.FirstOrDefault(g => string.Equals(g.Name, name, StringComparison.Ordinal));
+                            }
+                            @if (resolved is not null && !string.IsNullOrEmpty(resolved.Description))
+                            {
+                                <p class="text-secondary">@resolved.Description</p>
+                            }
+                            else if (resolved is null)
+                            {
+                                <p class="text-secondary" style="color: var(--status-warning);">
+                                    <RdbIcon Name="alert-triangle" Size="12" />
+                                    Group not found in the catalogue — may have been renamed or deleted.
+                                </p>
+                            }
+                        </div>
+                        <button class="btn btn-sm btn-danger"
+                                @onclick="@(() => RemoveGroup(name))"
+                                disabled="@_saving">
+                            Remove
+                        </button>
+                    </li>
+                }
+            </ul>
+        }
+
+        var available = _groupCatalogue
+            .Where(g => !string.IsNullOrEmpty(g.Name) && !_allowedGroups.Contains(g.Name!))
+            .ToList();
+        if (available.Count > 0)
+        {
+            <div class="app-detail__assignment-add" style="margin-top: var(--space-4);">
+                <select class="app-detail__input"
+                        value="@_groupToAdd"
+                        @onchange="@(e => _groupToAdd = e.Value?.ToString() ?? string.Empty)">
+                    <option value="">— pick a group to allow —</option>
+                    @foreach (var g in available)
+                    {
+                        <option value="@g.Name">@g.Name</option>
+                    }
+                </select>
+                <button class="btn btn-primary"
+                        @onclick="AddGroup"
+                        disabled="@(string.IsNullOrEmpty(_groupToAdd) || _saving)">
+                    Add
+                </button>
+            </div>
+        }
+        else if (_groupCatalogue.Count == 0)
+        {
+            <p class="text-secondary" style="margin-top: var(--space-3); font-size: var(--font-size-sm);">
+                No groups exist yet. Create some on the
+                <NavLink href="/admin/groups">Groups</NavLink> page first.
+            </p>
+        }
+        else
+        {
+            <p class="text-secondary" style="margin-top: var(--space-3); font-size: var(--font-size-sm);">
+                All known groups are already in the whitelist.
+            </p>
+        }
+    }
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">How role / group emission works</h3>
+    <p class="text-secondary" style="margin: 0; font-size: var(--font-size-sm); line-height: 1.6;">
+        Role claims in tokens are emitted by <strong>claim mappers</strong>
+        keyed on the user's <strong>group</strong> membership + the scopes
+        requested. The whitelist above gates whether the user can sign in at
+        all; the existing per-scope gate
+        (<code>RedbIdentityOptions.ScopeRequiredGroups</code>) governs which
+        claims the issued tokens may carry. Manage the underlying primitives
+        on
+        <NavLink href="/admin/groups">Groups</NavLink>,
+        <NavLink href="/admin/claim-mappers">Claim Mappers</NavLink>, and
+        <NavLink href="/admin/claim-scopes">Claim Scopes</NavLink>.
+    </p>
+</section>
+
+<div class="app-detail__submit-row">
+    <button class="btn btn-primary" @onclick="SaveAsync" disabled="@(!_dirty || _saving)">
+        @(_saving ? "Saving…" : "Update")
+    </button>
+    @if (_dirty)
+    {
+        <button class="btn btn-secondary" @onclick="Reset" disabled="@_saving">Discard</button>
+    }
+    @if (_error is not null)
+    {
+        <span class="text-error">@_error</span>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ApplicationResponse App { get; set; } = default!;
+    [Parameter] public EventCallback OnRefresh { get; set; }
+
+    private readonly List<string> _allowedGroups = new();
+    private readonly List<GroupResponse> _groupCatalogue = new();
+    private string _groupToAdd = "";
+    private bool _loading = true;
+    private bool _dirty;
+    private bool _saving;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        Reset();
+        await LoadCatalogueAsync();
+    }
+
+    private void Reset()
+    {
+        _allowedGroups.Clear();
+        foreach (var g in App.AllowedGroups ?? Array.Empty<string>())
+            _allowedGroups.Add(g);
+        _groupToAdd = "";
+        _dirty = false;
+        _error = null;
+    }
+
+    private async Task LoadCatalogueAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        _groupCatalogue.Clear();
+        try
+        {
+            // Root groups are usually enough for the whitelist UI; if a tenant
+            // has deeply-nested groups, those still work at the server side —
+            // the operator can type the name in (future enhancement) or use the
+            // Groups page to manage hierarchies. 200 is the API list cap.
+            var page = await Client.ListRootGroupsAsync(0, 200);
+            _groupCatalogue.AddRange(page);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void AddGroup()
+    {
+        if (string.IsNullOrEmpty(_groupToAdd)) return;
+        if (_allowedGroups.Contains(_groupToAdd, StringComparer.Ordinal)) return;
+        _allowedGroups.Add(_groupToAdd);
+        _groupToAdd = "";
+        _dirty = true;
+    }
+
+    private void RemoveGroup(string name)
+    {
+        if (_allowedGroups.Remove(name))
+        {
+            _dirty = true;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!_dirty || _saving) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            await Client.UpdateApplicationAsync(App.Id, new UpdateApplicationRequest
+            {
+                Id = App.Id,
+                AllowedGroups = _allowedGroups.ToArray(),
+                ConcurrencyToken = App.ConcurrencyToken,
+            });
+            Toast.Success("Access gate updated");
+            _dirty = false;
+            await OnRefresh.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

@@ -1,0 +1,32 @@
+# Build outputs
+bin/
+obj/
+*.user
+.vs/
+
+# NuGet
+*.nupkg
+*.snupkg
+nupkg/
+
+# Test results
+TestResults/
+
+# Secrets / local config
+appsettings.Development.json
+appsettings.Local.json
+context.json
+*.pem
+*.key
+*.pfx
+
+# Runtime artifacts
+src/**/Libs/
+src/**/output/
+src/**/Logs/
+demos/_logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

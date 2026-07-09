@@ -1,0 +1,365 @@
+@page "/admin/users"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    Users — row-table admin list mirroring the WSO2 IS 7.x "Users" page.
+
+    Click a row → /admin/users/{id} for the detail-with-tabs page.
+    "+ New User" CTA opens a small modal with login + password + display name,
+    then navigates to the freshly created user's detail page so the operator
+    can fine-tune profile / groups / MFA / federation immediately.
+*@
+
+<RdbPageHeader Title="Users"
+               Description="Users who can sign into applications managed by this server.">
+    <Actions>
+        <button class="btn btn-primary" @onclick="OpenCreate">
+            + New User
+        </button>
+    </Actions>
+</RdbPageHeader>
+
+<div class="apps-list__toolbar">
+    <div class="apps-list__search">
+        <RdbIcon Name="search" Size="14" />
+        <input type="search" placeholder="Search by login, display name or email…"
+               value="@_search"
+               @oninput="@(e => _search = e.Value?.ToString() ?? string.Empty)"
+               @onkeyup="OnSearchKey" />
+    </div>
+    <div style="display:flex; gap: var(--space-2);">
+        <button class="btn btn-sm btn-secondary" @onclick="DoSearch">Search</button>
+        @if (_searchActive)
+        {
+            <button class="btn btn-sm" @onclick="ClearSearch">Clear</button>
+        }
+        @if (!_loading && _total > 0)
+        {
+            <span class="text-sm text-secondary" style="margin-left: var(--space-3); display:flex; align-items:center;">
+                @{
+                    var noun = _searchActive ? "match" : "user";
+                    var plural = _total == 1 ? "" : (noun == "match" ? "es" : "s");
+                    var suffix = _searchActive ? " matches" : "";
+                }
+                @if (_total <= PageSize)
+                {
+                    @($"{_total} {noun}{plural}")
+                }
+                else
+                {
+                    @($"Showing {_offset + 1}-{Math.Min(_offset + PageSize, _total)} of {_total}{suffix}")
+                }
+            </span>
+        }
+    </div>
+</div>
+
+@if (_loading)
+{
+    <p class="text-secondary">Loading…</p>
+}
+else if (_error is not null)
+{
+    <p class="text-error">@_error</p>
+}
+else if (_items.Count == 0)
+{
+    <UiEmptyState Title="@(_searchActive ? "No users match your search" : "No users yet")"
+                  Description="@(_searchActive ? "Clear the filter or try a different term." : "Create the first user to get started.")">
+        <Illustration>
+            <RdbIcon Name="user" Size="48" />
+        </Illustration>
+        <Actions>
+            @if (!_searchActive)
+            {
+                <button class="btn btn-primary" @onclick="OpenCreate">+ New User</button>
+            }
+        </Actions>
+    </UiEmptyState>
+}
+else
+{
+    <table class="apps-list__table">
+        <thead>
+            <tr>
+                <th class="apps-list__col-name">User</th>
+                <th class="apps-list__col-type">Email</th>
+                <th class="apps-list__col-clienttype">Status</th>
+                <th class="apps-list__col-consent">Verified</th>
+                <th class="apps-list__col-meta">Created</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var u in _items)
+            {
+                <tr class="apps-list__row" @onclick="@(() => Nav.NavigateTo($"/admin/users/{u.Id}"))">
+                    <td class="apps-list__col-name">
+                        <div class="apps-list__row-name">
+                            <div class="apps-list__avatar">
+                                @AvatarLetter(u)
+                            </div>
+                            <div>
+                                <div class="apps-list__display-name">
+                                    @(u.DisplayName ?? u.Login ?? "Unnamed user")
+                                </div>
+                                <code class="apps-list__client-id">@u.Login</code>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="apps-list__col-type">
+                        @if (!string.IsNullOrEmpty(u.Email))
+                        {
+                            <span class="text-secondary">@u.Email</span>
+                        }
+                    </td>
+                    <td class="apps-list__col-clienttype">
+                        <RdbBadge Text="@(u.Status ?? "unknown")"
+                                  Variant="@StatusVariant(u.Status)"
+                                  ShowDot="false" />
+                    </td>
+                    <td class="apps-list__col-consent">
+                        @if (u.EmailVerified)
+                        {
+                            <span class="apps-list__chip" style="background: var(--status-online-bg); color: var(--status-online);">verified</span>
+                        }
+                        else
+                        {
+                            <span class="apps-list__chip">unverified</span>
+                        }
+                    </td>
+                    <td class="apps-list__col-meta">
+                        @u.CreatedAt.LocalDateTime.ToString("yyyy-MM-dd")
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    @if (_total > PageSize)
+    {
+        <div class="apps-list__pagination">
+            <button class="btn btn-sm" @onclick="PrevPage" disabled="@(_offset == 0)">&laquo; Prev</button>
+            <span class="text-secondary">@(_offset + 1)–@(_offset + _items.Count) of @_total</span>
+            <button class="btn btn-sm" @onclick="NextPage" disabled="@(_offset + _items.Count >= _total)">Next &raquo;</button>
+        </div>
+    }
+}
+
+@* New User modal — small create form. On submit, navigate to detail page. *@
+@if (_showCreate)
+{
+    <div class="confirm-overlay" @onclick="CloseCreate">
+        <div class="confirm-dialog" style="min-width: 420px;" @onclick:stopPropagation="true">
+            <div class="confirm-header">
+                <RdbIcon Name="user" Size="20" />
+                <span class="font-semibold">Create user</span>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: var(--space-3);">
+                <div class="app-detail__field">
+                    <label class="app-detail__field-label" for="new-user-login">Login *</label>
+                    <input id="new-user-login" type="text"
+                           class="app-detail__input app-detail__input--mono"
+                           value="@_form.Login"
+                           @oninput="@(e => _form.Login = e.Value?.ToString() ?? string.Empty)"
+                           autocomplete="off"
+                           placeholder="alice" />
+                </div>
+                <div class="app-detail__field">
+                    <label class="app-detail__field-label" for="new-user-password">Password *</label>
+                    <input id="new-user-password" type="password"
+                           class="app-detail__input"
+                           value="@_form.Password"
+                           @oninput="@(e => _form.Password = e.Value?.ToString() ?? string.Empty)"
+                           autocomplete="new-password" />
+                </div>
+                <div class="app-detail__field">
+                    <label class="app-detail__field-label" for="new-user-display">Display name</label>
+                    <input id="new-user-display" type="text"
+                           class="app-detail__input"
+                           value="@_form.DisplayName"
+                           @oninput="@(e => _form.DisplayName = e.Value?.ToString() ?? string.Empty)"
+                           placeholder="Alice Doe" />
+                </div>
+                <div class="app-detail__field">
+                    <label class="app-detail__field-label" for="new-user-email">Email</label>
+                    <input id="new-user-email" type="email"
+                           class="app-detail__input"
+                           value="@_form.Email"
+                           @oninput="@(e => _form.Email = e.Value?.ToString() ?? string.Empty)"
+                           placeholder="alice@example.com" />
+                </div>
+            </div>
+
+            @if (_createError is not null)
+            {
+                <p class="text-error" style="margin-top: var(--space-3);">@_createError</p>
+            }
+
+            <div class="confirm-actions">
+                <button class="btn btn-secondary btn-sm" @onclick="CloseCreate" disabled="@_creating">Cancel</button>
+                <button class="btn btn-primary btn-sm"
+                        disabled="@(_creating || !IsFormValid)"
+                        @onclick="CreateAsync">
+                    @(_creating ? "Creating…" : "Create")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private const int PageSize = 25;
+
+    private readonly List<UserResponse> _items = new();
+    private int _offset, _total;
+    private bool _loading = true;
+    private string? _error;
+
+    private string _search = "";
+    private bool _searchActive;
+
+    private bool _showCreate;
+    private bool _creating;
+    private string? _createError;
+    private CreateForm _form = new();
+
+    private sealed class CreateForm
+    {
+        public string Login { get; set; } = "";
+        public string Password { get; set; } = "";
+        public string DisplayName { get; set; } = "";
+        public string Email { get; set; } = "";
+    }
+
+    private bool IsFormValid =>
+        !string.IsNullOrWhiteSpace(_form.Login) &&
+        !string.IsNullOrWhiteSpace(_form.Password);
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            if (_searchActive && !string.IsNullOrWhiteSpace(_search))
+            {
+                var page = await Client.SearchUsersPagedAsync(_search, _offset, PageSize);
+                _items.Clear();
+                _items.AddRange(page.Items);
+                _total = page.Total;
+            }
+            else
+            {
+                var page = await Client.ListUsersAsync(_offset, PageSize);
+                _items.Clear();
+                _items.AddRange(page.Items);
+                _total = page.Total;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await DoSearch();
+    }
+
+    private Task DoSearch()
+    {
+        _searchActive = !string.IsNullOrWhiteSpace(_search);
+        _offset = 0;
+        return LoadAsync();
+    }
+
+    private Task ClearSearch()
+    {
+        _search = "";
+        _searchActive = false;
+        _offset = 0;
+        return LoadAsync();
+    }
+
+    private Task PrevPage()
+    {
+        _offset = Math.Max(0, _offset - PageSize);
+        return LoadAsync();
+    }
+
+    private Task NextPage()
+    {
+        _offset += PageSize;
+        return LoadAsync();
+    }
+
+    private void OpenCreate()
+    {
+        _showCreate = true;
+        _form = new CreateForm();
+        _createError = null;
+    }
+
+    private void CloseCreate()
+    {
+        if (_creating) return;
+        _showCreate = false;
+        _createError = null;
+    }
+
+    private async Task CreateAsync()
+    {
+        if (!IsFormValid || _creating) return;
+        _creating = true;
+        _createError = null;
+        try
+        {
+            var created = await Client.CreateUserAsync(new CreateUserRequest
+            {
+                Login = _form.Login.Trim(),
+                Password = _form.Password,
+                DisplayName = string.IsNullOrWhiteSpace(_form.DisplayName) ? null : _form.DisplayName.Trim(),
+                Email = string.IsNullOrWhiteSpace(_form.Email) ? null : _form.Email.Trim(),
+            });
+            Toast.Success($"User '{created.Login}' created");
+            _showCreate = false;
+            Nav.NavigateTo($"/admin/users/{created.Id}");
+        }
+        catch (Exception ex)
+        {
+            _createError = ex.Message;
+        }
+        finally
+        {
+            _creating = false;
+        }
+    }
+
+    private static string AvatarLetter(UserResponse u)
+    {
+        var source = u.DisplayName ?? u.Login ?? "?";
+        return string.IsNullOrEmpty(source)
+            ? "?"
+            : source.Substring(0, 1).ToUpperInvariant();
+    }
+
+    private static string StatusVariant(string? status) =>
+        status?.ToLowerInvariant() switch
+        {
+            "active" => "online",
+            "disabled" or "locked" => "warning",
+            "deleted" => "error",
+            _ => "info"
+        };
+}

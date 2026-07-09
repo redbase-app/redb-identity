@@ -1,0 +1,65 @@
+@* Shared user picker with debounced search dropdown. *@
+@inject IIdentityClient Client
+
+<div class="user-picker" style="position:relative;">
+    <input class="input" style="width:100%;"
+           value="@_display"
+           @oninput="OnInput"
+           placeholder="@Placeholder" />
+
+    @if (_results is { Count: > 0 })
+    {
+        <ul class="dropdown" style="position:absolute; z-index:100; background:var(--surface); border:1px solid var(--border); border-radius:4px; list-style:none; margin:0; padding:var(--space-1); min-width:100%;">
+            @foreach (var u in _results)
+            {
+                <li>
+                    <button class="btn btn-ghost" style="width:100%; text-align:left;"
+                            @onclick="() => Select(u)">
+                        <strong>@u.Login</strong> — @u.Email
+                    </button>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "Search user by login / email…";
+
+    private string _display = "";
+    private List<redb.Identity.Contracts.Users.UserResponse>? _results;
+    private CancellationTokenSource? _cts;
+
+    protected override void OnParametersSet()
+    {
+        if (Value is null) _display = "";
+    }
+
+    private async Task OnInput(ChangeEventArgs e)
+    {
+        _display = e.Value?.ToString() ?? "";
+        _cts?.Cancel();
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
+
+        if (_display.Length < 2) { _results = null; return; }
+
+        try
+        {
+            await Task.Delay(300, ct);
+            var found = await Client.SearchUsersAsync(_display);
+            _results = found.Take(8).ToList();
+        }
+        catch (OperationCanceledException) { /* new keystroke — ignore */ }
+        catch { _results = null; }
+    }
+
+    private async Task Select(redb.Identity.Contracts.Users.UserResponse u)
+    {
+        _display = $"{u.Login} ({u.Email})";
+        _results = null;
+        await ValueChanged.InvokeAsync(u.Id.ToString());
+    }
+}

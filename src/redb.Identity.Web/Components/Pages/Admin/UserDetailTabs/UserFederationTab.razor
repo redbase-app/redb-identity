@@ -1,0 +1,52 @@
+@*
+    User > Federation tab — linked external IdPs (read-only).
+
+    Reads from User.ExternalIdentities (Dictionary<providerId, ExternalIdentityDto>)
+    already present on the existing UserResponse — no extra round-trip.
+
+    Admin unlink is intentionally not exposed here: the user-side
+    /me/federated-identities flow already handles unlink (self-service),
+    and an admin-only unlink endpoint would need separate auditing rules
+    we haven't designed. Logged in FEATURE_GAPS for a later batch.
+*@
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Linked external identities</h3>
+
+    @if (User.ExternalIdentities is null || User.ExternalIdentities.Count == 0)
+    {
+        <UiEmptyState Variant="inline"
+                      Title="No federated identities linked"
+                      Description="This user signs in only with their local password (and any MFA factors enrolled on the MFA tab)." />
+    }
+    else
+    {
+        <ul class="app-detail__assignment-list">
+            @foreach (var kv in User.ExternalIdentities)
+            {
+                <li class="app-detail__assignment-row">
+                    <div class="app-detail__assignment-info">
+                        <strong>@kv.Key</strong>
+                        <p class="text-secondary">
+                            <span>external sub: <code>@(kv.Value.Sub ?? "—")</code></span><br />
+                            <span>linked @kv.Value.LinkedAt.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")</span>
+                        </p>
+                    </div>
+                </li>
+            }
+        </ul>
+
+        <p class="text-secondary" style="margin-top: var(--space-4); font-size: var(--font-size-xs);">
+            Admin-side unlink is not exposed here — the user can unlink any
+            external identity from <code>/me/federated-identities</code>
+            directly. Adding new federation providers (Google, GitHub, OIDC,
+            …) is managed on the
+            <NavLink href="/admin/federation">Federation Providers</NavLink>
+            page.
+        </p>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public UserResponse User { get; set; } = default!;
+}

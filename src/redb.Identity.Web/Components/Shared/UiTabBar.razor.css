@@ -1,0 +1,92 @@
+/* UiTabBar — horizontal tab strip with an animated under-line on the active tab.
+   Mirrors the WSO2 IS 7.x console pattern (strip under a page-header, underline
+   accent under the active tab) but uses our blue --accent instead of WSO2 coral. */
+
+.ui-tab-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    border-bottom: 1px solid var(--border-default);
+    margin-bottom: var(--space-6);
+    overflow-x: auto;
+    /* Hide native scrollbar on horizontal overflow — the tabs roll into view
+       on small viewports but the scrollbar is visual noise for desktop users. */
+    scrollbar-width: none;
+}
+
+.ui-tab-bar::-webkit-scrollbar {
+    display: none;
+}
+
+.ui-tab-bar__tab {
+    appearance: none;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    font-family: inherit;
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    /* The 2px bottom strip is part of the button so the active underline is
+       perfectly aligned with the bottom border of the .ui-tab-bar nav. */
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.ui-tab-bar__tab:hover:not(:disabled) {
+    color: var(--text-primary);
+}
+
+.ui-tab-bar__tab:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+
+.ui-tab-bar__tab:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.ui-tab-bar__tab--active {
+    color: var(--text-primary);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+}
+
+.ui-tab-bar__tab svg {
+    flex-shrink: 0;
+    opacity: 0.75;
+}
+
+.ui-tab-bar__tab--active svg {
+    opacity: 1;
+}
+
+/* Tiny numeric badge appended after the label — for tabs that track an item
+   count (Sessions: 12, Federation: 3 linked). */
+.ui-tab-bar__count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 var(--space-1);
+    border-radius: var(--radius-full);
+    background: var(--bg-inset);
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    margin-left: var(--space-1);
+}
+
+.ui-tab-bar__tab--active .ui-tab-bar__count {
+    background: var(--accent-light);
+    color: var(--accent-text);
+}

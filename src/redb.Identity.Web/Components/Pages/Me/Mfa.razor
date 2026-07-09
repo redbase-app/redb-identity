@@ -1,0 +1,181 @@
+@page "/me/mfa"
+@attribute [Authorize]
+@using QRCoder
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+<RdbPageHeader Title="Multi-factor authentication" Description="Manage your MFA methods and recovery codes." />
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Status</span>
+        <button class="btn btn-sm btn-secondary" @onclick="LoadAsync">Refresh</button>
+    </div>
+
+    @if (_loading) { <p class="text-secondary">Loading…</p> }
+    else if (_error is not null) { <p class="text-error">@_error</p> }
+    else
+    {
+        <p>MFA is <strong>@(_enabled ? "enabled" : "disabled")</strong>.</p>
+
+        @if (_methods.Count > 0)
+        {
+            <table class="data-table">
+                <thead><tr><th>Method</th><th>Registered</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var m in _methods)
+                    {
+                        <tr>
+                            <td><strong>@m</strong></td>
+                            <td class="text-secondary">—</td>
+                            <td><button class="btn btn-sm btn-danger" @onclick="() => Disable(m)">Disable</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    }
+</div>
+
+<div class="card" style="margin-top: var(--space-4);">
+    <div class="card-header">
+        <span class="card-title">Set up TOTP (authenticator app)</span>
+    </div>
+
+    @if (_setup is null)
+    {
+        <button class="btn btn-primary" @onclick="StartSetup">Begin setup</button>
+    }
+    else
+    {
+        <p>Scan the QR code with your authenticator app, or enter the secret manually.</p>
+        @if (_setupQrSvg is not null)
+        {
+            <div style="margin: var(--space-3) 0;">@((MarkupString)_setupQrSvg)</div>
+        }
+        @if (_setupSecret is not null) { <p><strong>Secret:</strong> <code>@_setupSecret</code></p> }
+        @if (_setupQrUrl is not null) { <details style="margin-top: var(--space-2);"><summary class="text-secondary" style="cursor:pointer;">otpauth URI</summary><code style="word-break: break-all; font-size: var(--font-size-xs);">@_setupQrUrl</code></details> }
+
+        <label class="form-field" style="margin-top: var(--space-3);">Verification code <input @bind="_otp" /></label>
+        <div style="display:flex; gap: var(--space-2); margin-top: var(--space-3);">
+            <button class="btn btn-secondary" @onclick="CancelSetup">Cancel</button>
+            <button class="btn btn-primary" @onclick="ConfirmSetup" disabled="@_busy">Confirm</button>
+        </div>
+    }
+</div>
+
+<div class="card" style="margin-top: var(--space-4);">
+    <div class="card-header">
+        <span class="card-title">Recovery codes</span>
+    </div>
+    <p class="text-secondary">Generate new recovery codes (this invalidates any previously issued codes).</p>
+    <div style="display:flex; gap: var(--space-2);">
+        <button class="btn btn-secondary" @onclick="Regenerate" disabled="@_busy">Regenerate codes</button>
+    </div>
+    @if (_codes is not null)
+    {
+        <pre style="margin-top: var(--space-3); padding: var(--space-3); background: var(--bg-subtle, #f1f5f9); border-radius: 6px;">@_codes</pre>
+    }
+</div>
+
+@code {
+    private bool _loading = true, _busy;
+    private string? _error;
+    private bool _enabled;
+    private readonly List<string> _methods = new();
+
+    private JsonElement? _setup;
+    private string? _setupSecret, _setupQrUrl, _setupQrSvg, _otp;
+    private string? _codes;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null; _methods.Clear();
+        try
+        {
+            var doc = await Client.GetMyMfaStatusAsync();
+            _enabled = doc.TryGetProperty("enabled", out var e) && e.ValueKind == JsonValueKind.True;
+            if (doc.TryGetProperty("methods", out var ms) && ms.ValueKind == JsonValueKind.Array)
+                foreach (var m in ms.EnumerateArray())
+                    if (m.ValueKind == JsonValueKind.String) _methods.Add(m.GetString()!);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task StartSetup()
+    {
+        _busy = true;
+        try
+        {
+            var doc = await Client.SetupMyMfaAsync(new Dictionary<string, object?> { ["method"] = "totp" });
+            _setup = doc;
+            _setupSecret = doc.TryGetProperty("secret", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() : null;
+            _setupQrUrl = doc.TryGetProperty("otpAuthUrl", out var u) && u.ValueKind == JsonValueKind.String ? u.GetString()
+                        : doc.TryGetProperty("uri", out var u2) && u2.ValueKind == JsonValueKind.String ? u2.GetString() : null;
+            _setupQrSvg = _setupQrUrl is not null ? GenerateQrSvg(_setupQrUrl) : null;
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+        finally { _busy = false; }
+    }
+
+    private void CancelSetup() { _setup = null; _setupSecret = null; _setupQrUrl = null; _setupQrSvg = null; _otp = null; }
+
+    private static string GenerateQrSvg(string content)
+    {
+        // QRCoder 1.6.0 has no SvgQRCodeOptions type; use the (pixelsPerModule, darkHex, lightHex,
+        // drawQuietZones, sizingMode, logo) overload directly.
+        using var gen = new QRCodeGenerator();
+        var data = gen.CreateQrCode(content, QRCodeGenerator.ECCLevel.Q);
+        return new SvgQRCode(data).GetGraphic(
+            pixelsPerModule: 4,
+            darkColorHex: "#1a1a1a",
+            lightColorHex: "#ffffff",
+            drawQuietZones: true,
+            sizingMode: SvgQRCode.SizingMode.WidthHeightAttribute,
+            logo: null);
+    }
+
+    private async Task ConfirmSetup()
+    {
+        if (string.IsNullOrEmpty(_otp)) return;
+        _busy = true;
+        try
+        {
+            await Client.ConfirmMyMfaAsync(new Dictionary<string, object?> { ["method"] = "totp", ["code"] = _otp });
+            Toast.Success("MFA enabled");
+            CancelSetup();
+            await LoadAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+        finally { _busy = false; }
+    }
+
+    private async Task Disable(string method)
+    {
+        try
+        {
+            await Client.DisableMyMfaMethodAsync(method);
+            Toast.Success($"{method} disabled");
+            await LoadAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+
+    private async Task Regenerate()
+    {
+        _busy = true;
+        try
+        {
+            var doc = await Client.RegenerateMyRecoveryCodesAsync();
+            if (doc.TryGetProperty("codes", out var c) && c.ValueKind == JsonValueKind.Array)
+                _codes = string.Join("\n", c.EnumerateArray()
+                    .Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()));
+            Toast.Success("New codes generated — store them safely.");
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+        finally { _busy = false; }
+    }
+}

@@ -1,0 +1,85 @@
+@page "/device"
+@page "/account/device"
+@attribute [Authorize]
+
+@*
+    BFF-side end-user verification UI for the OAuth 2.0 Device Authorization Grant
+    (RFC 8628 §3.3). The user reaches this page from their browser after kicking off
+    device flow on a constrained device (TV, CLI, ...). They paste the user_code,
+    confirm or deny, and we POST to /api/auth/device/verify which forwards the
+    decision to the host /connect/device/verify endpoint with the cookie-stored
+    access_token as Bearer (no password re-prompt — they're already signed in here).
+*@
+
+<PageTitle>Authorize device — redb.Identity</PageTitle>
+
+<div class="login-backdrop">
+    <div class="login-card">
+        <div class="login-brand">
+            <RdbIcon Name="shield" Size="28" />
+            <span class="login-brand-name">redb.Identity</span>
+        </div>
+
+        <h2 class="login-title">Authorize a device</h2>
+        <p class="login-subtitle">
+            Confirm the code shown on your other device, then choose whether to
+            grant or deny access.
+        </p>
+
+        @if (!string.IsNullOrEmpty(Error))
+        {
+            <div class="login-error" role="alert" aria-live="polite">
+                <RdbIcon Name="alert-circle" Size="16" />
+                <span>@ErrorMessage</span>
+            </div>
+        }
+
+        <form method="post" action="/api/auth/device/verify" class="login-form" autocomplete="off">
+            <AntiforgeryToken />
+
+            <div class="float-field">
+                <input id="user_code" name="user_code" type="text" inputmode="text"
+                       autocapitalize="characters" maxlength="20" placeholder=" "
+                       value="@(User_Code ?? string.Empty)" autofocus required
+                       aria-describedby="user_code_help" />
+                <label for="user_code">User code</label>
+            </div>
+            <p id="user_code_help" style="font-size:0.8125rem; color:var(--text-muted); margin-top:calc(-1 * var(--space-2));">
+                Enter the code exactly as it appears on your other device.
+            </p>
+
+            <div class="login-actions" style="display:flex; gap:var(--space-3);">
+                <button type="submit" name="action" value="allow" class="btn btn-primary login-btn" style="flex:1;">
+                    <RdbIcon Name="check" Size="16" />
+                    <span>Allow</span>
+                </button>
+                <button type="submit" name="action" value="deny" class="btn btn-secondary login-btn" style="flex:1;">
+                    <RdbIcon Name="x" Size="16" />
+                    <span>Deny</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] public HttpContext? HttpContext { get; set; }
+    [SupplyParameterFromQuery(Name = "user_code")] public string? User_Code { get; set; }
+    [SupplyParameterFromQuery] public string? Error { get; set; }
+    [SupplyParameterFromQuery(Name = "error_detail")] public string? ErrorDetail { get; set; }
+
+    // Maps OAuth-style error codes from the host (and BFF-local sentinels) to
+    // user-visible copy. Falls back to the server-provided detail when present.
+    private string ErrorMessage => Error switch
+    {
+        "missing_user_code" => "Please enter the user code shown on your device.",
+        "invalid_grant" => "That user code is invalid, expired, or has already been used.",
+        "expired_token" => "That user code has expired. Restart device sign-in on your other device.",
+        "access_denied" => "Access was not granted.",
+        "invalid_action" => "Invalid choice. Please try Allow or Deny.",
+        "verify_failed" => string.IsNullOrEmpty(ErrorDetail) ? "Could not verify the device. Please try again." : ErrorDetail!,
+        "transport_error" => "Could not reach the identity server. Please try again.",
+        null or "" => "",
+        _ => string.IsNullOrEmpty(ErrorDetail) ? "Device verification failed. Please try again." : ErrorDetail!
+    };
+}

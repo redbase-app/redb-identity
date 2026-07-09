@@ -1,0 +1,153 @@
+@page "/admin/applications/{Id}"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+@using redb.Identity.Web.Components.Pages.Admin.ApplicationDetailTabs
+
+@*
+    Application detail — WSO2 IS 7.x-style detail-with-tabs page.
+
+    URL: /admin/applications/{id}#tab=protocol  (deep-linkable via UiTabBar)
+
+    Layout:
+        ┌──── UiPageHeader ────────────────────────────────────────┐
+        │  ← Go back to Applications                               │
+        │  [M]  {DisplayName}                                      │
+        │       [client_type] [consent_type]                       │
+        └──────────────────────────────────────────────────────────┘
+
+        [General] [Protocol] [Authorization] [Info]   ← UiTabBar
+
+        @switch (_activeTab) { ... }
+*@
+
+@if (_loading)
+{
+    <p class="text-secondary">Loading…</p>
+}
+else if (_error is not null)
+{
+    <p class="text-error">@_error</p>
+    <NavLink class="btn btn-secondary" href="/admin/applications">Back to Applications</NavLink>
+}
+else if (_app is not null)
+{
+    <UiPageHeader BackLink="/admin/applications"
+                  BackLabel="Go back to Applications"
+                  Title="@(_app.DisplayName ?? _app.ClientId ?? "Untitled application")"
+                  Avatar="@AvatarLetter(_app)">
+        <Badges>
+            @if (!string.IsNullOrEmpty(_app.ClientType))
+            {
+                <RdbBadge Text="@_app.ClientType" Variant="@TypeVariant(_app.ClientType)" ShowDot="false" />
+            }
+            @if (!string.IsNullOrEmpty(_app.ConsentType))
+            {
+                <RdbBadge Text="@($"consent: {_app.ConsentType}")" Variant="info" ShowDot="false" />
+            }
+        </Badges>
+    </UiPageHeader>
+
+    <UiTabBar @bind-ActiveTab="_activeTab" Tabs="_tabs" AriaLabel="Application sections" />
+
+    @switch (_activeTab)
+    {
+        case "general":
+            <ApplicationGeneralTab App="_app" OnRefresh="LoadAsync" OnDeleted="OnDeleted" />
+            break;
+        case "protocol":
+            <ApplicationProtocolTab App="_app" OnRefresh="LoadAsync" />
+            break;
+        case "user-attributes":
+            <ApplicationUserAttributesTab App="_app" />
+            break;
+        case "authorization":
+            <ApplicationAuthorizationTab App="_app" OnRefresh="LoadAsync" />
+            break;
+        case "roles":
+            <ApplicationRolesTab App="_app" />
+            break;
+        case "provisioning":
+            <ApplicationProvisioningTab App="_app" />
+            break;
+        case "advanced":
+            <ApplicationAdvancedTab App="_app" OnRefresh="LoadAsync" />
+            break;
+        case "info":
+            <ApplicationInfoTab App="_app" />
+            break;
+        default:
+            <p class="text-secondary">Unknown tab.</p>
+            break;
+    }
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    private ApplicationResponse? _app;
+    private bool _loading = true;
+    private string? _error;
+    private string _activeTab = "general";
+
+    // Order matters — it's the deep-link order users will see in the URL hash
+    // and the visual order in the strip.
+    private readonly IReadOnlyList<UiTabBar.Tab> _tabs = new[]
+    {
+        new UiTabBar.Tab("general", "General"),
+        new UiTabBar.Tab("protocol", "Protocol"),
+        new UiTabBar.Tab("user-attributes", "User Attributes"),
+        new UiTabBar.Tab("authorization", "Authorization"),
+        new UiTabBar.Tab("roles", "Roles"),
+        new UiTabBar.Tab("provisioning", "Provisioning"),
+        new UiTabBar.Tab("advanced", "Advanced"),
+        new UiTabBar.Tab("info", "Info"),
+    };
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _app = await Client.GetApplicationAsync(Id);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _app = null;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OnDeleted()
+    {
+        // General tab notified us the user just hard-deleted this application.
+        // Navigate back to the list — the detail page can no longer load.
+        Toast.Success("Application deleted");
+        Nav.NavigateTo("/admin/applications");
+    }
+
+    private static string AvatarLetter(ApplicationResponse a)
+    {
+        var source = a.DisplayName ?? a.ClientId ?? "?";
+        return string.IsNullOrEmpty(source)
+            ? "?"
+            : source.Substring(0, 1).ToUpperInvariant();
+    }
+
+    private static string TypeVariant(string? clientType) =>
+        clientType?.ToLowerInvariant() switch
+        {
+            "public" => "info",
+            "confidential" => "online",
+            _ => "info"
+        };
+}

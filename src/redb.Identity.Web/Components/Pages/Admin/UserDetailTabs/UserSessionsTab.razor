@@ -1,0 +1,199 @@
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+@*
+    User > Sessions tab — active sessions for this user.
+
+    Backend: ListSessionsAsync(userId) returns a JsonElement. We tolerate
+    the {items: [...]} envelope shape and a bare array, same defensive
+    parse the other tabs use.
+
+    Actions:
+      - Revoke one session by session id (RevokeSessionAsync).
+      - Terminate all the user's sessions (RevokeAllUserSessionsAsync).
+*@
+
+<section class="app-detail__section">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: var(--space-3);">
+        <h3 class="app-detail__section-title" style="margin:0; border:0; padding:0;">Active sessions</h3>
+        @if (_sessions.Count > 0)
+        {
+            <button class="btn btn-danger btn-sm" @onclick="TerminateAllAsync" disabled="@_mutating">
+                @(_mutating ? "Working…" : "Terminate all")
+            </button>
+        }
+    </div>
+
+    @if (_loading)
+    {
+        <p class="text-secondary">Loading…</p>
+    }
+    else if (_error is not null)
+    {
+        <p class="text-error">@_error</p>
+    }
+    else if (_sessions.Count == 0)
+    {
+        <UiEmptyState Variant="inline"
+                      Title="No active sessions"
+                      Description="This user has no live sign-in sessions at the moment." />
+    }
+    else
+    {
+        <ul class="app-detail__assignment-list">
+            @foreach (var s in _sessions)
+            {
+                <li class="app-detail__assignment-row">
+                    <div class="app-detail__assignment-info">
+                        <strong>@(s.Display ?? "Session " + s.Id)</strong>
+                        <p class="text-secondary">
+                            @if (!string.IsNullOrEmpty(s.IpAddress))
+                            {
+                                <span>@s.IpAddress</span><span> · </span>
+                            }
+                            @if (s.LastAccessed is { } la)
+                            {
+                                <span title="@la.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")">
+                                    last @RelativeTime(la)
+                                    @if (!string.IsNullOrEmpty(s.LastAccessedBy))
+                                    {
+                                        <span class="text-tertiary"> (@s.LastAccessedBy)</span>
+                                    }
+                                </span>
+                            }
+                            else if (s.Started is { } st)
+                            {
+                                <span title="@st.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")">
+                                    started @RelativeTime(st)
+                                </span>
+                            }
+                        </p>
+                    </div>
+                    <button class="btn btn-sm btn-danger"
+                            @onclick="@(() => RevokeAsync(s.Id))"
+                            disabled="@_mutating">
+                        Revoke
+                    </button>
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public UserResponse User { get; set; } = default!;
+
+    private readonly List<SessionRow> _sessions = new();
+    private bool _loading = true;
+    private bool _mutating;
+    private string? _error;
+
+    private sealed record SessionRow(long Id, string? Display, string? IpAddress, DateTimeOffset? Started, DateTimeOffset? LastAccessed, string? LastAccessedBy);
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        _sessions.Clear();
+        try
+        {
+            var doc = await Client.ListSessionsAsync(User.Id);
+            void Visit(JsonElement el)
+            {
+                long id = 0;
+                if (el.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number)
+                    id = idEl.GetInt64();
+                else if (el.TryGetProperty("sessionId", out var sidEl) && sidEl.ValueKind == JsonValueKind.Number)
+                    id = sidEl.GetInt64();
+                if (id <= 0) return;
+
+                string? display = TryString(el, "userAgent") ?? TryString(el, "displayName") ?? TryString(el, "device");
+                string? ip = TryString(el, "ipAddress") ?? TryString(el, "ip");
+                DateTimeOffset? started = TryDate(el, "startedAt") ?? TryDate(el, "createdAt");
+                DateTimeOffset? last = TryDate(el, "lastAccessedAt") ?? TryDate(el, "modifiedAt");
+                string? lastBy = TryString(el, "lastAccessedBy");
+                _sessions.Add(new SessionRow(id, display, ip, started, last, lastBy));
+            }
+            if (doc.ValueKind == JsonValueKind.Object &&
+                doc.TryGetProperty("items", out var arr) &&
+                arr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in arr.EnumerateArray()) Visit(el);
+            }
+            else if (doc.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in doc.EnumerateArray()) Visit(el);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private static string? TryString(JsonElement el, string name) =>
+        el.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+
+    private static DateTimeOffset? TryDate(JsonElement el, string name) =>
+        el.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String &&
+        DateTimeOffset.TryParse(p.GetString(), out var dt) ? dt : null;
+
+    private static string RelativeTime(DateTimeOffset when)
+    {
+        var d = DateTimeOffset.UtcNow - when;
+        if (d.TotalSeconds < 60) return "just now";
+        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes} min ago";
+        if (d.TotalHours < 24) return $"{(int)d.TotalHours} h ago";
+        if (d.TotalDays < 7) return $"{(int)d.TotalDays} d ago";
+        if (d.TotalDays < 30) return $"{(int)(d.TotalDays / 7)} w ago";
+        if (d.TotalDays < 365) return $"{(int)(d.TotalDays / 30)} mo ago";
+        return $"{(int)(d.TotalDays / 365)} y ago";
+    }
+
+    private async Task RevokeAsync(long sessionId)
+    {
+        if (_mutating) return;
+        _mutating = true;
+        try
+        {
+            await Client.RevokeSessionAsync(sessionId);
+            Toast.Success("Session revoked");
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _mutating = false;
+        }
+    }
+
+    private async Task TerminateAllAsync()
+    {
+        if (_mutating) return;
+        _mutating = true;
+        try
+        {
+            await Client.RevokeAllUserSessionsAsync(User.Id);
+            Toast.Success("All sessions revoked");
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _mutating = false;
+        }
+    }
+}

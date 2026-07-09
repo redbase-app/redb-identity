@@ -1,0 +1,115 @@
+/* UiUndoToast — singleton snackbar with an inline Undo button and a
+   countdown progress bar. Positioned bottom-left so it doesn't fight
+   with RdbToast (bottom-right) or CookieBanner (bottom-full-width). */
+
+.ui-undo-toast {
+    position: fixed;
+    bottom: var(--space-6);
+    left: var(--space-6);
+    z-index: 1000;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 320px;
+    max-width: 520px;
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    /* Slide-in from bottom-left. Single keyframe so the toast is gone after
+       its prompt resolves and the element unmounts. */
+    animation: ui-undo-toast-in var(--transition-base) ease;
+    overflow: hidden;
+}
+
+@keyframes ui-undo-toast-in {
+    from {
+        transform: translateY(8px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.ui-undo-toast__message {
+    flex: 1;
+    font-size: var(--font-size-sm);
+    min-width: 0;
+    /* Long messages wrap rather than push the Undo button off-screen. */
+    overflow-wrap: anywhere;
+}
+
+.ui-undo-toast__undo {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    color: var(--accent);
+    font-family: inherit;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    cursor: pointer;
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    transition: background var(--transition-fast);
+}
+
+.ui-undo-toast__undo:hover {
+    background: var(--accent-light);
+}
+
+.ui-undo-toast__close {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    padding: var(--space-1);
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ui-undo-toast__close:hover {
+    color: var(--text-secondary);
+    background: var(--bg-surface-hover);
+}
+
+/* Bottom-edge progress strip — fills 100→0 over the prompt's DurationMs.
+   Pure CSS animation so we don't call back into Blazor every tick. */
+.ui-undo-toast__progress {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 3px;
+    background: var(--accent);
+    width: 100%;
+    transform-origin: left center;
+    animation-name: ui-undo-toast-countdown;
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+}
+
+@keyframes ui-undo-toast-countdown {
+    from { transform: scaleX(1); }
+    to   { transform: scaleX(0); }
+}
+
+/* Reduced-motion users: keep the toast visible but drop the slide-in and
+   replace the linear countdown with a static colour change at midpoint.
+   That still communicates urgency without animation. */
+@media (prefers-reduced-motion: reduce) {
+    .ui-undo-toast {
+        animation: none;
+    }
+    .ui-undo-toast__progress {
+        animation: none;
+        background: var(--accent-light);
+    }
+}

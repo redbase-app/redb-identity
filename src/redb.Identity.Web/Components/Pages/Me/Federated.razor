@@ -1,0 +1,71 @@
+@page "/me/federated"
+@attribute [Authorize]
+@inject IIdentityClient Client
+
+<RdbPageHeader Title="Federated identities" Description="External identity providers linked to your account." />
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Linked accounts</span>
+        <button class="btn btn-sm btn-secondary" @onclick="LoadAsync">Refresh</button>
+    </div>
+
+    @if (_loading) { <p class="text-secondary">Loading…</p> }
+    else if (_error is not null) { <p class="text-error">@_error</p> }
+    else if (_items.Count == 0) { <p class="text-secondary">No federated accounts linked.</p> }
+    else
+    {
+        <table class="data-table">
+            <thead><tr><th>Provider</th><th>External subject</th><th>Linked at</th></tr></thead>
+            <tbody>
+                @foreach (var (provider, ident) in _items)
+                {
+                    <tr>
+                        <td><strong>@provider</strong></td>
+                        <td class="text-secondary" style="font-family: var(--font-mono); font-size: var(--font-size-xs);">
+                            @(GetStr(ident, "subject") ?? GetStr(ident, "sub") ?? "—")
+                        </td>
+                        <td class="text-secondary">@(GetStr(ident, "linkedAt") ?? GetStr(ident, "createdAt") ?? "—")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <p class="text-secondary" style="margin-top: var(--space-3);">
+        Linking and unlinking external providers is performed via the OIDC federation flow on the host.
+    </p>
+</div>
+
+@code {
+    private readonly List<(string Provider, JsonElement Identity)> _items = new();
+    private bool _loading = true;
+    private string? _error;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null; _items.Clear();
+        try
+        {
+            var doc = await Client.GetMyProfileAsync();
+            if (doc.TryGetProperty("externalIdentities", out var ei) && ei.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var p in ei.EnumerateObject())
+                    _items.Add((p.Name, p.Value.Clone()));
+            }
+            else if (doc.TryGetProperty("external_identities", out var ei2) && ei2.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var p in ei2.EnumerateObject())
+                    _items.Add((p.Name, p.Value.Clone()));
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private static string? GetStr(JsonElement e, string p)
+        => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(p, out var v) && v.ValueKind == JsonValueKind.String
+            ? v.GetString() : null;
+}

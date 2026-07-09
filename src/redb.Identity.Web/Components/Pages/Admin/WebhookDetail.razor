@@ -1,0 +1,243 @@
+@page "/admin/webhooks/{Id:long}"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+<div style="margin-bottom: var(--space-3);">
+    <NavLink href="/admin/webhooks" class="btn btn-ghost" style="padding: 0; color: var(--accent-primary);">← Go back to Webhooks</NavLink>
+</div>
+
+@if (_loading) { <p class="text-secondary">Loading…</p> }
+else if (_error is not null) { <p class="text-error">@_error</p> }
+else if (_w is not null)
+{
+    <div style="display:flex; gap: var(--space-4); align-items: flex-start; margin-bottom: var(--space-4);">
+        <div class="apps-list__avatar" style="font-size: 1.5rem; width: 56px; height: 56px;">@(_w.DisplayName?[0] ?? 'W')</div>
+        <div style="flex: 1;">
+            <h1 style="margin: 0;">@(_w.DisplayName ?? "(no name)")</h1>
+            <div style="display:flex; gap: var(--space-2); margin-top: var(--space-1);">
+                @if (_w.Enabled) { <RdbBadge Text="enabled" Variant="online" /> } else { <RdbBadge Text="disabled" Variant="offline" /> }
+                @if (_w.HasHmacSecret) { <RdbBadge Text="secret set" Variant="online" /> } else { <RdbBadge Text="NO SECRET" Variant="error" /> }
+            </div>
+            <p class="text-secondary" style="margin-top: var(--space-2);"><code>@_w.Url</code></p>
+        </div>
+        <div style="display:flex; gap: var(--space-2);">
+            <button class="btn btn-secondary" @onclick="RotateSecret">Rotate secret</button>
+            <button class="btn btn-danger" @onclick="DeleteWebhook">Delete</button>
+        </div>
+    </div>
+
+    <UiTabBar @bind-ActiveTab="_tab" Tabs="@Tabs" AriaLabel="Webhook sections" />
+
+    <div class="card" style="margin-top: var(--space-4);">
+        @if (_tab == "overview")
+        {
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">Configuration</h3>
+                <dl class="app-detail__kv">
+                    <dt>Internal id</dt><dd><code>@_w.Id</code></dd>
+                    <dt>URL</dt><dd><code>@_w.Url</code></dd>
+                    <dt>Filter</dt><dd><code>@_w.EventTypeFilter</code></dd>
+                    <dt>Enabled</dt><dd>@(_w.Enabled ? "yes" : "no")</dd>
+                    <dt>Timeout</dt><dd>@_w.TimeoutMs ms per attempt</dd>
+                    <dt>Max attempts</dt><dd>@_w.MaxAttempts</dd>
+                    <dt>Retry backoff (base)</dt><dd>@_w.RetryBackoffMs ms — exponential 2× per attempt</dd>
+                    @if (_w.ExtraHeaders is { Count: > 0 })
+                    {
+                        <dt>Extra headers</dt>
+                        <dd>
+                            <ul>
+                                @foreach (var h in _w.ExtraHeaders)
+                                {
+                                    <li><code>@h.Key</code>: <code>@h.Value</code></li>
+                                }
+                            </ul>
+                        </dd>
+                    }
+                </dl>
+            </section>
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">Signing</h3>
+                <p class="text-secondary" style="font-size: var(--font-size-sm);">
+                    Each delivery carries:<br />
+                    <code>X-RedbIdentity-Signature</code> = <code>sha256=&lt;hex&gt;</code><br />
+                    <code>X-RedbIdentity-Timestamp</code> = ISO-8601 UTC<br />
+                    <code>X-RedbIdentity-Delivery</code> = per-attempt GUID (use for receiver-side dedupe)<br />
+                    <code>X-RedbIdentity-EventType</code> = canonical event id<br />
+                    <code>X-RedbIdentity-Attempt</code> = 1..MaxAttempts<br /><br />
+                    Receiver verifies by recomputing
+                    <code>HMAC-SHA256(secret, timestamp + "." + body)</code> and
+                    comparing the hex-encoded signature in constant time.
+                </p>
+            </section>
+        }
+        else if (_tab == "settings")
+        {
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">Edit</h3>
+
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">URL *</span>
+                    <input class="app-detail__input app-detail__input--mono" value="@_edit.Url"
+                           @oninput="@(e => _edit.Url = e.Value?.ToString() ?? string.Empty)" />
+                </label>
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Display name</span>
+                    <input class="app-detail__input" value="@_edit.DisplayName"
+                           @oninput="@(e => _edit.DisplayName = e.Value?.ToString() ?? string.Empty)" />
+                </label>
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Event type filter</span>
+                    <input class="app-detail__input app-detail__input--mono" value="@_edit.EventTypeFilter"
+                           @oninput="@(e => _edit.EventTypeFilter = e.Value?.ToString() ?? string.Empty)" />
+                </label>
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Timeout (ms)</span>
+                    <input type="number" class="app-detail__input" value="@_edit.TimeoutMs"
+                           @oninput="@(e => OnTimeoutChanged(e.Value?.ToString()))" />
+                </label>
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Max attempts</span>
+                    <input type="number" class="app-detail__input" value="@_edit.MaxAttempts"
+                           @oninput="@(e => OnMaxAttemptsChanged(e.Value?.ToString()))" />
+                </label>
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Retry backoff (ms)</span>
+                    <input type="number" class="app-detail__input" value="@_edit.RetryBackoffMs"
+                           @oninput="@(e => OnRetryBackoffChanged(e.Value?.ToString()))" />
+                </label>
+                <label style="display:flex; gap: var(--space-2); align-items:center;">
+                    <input type="checkbox" @bind="_edit.Enabled" /> Enabled
+                </label>
+
+                <div class="app-detail__submit-row">
+                    <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">
+                        @(_saving ? "Saving…" : "Save")
+                    </button>
+                    @if (_saveError is not null) { <span class="text-error">@_saveError</span> }
+                </div>
+            </section>
+        }
+    </div>
+}
+
+@if (_rotateSecret is not null)
+{
+    <div class="modal-backdrop" @onclick="@(() => _rotateSecret = null)">
+        <div class="modal" @onclick:stopPropagation="true" style="max-width: 560px;">
+            <h3>New HMAC secret</h3>
+            <p class="text-secondary">
+                Copy now — server side keeps it hashed; we cannot show it again.
+                Receivers MUST be updated to verify with this new value.
+            </p>
+            <code style="display:block; padding: var(--space-3); background: var(--bg-tertiary); border-radius: var(--border-radius); word-break: break-all; font-size: var(--font-size-sm);">@_rotateSecret</code>
+            <div class="modal-actions">
+                <button class="btn btn-primary" @onclick="@(() => _rotateSecret = null)">Done</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public long Id { get; set; }
+
+    private bool _loading = true;
+    private string? _error;
+    private WebhookSubscriptionResponse? _w;
+    private string _tab = "overview";
+
+    private EditState _edit = new();
+    private bool _saving;
+    private string? _saveError;
+    private string? _rotateSecret;
+
+    private IReadOnlyList<UiTabBar.Tab> Tabs => new[]
+    {
+        new UiTabBar.Tab("overview", "Overview"),
+        new UiTabBar.Tab("settings", "Settings"),
+    };
+
+    private sealed class EditState
+    {
+        public string Url = "";
+        public string? DisplayName;
+        public string EventTypeFilter = "*";
+        public bool Enabled = true;
+        public int TimeoutMs = 5000;
+        public int MaxAttempts = 3;
+        public int RetryBackoffMs = 500;
+    }
+
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    private void OnTimeoutChanged(string? raw) => _edit.TimeoutMs = int.TryParse(raw, out var v) ? v : _edit.TimeoutMs;
+    private void OnMaxAttemptsChanged(string? raw) => _edit.MaxAttempts = int.TryParse(raw, out var v) ? v : _edit.MaxAttempts;
+    private void OnRetryBackoffChanged(string? raw) => _edit.RetryBackoffMs = int.TryParse(raw, out var v) ? v : _edit.RetryBackoffMs;
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            _w = await Client.GetWebhookAsync(Id);
+            _edit = new EditState
+            {
+                Url = _w.Url,
+                DisplayName = _w.DisplayName,
+                EventTypeFilter = _w.EventTypeFilter,
+                Enabled = _w.Enabled,
+                TimeoutMs = _w.TimeoutMs,
+                MaxAttempts = _w.MaxAttempts,
+                RetryBackoffMs = _w.RetryBackoffMs,
+            };
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_saving) return;
+        _saving = true; _saveError = null;
+        try
+        {
+            await Client.UpdateWebhookAsync(Id, new UpdateWebhookSubscriptionRequest
+            {
+                Url = string.IsNullOrWhiteSpace(_edit.Url) ? null : _edit.Url.Trim(),
+                DisplayName = string.IsNullOrWhiteSpace(_edit.DisplayName) ? null : _edit.DisplayName,
+                EventTypeFilter = string.IsNullOrWhiteSpace(_edit.EventTypeFilter) ? "*" : _edit.EventTypeFilter,
+                Enabled = _edit.Enabled,
+                TimeoutMs = _edit.TimeoutMs,
+                MaxAttempts = _edit.MaxAttempts,
+                RetryBackoffMs = _edit.RetryBackoffMs,
+            });
+            Toast.Success("Saved");
+            await LoadAsync();
+        }
+        catch (Exception ex) { _saveError = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task RotateSecret()
+    {
+        try
+        {
+            var resp = await Client.RotateWebhookSecretAsync(Id);
+            _rotateSecret = resp.HmacSecret;
+            await LoadAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+
+    private async Task DeleteWebhook()
+    {
+        try
+        {
+            await Client.DeleteWebhookAsync(Id);
+            Toast.Success("Deleted");
+            Nav.NavigateTo("/admin/webhooks");
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+}

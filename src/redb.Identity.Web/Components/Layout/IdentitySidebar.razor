@@ -1,0 +1,131 @@
+@* Identity admin sidebar — navigation for /admin/* routes. *@
+
+<aside class="sidebar">
+    <div class="sidebar-brand">
+        <RdbIcon Name="shield" Size="24" />
+        <span class="sidebar-brand-text">redb.Identity</span>
+    </div>
+
+    <nav class="sidebar-nav">
+        <div class="sidebar-group">
+            <span class="sidebar-group-label">Overview</span>
+            <NavLink class="sidebar-link" href="" Match="NavLinkMatch.All">
+                <RdbIcon Name="dashboard" Size="18" />
+                <span>Home</span>
+            </NavLink>
+            <NavLink class="sidebar-link" href="admin">
+                <RdbIcon Name="activity" Size="18" />
+                <span>Dashboard</span>
+            </NavLink>
+        </div>
+
+        <div class="sidebar-group">
+            <span class="sidebar-group-label">Account</span>
+            <NavLink class="sidebar-link" href="me/profile">
+                <RdbIcon Name="info" Size="18" />
+                <span>My profile</span>
+            </NavLink>
+            <NavLink class="sidebar-link" href="me/sessions">
+                <RdbIcon Name="terminal" Size="18" />
+                <span>My sessions</span>
+            </NavLink>
+            <NavLink class="sidebar-link" href="me/mfa">
+                <RdbIcon Name="shield" Size="18" />
+                <span>MFA</span>
+            </NavLink>
+            <NavLink class="sidebar-link" href="me/webauthn">
+                <RdbIcon Name="zap" Size="18" />
+                <span>Security keys</span>
+            </NavLink>
+            <NavLink class="sidebar-link" href="me/password">
+                <RdbIcon Name="info" Size="18" />
+                <span>Password</span>
+            </NavLink>
+            <NavLink class="sidebar-link" href="me/federated">
+                <RdbIcon Name="cluster" Size="18" />
+                <span>Federated</span>
+            </NavLink>
+            <NavLink class="sidebar-link" href="me/consents">
+                <RdbIcon Name="clock" Size="18" />
+                <span>Consents</span>
+            </NavLink>
+        </div>
+
+        @* Administration section. Policy="identity.*.manage" gates were dropped
+           in N7-x: those policies require a `scope` claim on the ClaimsPrincipal,
+           but the cookie-based BFF flow stores the AT in AuthenticationProperties
+           and does NOT project AT scopes onto user claims — so even an admin
+           token would silently hide every link. Pages themselves still enforce
+           [Authorize] and the management API enforces scope server-side, so
+           unauthorised callers see a 403 from the call rather than a hidden link.
+           See IDENTITY_WEB_REDESIGN_PLAN.md → "sidebar policy gates" for the
+           full rationale. *@
+        <AuthorizeView>
+            <Authorized>
+                <div class="sidebar-group">
+                    <span class="sidebar-group-label">Administration</span>
+                    <NavLink class="sidebar-link" href="admin/users">
+                        <RdbIcon Name="server" Size="18" />
+                        <span>Users</span>
+                    </NavLink>
+                    <NavLink class="sidebar-link" href="admin/groups">
+                        <RdbIcon Name="cluster" Size="18" />
+                        <span>Groups</span>
+                    </NavLink>
+                    <NavLink class="sidebar-link" href="admin/applications">
+                        <RdbIcon Name="package" Size="18" />
+                        <span>Applications</span>
+                    </NavLink>
+                    <NavLink class="sidebar-link" href="admin/scopes">
+                        <RdbIcon Name="zap" Size="18" />
+                        <span>Scopes</span>
+                    </NavLink>
+                    <NavLink class="sidebar-link" href="admin/claim-mappers">
+                        <RdbIcon Name="zap" Size="18" />
+                        <span>Claim mappers</span>
+                    </NavLink>
+                    <NavLink class="sidebar-link" href="admin/claim-scopes">
+                        <RdbIcon Name="zap" Size="18" />
+                        <span>Claim scopes</span>
+                    </NavLink>
+                    <NavLink class="sidebar-link" href="admin/claim-definitions">
+                        <RdbIcon Name="zap" Size="18" />
+                        <span>Claim definitions</span>
+                    </NavLink>
+                    <NavLink class="sidebar-link" href="admin/roles">
+                        <RdbIcon Name="zap" Size="18" />
+                        <span>Roles</span>
+                    </NavLink>
+                    <NavLink class="sidebar-link" href="admin/webhooks">
+                        <RdbIcon Name="cluster" Size="18" />
+                        <span>Webhooks</span>
+                    </NavLink>
+                    <NavLink class="sidebar-link" href="admin/federation">
+                        <RdbIcon Name="cluster" Size="18" />
+                        <span>Federation</span>
+                    </NavLink>
+                    <NavLink class="sidebar-link" href="admin/sessions">
+                        <RdbIcon Name="terminal" Size="18" />
+                        <span>Sessions</span>
+                    </NavLink>
+                    <NavLink class="sidebar-link" href="admin/tokens">
+                        <RdbIcon Name="shield" Size="18" />
+                        <span>Tokens</span>
+                    </NavLink>
+                    <NavLink class="sidebar-link" href="admin/scim">
+                        <RdbIcon Name="info" Size="18" />
+                        <span>SCIM browser</span>
+                    </NavLink>
+                    <NavLink class="sidebar-link" href="admin/settings">
+                        <RdbIcon Name="settings" Size="18" />
+                        <span>Settings</span>
+                    </NavLink>
+                    <NavLink class="sidebar-link" href="admin/audit">
+                        <RdbIcon Name="clock" Size="18" />
+                        <span>Audit log</span>
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+    </nav>
+</aside>

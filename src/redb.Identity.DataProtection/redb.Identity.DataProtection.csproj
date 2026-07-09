@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>redb.Identity.DataProtection</AssemblyName>
+    <RootNamespace>redb.Identity.DataProtection</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Phase 9 (9a): redb-backed ASP.NET DataProtection key repository, extracted from
+      redb.Identity.Core so that any Identity facade (Http, gRPC, …) can persist its
+      cookie / state-protector key-ring in redb without taking a project-reference on
+      Core. Contains only the key XML repo + DI extension; everything that depends on
+      RedbIdentityOptions (at-rest encryption, refresh route, lifecycle init) stays in
+      Core where the option type lives.
+    -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="9.0.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="redb.Core" Version="3.3.0" />
+  </ItemGroup>
+
+</Project>
+

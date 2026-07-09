@@ -1,0 +1,294 @@
+@page "/admin/settings"
+@attribute [Authorize]
+@using Microsoft.Extensions.Options
+@using redb.Identity.Web.Configuration
+@inject IIdentityClient Client
+@inject IOptions<IdentityWebOptions> IdentityOpts
+@inject ToastService Toast
+
+<RdbPageHeader Title="Settings" Description="Identity tenant configuration and live diagnostics." />
+
+@{
+    var authority = IdentityOpts.Value.Authority.TrimEnd('/');
+    var discoveryUrl = !string.IsNullOrWhiteSpace(IdentityOpts.Value.MetadataAddress)
+        ? IdentityOpts.Value.MetadataAddress
+        : $"{authority}/.well-known/openid-configuration";
+    // Server exposes /.well-known/jwks (no .json) — keep this consistent with
+    // discovery.jwks_uri so the link the operator opens is the one the SDK hits.
+    var jwksUrl = $"{authority}/.well-known/jwks";
+    var scimUrl = $"{authority}/scim/v2";
+}
+
+<div style="display:flex; flex-direction:column; gap: var(--space-4);">
+
+    <RdbCard Title="Identity authority" Icon="globe">
+        <ChildContent>
+            <table class="data-table">
+                <tbody>
+                    <tr>
+                        <td class="text-secondary" style="width:180px">Authority</td>
+                        <td><code>@authority</code></td>
+                    </tr>
+                    <tr>
+                        <td class="text-secondary">API base URL</td>
+                        <td><code>@IdentityOpts.Value.ApiBaseUrl</code></td>
+                    </tr>
+                    <tr>
+                        <td class="text-secondary">Issuer</td>
+                        <td>
+                            @if (_discovery.ValueKind != JsonValueKind.Undefined
+                                 && _discovery.TryGetProperty("issuer", out var issEl))
+                            {
+                                <code>@issEl.GetString()</code>
+                            }
+                            else { <span class="text-secondary">—</span> }
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="text-secondary">Endpoints</td>
+                        <td style="display:flex; gap: var(--space-3); flex-wrap:wrap;">
+                            <a href="@discoveryUrl" target="_blank" rel="noopener noreferrer">openid-configuration ↗</a>
+                            <a href="@jwksUrl" target="_blank" rel="noopener noreferrer">jwks ↗</a>
+                            <a href="@scimUrl" target="_blank" rel="noopener noreferrer">scim/v2 ↗</a>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </ChildContent>
+    </RdbCard>
+
+    <RdbCard Title="Authority status" Icon="activity">
+        <HeaderExtra>
+            <button class="btn btn-ghost btn-sm" @onclick="RefreshAllAsync">
+                <RdbIcon Name="refresh-cw" Size="14" /> Refresh
+            </button>
+        </HeaderExtra>
+        <ChildContent>
+            @* Discovery + JWKS are themselves the liveness probe — when both
+               resolve cleanly the authority is alive. No separate /health
+               endpoint required (Tsak exposes /api/health/{startup,live,ready}
+               on the Worker management port, not the public HTTP facade). *@
+            <table class="data-table">
+                <tbody>
+                    <tr>
+                        <td class="text-secondary" style="width:180px">Discovery document</td>
+                        <td>
+                            @if (_discoveryLoading) { <span class="text-secondary">Probing…</span> }
+                            else if (_discoveryError is not null) { <RdbBadge Text="error" Variant="error" /> <span class="text-secondary" style="margin-left: var(--space-2);">@_discoveryError</span> }
+                            else { <RdbBadge Text="ok" Variant="online" /> }
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="text-secondary">JWKS</td>
+                        <td>
+                            @if (_jwksLoading) { <span class="text-secondary">Probing…</span> }
+                            else if (_jwksError is not null) { <RdbBadge Text="error" Variant="error" /> <span class="text-secondary" style="margin-left: var(--space-2);">@_jwksError</span> }
+                            else if (_jwks.ValueKind != JsonValueKind.Undefined
+                                     && _jwks.TryGetProperty("keys", out var keysCountEl))
+                            {
+                                <RdbBadge Text="ok" Variant="online" />
+                                <span class="text-secondary" style="margin-left: var(--space-2);">
+                                    @keysCountEl.GetArrayLength() active key@(keysCountEl.GetArrayLength() == 1 ? "" : "s")
+                                </span>
+                            }
+                        </td>
+                    </tr>
+                    @if (_discovery.ValueKind != JsonValueKind.Undefined
+                         && _discovery.TryGetProperty("federation_providers", out var fpEl))
+                    {
+                        <tr>
+                            <td class="text-secondary">Federation providers</td>
+                            <td>
+                                <RdbBadge Text="@($"{fpEl.GetArrayLength()} configured")"
+                                          Variant="@(fpEl.GetArrayLength() > 0 ? "online" : "neutral")" />
+                            </td>
+                        </tr>
+                    }
+                    @if (_discovery.ValueKind != JsonValueKind.Undefined
+                         && _discovery.TryGetProperty("scopes_supported", out var spEl))
+                    {
+                        <tr>
+                            <td class="text-secondary">Scopes supported</td>
+                            <td>
+                                <RdbBadge Text="@($"{spEl.GetArrayLength()} registered")" Variant="online" />
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </ChildContent>
+    </RdbCard>
+
+    <RdbCard Title="Tenant content" Icon="database">
+        <HeaderExtra>
+            <button class="btn btn-ghost btn-sm" @onclick="LoadStatsAsync">
+                <RdbIcon Name="refresh-cw" Size="14" /> Refresh
+            </button>
+        </HeaderExtra>
+        <ChildContent>
+            @if (_statsLoading) { <p class="text-secondary">Loading…</p> }
+            else if (_statsError is not null) { <p class="text-error">@_statsError</p> }
+            else
+            {
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-3);">
+                    @foreach (var stat in _stats)
+                    {
+                        <a href="@stat.Href" class="stat-card"
+                           style="display:block; padding: var(--space-3); border: 1px solid var(--border-color); border-radius: var(--border-radius); text-decoration: none; color: inherit;">
+                            <div class="text-secondary" style="font-size: var(--font-size-sm);">@stat.Label</div>
+                            <div style="font-size: 1.75rem; font-weight: 600; margin-top: var(--space-1);">
+                                @(stat.Value?.ToString() ?? "—")
+                            </div>
+                        </a>
+                    }
+                </div>
+            }
+        </ChildContent>
+    </RdbCard>
+
+    <RdbCard Title="Discovery document" Icon="file-text">
+        <HeaderExtra>
+            <button class="btn btn-ghost btn-sm" @onclick="LoadDiscoveryAsync">
+                <RdbIcon Name="refresh-cw" Size="14" /> Refresh
+            </button>
+        </HeaderExtra>
+        <ChildContent>
+            @if (_discoveryLoading) { <p class="text-secondary">Loading…</p> }
+            else if (_discoveryError is not null) { <p class="text-error">@_discoveryError</p> }
+            else if (_discoveryJson is not null)
+            {
+                <details>
+                    <summary style="cursor:pointer; color: var(--accent-primary); margin-bottom: var(--space-3);">
+                        Show full discovery JSON (@_discoveryJson.Length characters)
+                    </summary>
+                    <JsonViewer Json="@_discoveryJson" />
+                </details>
+            }
+        </ChildContent>
+    </RdbCard>
+
+    <RdbCard Title="JWKS keys" Icon="key">
+        <HeaderExtra>
+            <button class="btn btn-ghost btn-sm" @onclick="LoadJwksAsync">
+                <RdbIcon Name="refresh-cw" Size="14" /> Refresh
+            </button>
+        </HeaderExtra>
+        <ChildContent>
+            @if (_jwksLoading) { <p class="text-secondary">Loading…</p> }
+            else if (_jwksError is not null) { <p class="text-error">@_jwksError</p> }
+            else if (_jwks.ValueKind != JsonValueKind.Undefined
+                     && _jwks.TryGetProperty("keys", out var keysEl))
+            {
+                @if (keysEl.GetArrayLength() == 0)
+                {
+                    <UiEmptyState Variant="inline"
+                                  Title="No active signing keys"
+                                  Description="JWKS endpoint returned an empty key set. New tokens cannot be issued — rotate via /signing-keys/rotate." />
+                }
+                else
+                {
+                    <table class="data-table">
+                        <thead>
+                            <tr><th>kid</th><th>kty</th><th>alg</th><th>use</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var key in keysEl.EnumerateArray())
+                            {
+                                <tr>
+                                    <td><code>@(key.TryGetProperty("kid", out var kid) ? kid.GetString() : "—")</code></td>
+                                    <td>@(key.TryGetProperty("kty", out var kty) ? kty.GetString() : "—")</td>
+                                    <td>@(key.TryGetProperty("alg", out var alg) ? alg.GetString() : "—")</td>
+                                    <td>@(key.TryGetProperty("use", out var use) ? use.GetString() : "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            }
+        </ChildContent>
+    </RdbCard>
+
+</div>
+
+@code {
+    private JsonElement _discovery;
+    private string? _discoveryJson;
+    private bool _discoveryLoading;
+    private string? _discoveryError;
+
+    private JsonElement _jwks;
+    private bool _jwksLoading;
+    private string? _jwksError;
+
+    private record StatCard(string Label, long? Value, string Href);
+    private List<StatCard> _stats = new();
+    private bool _statsLoading;
+    private string? _statsError;
+
+    protected override async Task OnInitializedAsync() => await RefreshAllAsync();
+
+    private async Task RefreshAllAsync()
+    {
+        await Task.WhenAll(LoadDiscoveryAsync(), LoadJwksAsync(), LoadStatsAsync());
+    }
+
+    private async Task LoadDiscoveryAsync()
+    {
+        _discoveryLoading = true;
+        _discoveryError = null;
+        StateHasChanged();
+        try
+        {
+            _discovery = await Client.GetDiscoveryDocumentAsync();
+            _discoveryJson = JsonSerializer.Serialize(_discovery, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (Exception ex) { _discoveryError = ex.Message; _discovery = default; _discoveryJson = null; }
+        finally { _discoveryLoading = false; }
+    }
+
+    private async Task LoadJwksAsync()
+    {
+        _jwksLoading = true;
+        _jwksError = null;
+        StateHasChanged();
+        try { _jwks = await Client.GetJwksAsync(); }
+        catch (Exception ex) { _jwksError = ex.Message; _jwks = default; }
+        finally { _jwksLoading = false; }
+    }
+
+    /// <summary>
+    /// Top-level tenant content gauges. Each card links to the corresponding
+    /// admin page. Counts come from the existing list endpoints with count=1
+    /// — the response carries Total. No new endpoint needed.
+    /// </summary>
+    private async Task LoadStatsAsync()
+    {
+        _statsLoading = true;
+        _statsError = null;
+        try
+        {
+            var tasks = new[]
+            {
+                Probe("Users",        "/admin/users",        async () => (await Client.ListUsersAsync(0, 1)).Total),
+                Probe("Applications", "/admin/applications", async () => (await Client.ListApplicationsAsync(0, 1)).Total),
+                Probe("Scopes",       "/admin/scopes",       async () => (await Client.ListScopesAsync(0, 1)).Total),
+                Probe("Roles",        "/admin/roles",        async () =>
+                {
+                    var r = await Client.SearchRolesAsync(null, null, null, 0, 1);
+                    return r.Total;
+                }),
+                Probe("Webhooks",     "/admin/webhooks",     async () => (await Client.ListWebhooksAsync(0, 1)).Total),
+                Probe("Claim definitions", "/admin/claim-definitions", async () => (await Client.ListClaimDefinitionsAsync(0, 1)).Total),
+            };
+            _stats = (await Task.WhenAll(tasks)).ToList();
+        }
+        catch (Exception ex) { _statsError = ex.Message; }
+        finally { _statsLoading = false; }
+    }
+
+    private static async Task<StatCard> Probe(string label, string href, Func<Task<int>> resolve)
+    {
+        try { return new StatCard(label, await resolve(), href); }
+        catch { return new StatCard(label, null, href); }
+    }
+}

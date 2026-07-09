@@ -1,0 +1,43 @@
+@*
+    N8-4 (BFF UX): global site footer. Renders operator-controlled legal links
+    (Terms of Service / Privacy Policy / Support) bound from configuration
+    via IdentityWebLinksOptions. Each link is omitted when the corresponding
+    URL is not configured, so a deployment with no legal pages renders just
+    the copyright row instead of a broken anchor.
+*@
+@using Microsoft.Extensions.Options
+@using redb.Identity.Web.Configuration
+@inject IOptions<IdentityWebLinksOptions> LinksOptions
+
+@{
+    var links = LinksOptions.Value;
+    var hasTos = !string.IsNullOrWhiteSpace(links.TermsOfService);
+    var hasPrivacy = !string.IsNullOrWhiteSpace(links.PrivacyPolicy);
+    var hasSupport = !string.IsNullOrWhiteSpace(links.Support);
+    var hasAny = hasTos || hasPrivacy || hasSupport;
+}
+
+<footer class="rdb-site-footer" role="contentinfo">
+    <div class="rdb-site-footer-row">
+        <span class="rdb-site-footer-copy">
+            &copy; @DateTime.UtcNow.Year redb.Identity
+        </span>
+        @if (hasAny)
+        {
+            <nav class="rdb-site-footer-links" aria-label="Legal">
+                @if (hasTos)
+                {
+                    <a href="@links.TermsOfService" rel="noopener" target="_blank">Terms of Service</a>
+                }
+                @if (hasPrivacy)
+                {
+                    <a href="@links.PrivacyPolicy" rel="noopener" target="_blank">Privacy Policy</a>
+                }
+                @if (hasSupport)
+                {
+                    <a href="@links.Support" rel="noopener" target="_blank">Support</a>
+                }
+            </nav>
+        }
+    </div>
+</footer>

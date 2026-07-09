@@ -1,0 +1,26 @@
+<Router AppAssembly="@typeof(Program).Assembly">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(Layout.MainLayout)">
+            <NotAuthorized>
+                @{
+                    var ru = Uri.EscapeDataString(Navigation.Uri);
+                    Navigation.NavigateTo($"/account/login?returnUrl={ru}", forceLoad: true);
+                }
+            </NotAuthorized>
+        </AuthorizeRouteView>
+        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    </Found>
+    <NotFound>
+        <LayoutView Layout="@typeof(Layout.MainLayout)">
+            <div class="empty-state">
+                <RdbIcon Name="alert-triangle" Size="48" />
+                <h2>Page not found</h2>
+                <p class="text-secondary">The requested page does not exist.</p>
+            </div>
+        </LayoutView>
+    </NotFound>
+</Router>
+
+@code {
+    [Inject] public NavigationManager Navigation { get; set; } = default!;
+}

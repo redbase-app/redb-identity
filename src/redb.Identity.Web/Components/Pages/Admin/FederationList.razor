@@ -1,0 +1,204 @@
+@page "/admin/federation"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+<RdbPageHeader Title="Federation providers" Description="External OIDC / OAuth identity providers." />
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">All providers</span>
+        <button class="btn btn-primary" @onclick="OpenCreate">
+            <RdbIcon Name="cluster" Size="14" /> New provider
+        </button>
+    </div>
+
+    @if (_loading) { <p class="text-secondary">Loading…</p> }
+    else if (_error is not null) { <p class="text-error">@_error</p> }
+    else if (_items.Count == 0) { <p class="text-secondary">No federation providers configured.</p> }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr><th>Provider ID</th><th>Kind</th><th>Display name</th><th>Authority</th><th>Client ID</th><th>Secret</th><th>Enabled</th><th></th></tr>
+            </thead>
+            <tbody>
+                @foreach (var p in _items)
+                {
+                    <tr>
+                        <td><strong>@p.ProviderId</strong></td>
+                        <td><span class="badge">@p.Kind</span></td>
+                        <td>@p.DisplayName</td>
+                        <td class="text-secondary"><code>@p.Authority</code></td>
+                        <td><code>@p.ClientId</code></td>
+                        <td><RdbBadge Text="@(p.HasSecret ? "set" : "none")" Variant="@(p.HasSecret ? "online" : "offline")" /></td>
+                        <td><RdbBadge Text="@(p.Enabled ? "on" : "off")" Variant="@(p.Enabled ? "online" : "offline")" /></td>
+                        <td style="display:flex; gap:var(--space-1);">
+                            <button class="btn btn-sm" @onclick="() => OpenEdit(p)">Edit</button>
+                            <button class="btn btn-sm btn-danger" @onclick="() => Delete(p)">Delete</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <div style="display:flex; gap: var(--space-2); margin-top: var(--space-3); align-items:center;">
+            <button class="btn btn-sm" @onclick="PrevPage" disabled="@(_offset == 0)">&laquo; Prev</button>
+            <span class="text-secondary">@(_offset + 1)–@(_offset + _items.Count) of @_total</span>
+            <button class="btn btn-sm" @onclick="NextPage" disabled="@(_offset + _items.Count >= _total)">Next &raquo;</button>
+        </div>
+    }
+</div>
+
+@if (_editing is not null)
+{
+    <div class="modal-backdrop" @onclick="CloseModal">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h3>@(string.IsNullOrEmpty(_editing.Id) ? "New federation provider" : $"Edit: {_editing.ProviderId}")</h3>
+
+            @if (string.IsNullOrEmpty(_editing.Id))
+            {
+                <label>Provider ID * <input @bind="_form.ProviderId" placeholder="google, azure-ad, corp-github…" /></label>
+                <label>Kind *
+                    <select @bind="_form.Kind">
+                        <option value="oidc">OIDC</option>
+                        <option value="github">GitHub</option>
+                    </select>
+                </label>
+            }
+            else
+            {
+                <label>Provider ID <input value="@_editing.ProviderId" disabled /></label>
+                <label>Kind <input value="@_editing.Kind" disabled /></label>
+            }
+
+            <label>Display name * <input @bind="_form.DisplayName" /></label>
+
+            @if (_form.Kind == "oidc")
+            {
+                <label>Authority (issuer URL) <input @bind="_form.Authority" placeholder="https://accounts.google.com" /></label>
+            }
+
+            <label>Client ID * <input @bind="_form.ClientId" /></label>
+            <label>Client secret <input type="password" @bind="_form.ClientSecret" placeholder="@(!string.IsNullOrEmpty(_editing.Id) && _editing.HasSecret ? "(unchanged — leave blank)" : "")" /></label>
+            <label>Scopes (space-separated) <input @bind="_form.Scopes" placeholder="openid profile email" /></label>
+
+            <label style="display:flex; gap:var(--space-2); align-items:center;">
+                <input type="checkbox" @bind="_form.AutoProvision" /> Auto-provision new users on first login
+            </label>
+            <label style="display:flex; gap:var(--space-2); align-items:center;">
+                <input type="checkbox" @bind="_form.Enabled" /> Enabled
+            </label>
+
+            @if (_modalError is not null) { <p class="text-error">@_modalError</p> }
+            <div class="modal-actions">
+                <button class="btn btn-secondary" @onclick="CloseModal">Cancel</button>
+                <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">@(_saving ? "Saving…" : "Save")</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private readonly List<FederationProviderResponse> _items = new();
+    private int _offset, _total;
+    private const int PageSize = 25;
+    private bool _loading = true;
+    private string? _error;
+
+    private FederationProviderResponse? _editing;
+    private FormState _form = new();
+    private bool _saving;
+    private string? _modalError;
+
+    private sealed class FormState
+    {
+        public string ProviderId = "";
+        public string Kind = "oidc";
+        public string DisplayName = "";
+        public string? Authority;
+        public string ClientId = "";
+        public string? ClientSecret;
+        public string Scopes = "openid profile email";
+        public bool AutoProvision = true;
+        public bool Enabled = true;
+    }
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            var page = await Client.ListFederationProvidersAsync(offset: _offset, count: PageSize);
+            _items.Clear(); _items.AddRange(page.Items); _total = page.Total;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private void OpenCreate()
+    {
+        _editing = new FederationProviderResponse { Id = "", ProviderId = "", Kind = "oidc", DisplayName = "", ClientId = "", Scopes = [], Enabled = true };
+        _form = new FormState(); _modalError = null;
+    }
+
+    private void OpenEdit(FederationProviderResponse p)
+    {
+        _editing = p;
+        _form = new FormState
+        {
+            ProviderId = p.ProviderId, Kind = p.Kind, DisplayName = p.DisplayName,
+            Authority = p.Authority, ClientId = p.ClientId, ClientSecret = null,
+            Scopes = string.Join(" ", p.Scopes), AutoProvision = p.AutoProvision, Enabled = p.Enabled,
+        };
+        _modalError = null;
+    }
+
+    private void CloseModal() { _editing = null; }
+
+    private async Task SaveAsync()
+    {
+        _saving = true; _modalError = null;
+        try
+        {
+            var scopes = _form.Scopes.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (string.IsNullOrEmpty(_editing!.Id))
+            {
+                await Client.CreateFederationProviderAsync(new CreateFederationProviderRequest
+                {
+                    ProviderId = _form.ProviderId, Kind = _form.Kind, DisplayName = _form.DisplayName,
+                    Authority = string.IsNullOrWhiteSpace(_form.Authority) ? null : _form.Authority,
+                    ClientId = _form.ClientId, ClientSecret = _form.ClientSecret,
+                    Scopes = scopes, AutoProvision = _form.AutoProvision, Enabled = _form.Enabled,
+                });
+            }
+            else
+            {
+                await Client.UpdateFederationProviderAsync(_editing.Id, new UpdateFederationProviderRequest
+                {
+                    Id = _editing.Id, DisplayName = _form.DisplayName,
+                    Authority = string.IsNullOrWhiteSpace(_form.Authority) ? null : _form.Authority,
+                    ClientId = _form.ClientId,
+                    ClientSecret = string.IsNullOrEmpty(_form.ClientSecret) ? null : _form.ClientSecret,
+                    Scopes = scopes, AutoProvision = _form.AutoProvision, Enabled = _form.Enabled,
+                });
+            }
+            Toast.Show("Saved.", "online");
+            CloseModal();
+            await LoadAsync();
+        }
+        catch (Exception ex) { _modalError = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task Delete(FederationProviderResponse p)
+    {
+        try { await Client.DeleteFederationProviderAsync(p.Id); Toast.Show("Deleted.", "online"); await LoadAsync(); }
+        catch (Exception ex) { Toast.Show(ex.Message, "error"); }
+    }
+
+    private async Task PrevPage() { _offset = Math.Max(0, _offset - PageSize); await LoadAsync(); }
+    private async Task NextPage() { _offset += PageSize; await LoadAsync(); }
+}

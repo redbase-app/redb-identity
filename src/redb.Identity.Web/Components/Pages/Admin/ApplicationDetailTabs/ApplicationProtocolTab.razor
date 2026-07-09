@@ -1,0 +1,921 @@
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject IJSRuntime JS
+
+@*
+    Application > Protocol tab — the OAuth2 / OIDC configuration surface.
+
+    Sections (vertical scroll, mirrors WSO2 IS 7.x):
+      1. Client credentials   — client_id (RO + copy), client_secret (Regenerate)
+      2. Allowed grant types  — checkbox grid mapped to Permissions[gt:*]
+      3. Allowed endpoints    — checkbox grid mapped to Permissions[ept:*]
+      4. Allowed response types — checkbox grid mapped to Permissions[rst:*]
+      5. Allowed scopes       — checkbox grid mapped to Permissions[scp:*]
+      6. Redirect URIs        — multi-line textarea, one URI per line
+      7. Post-logout URIs     — multi-line textarea
+      8. Requirements         — PKCE checkbox
+
+    The OpenIddict permissions schema groups all of these under a single
+    Permissions[] string array on the application. We split by prefix on
+    load and recompose on save — the API stays stable, the UI gets a more
+    structured form.
+
+    "Update" button at the bottom batches every section into one PATCH —
+    mirroring the WSO2 single-submit pattern. No autosave; explicit save
+    avoids partial-write surprises if the user navigates away mid-edit.
+*@
+
+@if (_dirty)
+{
+    <div class="app-detail__dirty-banner">
+        <RdbIcon Name="alert-triangle" Size="14" />
+        <span>You have unsaved changes.</span>
+        <button class="btn btn-sm btn-ghost" @onclick="Reset" disabled="@_saving">Discard</button>
+    </div>
+}
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Client authentication</h3>
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Authentication method</span>
+        <select class="app-detail__input"
+                value="@_authMethod"
+                @onchange="OnAuthMethodChanged"
+                disabled="@_saving">
+            <option value="none">none — public client (no client_secret, PKCE-only)</option>
+            <option value="client_secret">client_secret — confidential, BCrypt-hashed secret</option>
+            <option value="private_key_jwt">private_key_jwt — confidential, JWT bearer assertion via client JWKS</option>
+        </select>
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            <code>none</code> turns the client public (SPA / mobile) — PKCE mandatory.
+            <code>client_secret</code> uses HTTP Basic / form-post (RFC 6749 §2.3.1 / §2.3.2 — both accepted).
+            <code>private_key_jwt</code> requires the Client JWKS section to carry the client's public keys
+            (RFC 7521 §6.2 / RFC 7523 §2.2).
+            Switching to <code>none</code> drops any existing secret; switching back regenerates one on save.
+        </span>
+    </div>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Client credentials</h3>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Client ID</span>
+        <div class="app-detail__input-cluster">
+            <input type="text"
+                   readonly
+                   class="app-detail__input app-detail__input--mono app-detail__input--readonly"
+                   value="@(App.ClientId ?? string.Empty)" />
+            <button class="btn btn-sm btn-ghost" @onclick="@(() => CopyAsync(App.ClientId ?? string.Empty))">
+                <RdbIcon Name="copy" Size="14" />
+            </button>
+        </div>
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            The OAuth <code>client_id</code>. Immutable once issued.
+        </span>
+    </div>
+
+    @if (!string.Equals(App.ClientType, "public", StringComparison.OrdinalIgnoreCase))
+    {
+        <div class="app-detail__field">
+            <span class="app-detail__field-label">Client secret</span>
+            @if (_newSecret is null)
+            {
+                <div class="app-detail__input-cluster">
+                    <input type="text"
+                           readonly
+                           class="app-detail__input app-detail__input--mono app-detail__input--readonly"
+                           value="•••••••••••••••• (BCrypt-stored; never displayed)" />
+                    <button class="btn btn-sm btn-danger" @onclick="OnRotateClickedAsync" disabled="@_rotating">
+                        @(_rotating ? "Rotating…" : "Regenerate")
+                    </button>
+                </div>
+            }
+            else
+            {
+                <div class="app-detail__input-cluster">
+                    <input type="text"
+                           readonly
+                           class="app-detail__input app-detail__input--mono"
+                           value="@_newSecret" />
+                    <button class="btn btn-sm btn-ghost" @onclick="@(() => CopyAsync(_newSecret))">
+                        <RdbIcon Name="copy" Size="14" />
+                    </button>
+                    <button class="btn btn-sm btn-secondary" @onclick="@(() => _newSecret = null)">
+                        Hide
+                    </button>
+                </div>
+                <span class="app-detail__field-hint" style="color: var(--status-warning);">
+                    <RdbIcon Name="alert-triangle" Size="12" />
+                    Copy this value now. It will not be shown again — only the BCrypt hash is stored.
+                </span>
+            }
+            <span class="app-detail__field-hint">
+                <RdbIcon Name="info" Size="12" />
+                Rotation invalidates the previous secret <strong>immediately</strong>.
+                Any service still using the old value will start getting HTTP 401.
+            </span>
+        </div>
+    }
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Allowed grant types</h3>
+    <div class="app-detail__checkbox-grid">
+        @foreach (var gt in GrantTypes)
+        {
+            <label class="app-detail__checkbox">
+                <input type="checkbox"
+                       checked="@_grantTypes.Contains(gt.Permission)"
+                       @onchange="@(e => ToggleGrant(gt.Permission, (bool)(e.Value ?? false)))" />
+                <span>@gt.Label</span>
+                @if (gt.Discouraged)
+                {
+                    <span class="app-detail__checkbox-warning" title="@gt.Warning">
+                        <RdbIcon Name="alert-triangle" Size="14" />
+                    </span>
+                }
+            </label>
+        }
+    </div>
+    <span class="app-detail__field-hint" style="margin-top: var(--space-3);">
+        <RdbIcon Name="info" Size="12" />
+        Determines which OAuth grant flows this client can use.
+        <code>implicit</code> and <code>password</code> are discouraged by
+        OAuth 2.1 — prefer <code>authorization_code</code> with PKCE.
+    </span>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Allowed endpoints</h3>
+    <div class="app-detail__checkbox-grid">
+        @foreach (var ep in Endpoints)
+        {
+            <label class="app-detail__checkbox">
+                <input type="checkbox"
+                       checked="@_endpoints.Contains(ep.Permission)"
+                       @onchange="@(e => ToggleEndpoint(ep.Permission, (bool)(e.Value ?? false)))" />
+                <span>@ep.Label</span>
+            </label>
+        }
+    </div>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Allowed response types</h3>
+    <div class="app-detail__checkbox-grid">
+        @foreach (var rt in ResponseTypes)
+        {
+            <label class="app-detail__checkbox">
+                <input type="checkbox"
+                       checked="@_responseTypes.Contains(rt.Permission)"
+                       @onchange="@(e => ToggleResponseType(rt.Permission, (bool)(e.Value ?? false)))" />
+                <span>@rt.Label</span>
+            </label>
+        }
+    </div>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Allowed scopes</h3>
+    <div class="app-detail__field">
+        <textarea class="app-detail__input app-detail__input--mono"
+                  rows="4"
+                  value="@_scopesText"
+                  @oninput="@(e => OnScopesChanged((e.Value?.ToString() ?? string.Empty)))"
+                  placeholder="openid"></textarea>
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            One scope per line. Standard OIDC scopes (<code>openid</code>,
+            <code>profile</code>, <code>email</code>, <code>offline_access</code>)
+            are always available regardless. Custom scopes must be declared on the
+            Authorization tab.
+        </span>
+    </div>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Redirect URIs</h3>
+    <div class="app-detail__field">
+        <textarea class="app-detail__input app-detail__input--mono"
+                  rows="4"
+                  value="@_redirectUrisText"
+                  @oninput="@(e => OnRedirectUrisChanged((e.Value?.ToString() ?? string.Empty)))"
+                  placeholder="https://app.example.com/callback"></textarea>
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            One absolute URI per line. Authorization responses are only sent to URIs
+            in this list (exact match, RFC 6749 §3.1.2).
+        </span>
+    </div>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Post-logout redirect URIs</span>
+        <textarea class="app-detail__input app-detail__input--mono"
+                  rows="3"
+                  value="@_postLogoutUrisText"
+                  @oninput="@(e => OnPostLogoutUrisChanged((e.Value?.ToString() ?? string.Empty)))"
+                  placeholder="https://app.example.com/signed-out"></textarea>
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            One absolute URI per line. Used by RP-initiated logout (OIDC §5).
+        </span>
+    </div>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Requirements</h3>
+    <label class="app-detail__checkbox">
+        <input type="checkbox"
+               checked="@_requirements.Contains("ft:pkce")"
+               @onchange="@(e => ToggleRequirement("ft:pkce", (bool)(e.Value ?? false)))" />
+        <span>Require PKCE on authorization_code grant</span>
+    </label>
+    <span class="app-detail__field-hint" style="margin-top: var(--space-2);">
+        <RdbIcon Name="info" Size="12" />
+        OAuth 2.1 requires PKCE for all <code>authorization_code</code> clients;
+        public clients (SPA / mobile) are typically required, confidential clients
+        recommended.
+    </span>
+
+    <label class="app-detail__checkbox" style="margin-top: var(--space-3);">
+        <input type="checkbox"
+               checked="@_requirePar"
+               @onchange="@(e => { _requirePar = (bool)(e.Value ?? false); _dirty = true; })" />
+        <span>Require Pushed Authorization Requests (RFC 9126)</span>
+    </label>
+    <span class="app-detail__field-hint" style="margin-top: var(--space-2);">
+        <RdbIcon Name="info" Size="12" />
+        Force every authorization request to arrive via <code>/connect/par</code> first.
+        Direct calls to <code>/connect/authorize</code> are rejected with
+        <code>par_required</code>. Recommended for FAPI &amp; high-assurance clients.
+    </span>
+
+    <label class="app-detail__checkbox" style="margin-top: var(--space-3);">
+        <input type="checkbox"
+               checked="@_requireDpop"
+               @onchange="@(e => { _requireDpop = (bool)(e.Value ?? false); _dirty = true; })" />
+        <span>Require DPoP sender-constrained access tokens (RFC 9449)</span>
+    </label>
+    <span class="app-detail__field-hint" style="margin-top: var(--space-2);">
+        <RdbIcon Name="info" Size="12" />
+        Reject token requests from this client that don't carry a valid
+        <code>DPoP</code> header. Server-wide
+        <code>DpopOptions.RequireForAccessTokens</code> already forces strict
+        mode for every client; this flag opts in just this client when the
+        server-wide setting is soft. Soft-mode is the default — clients may
+        send a DPoP proof to upgrade voluntarily.
+    </span>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Request Object (JAR / RFC 9101)</h3>
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Signing algorithm</span>
+        <select class="app-detail__input"
+                value="@_reqObjSigningAlg"
+                @onchange="@(e => { _reqObjSigningAlg = e.Value?.ToString() ?? string.Empty; _dirty = true; })">
+            <option value="">(none — unsigned request not accepted unless explicitly enabled)</option>
+            <option value="RS256">RS256</option>
+            <option value="RS384">RS384</option>
+            <option value="RS512">RS512</option>
+            <option value="PS256">PS256 (FAPI-recommended)</option>
+            <option value="PS384">PS384</option>
+            <option value="PS512">PS512</option>
+            <option value="ES256">ES256</option>
+            <option value="ES384">ES384</option>
+            <option value="ES512">ES512</option>
+            <option value="EdDSA">EdDSA</option>
+        </select>
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            JOSE algorithm the client uses to sign authorization requests sent as
+            <code>request</code> / <code>request_uri</code>. Stored as an
+            advisory hint today — full enforcement (reject mismatched JWTs at
+            <code>/authorize</code>) lands in a follow-up handler.
+        </span>
+    </div>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Encryption algorithm</span>
+        <select class="app-detail__input"
+                value="@_reqObjEncAlg"
+                @onchange="@(e => { _reqObjEncAlg = e.Value?.ToString() ?? string.Empty; _dirty = true; })">
+            <option value="">(no encryption)</option>
+            <option value="RSA-OAEP">RSA-OAEP</option>
+            <option value="RSA-OAEP-256">RSA-OAEP-256</option>
+            <option value="ECDH-ES">ECDH-ES</option>
+            <option value="ECDH-ES+A128KW">ECDH-ES+A128KW</option>
+            <option value="ECDH-ES+A192KW">ECDH-ES+A192KW</option>
+            <option value="ECDH-ES+A256KW">ECDH-ES+A256KW</option>
+        </select>
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            JWE key-wrap algorithm. Combine with the JWE enc method below.
+        </span>
+    </div>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Encryption method</span>
+        <select class="app-detail__input"
+                value="@_reqObjEncEnc"
+                @onchange="@(e => { _reqObjEncEnc = e.Value?.ToString() ?? string.Empty; _dirty = true; })">
+            <option value="">(no encryption)</option>
+            <option value="A128CBC-HS256">A128CBC-HS256</option>
+            <option value="A192CBC-HS384">A192CBC-HS384</option>
+            <option value="A256CBC-HS512">A256CBC-HS512</option>
+            <option value="A128GCM">A128GCM</option>
+            <option value="A192GCM">A192GCM</option>
+            <option value="A256GCM">A256GCM</option>
+        </select>
+    </div>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">ID Token audience</h3>
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Extra audiences</span>
+        <textarea class="app-detail__input app-detail__input--mono"
+                  rows="3"
+                  value="@_idTokenAudiencesText"
+                  @oninput="@(e => { _idTokenAudiencesText = e.Value?.ToString() ?? string.Empty; _dirty = true; })"
+                  placeholder="https://api.example.com"></textarea>
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            One audience per line. The <code>client_id</code> of this application is
+            <strong>always</strong> included as an audience by default (OIDC core §2);
+            these entries are appended so the same <code>id_token</code> can be consumed
+            by federated downstream resource servers. Leave empty for the client_id-only
+            default.
+        </span>
+    </div>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Token lifetimes</h3>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Access token expiry (seconds)</span>
+        <input type="number"
+               class="app-detail__input"
+               min="0"
+               step="60"
+               value="@_accessTokenSeconds"
+               @oninput="@(e => OnLifetimeChanged(s => _accessTokenSeconds = s, e.Value?.ToString()))"
+               placeholder="3600 (default)" />
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            Per-client override for <code>access_token</code> validity. Leave 0 (or blank)
+            to use the global default (1 hour).
+        </span>
+    </div>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Refresh token expiry (seconds)</span>
+        <input type="number"
+               class="app-detail__input"
+               min="0"
+               step="3600"
+               value="@_refreshTokenSeconds"
+               @oninput="@(e => OnLifetimeChanged(s => _refreshTokenSeconds = s, e.Value?.ToString()))"
+               placeholder="1209600 (default = 14 days)" />
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            Per-client override for <code>refresh_token</code> validity. 0/blank = global default.
+        </span>
+    </div>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">ID token expiry (seconds)</span>
+        <input type="number"
+               class="app-detail__input"
+               min="0"
+               step="60"
+               value="@_idTokenSeconds"
+               @oninput="@(e => OnLifetimeChanged(s => _idTokenSeconds = s, e.Value?.ToString()))"
+               placeholder="300 (default = 5 minutes)" />
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            Per-client override for <code>id_token</code> validity. The id_token is meant
+            to be short-lived (5 min default); set higher only if your client refreshes
+            tokens at the boundary, not constantly.
+        </span>
+    </div>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Logout URLs</h3>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Back-channel logout URL</span>
+        <input type="text"
+               class="app-detail__input app-detail__input--mono"
+               value="@_backchannelLogoutUri"
+               @oninput="@(e => { _backchannelLogoutUri = e.Value?.ToString() ?? string.Empty; _dirty = true; })"
+               placeholder="https://app.example.com/oidc-backchannel" />
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            Absolute HTTPS URL the server POSTs a signed <code>logout_token</code> to
+            when the user's session is terminated (OIDC Back-Channel Logout 1.0).
+            Leave empty to disable back-channel logout for this client.
+        </span>
+    </div>
+
+    <label class="app-detail__checkbox">
+        <input type="checkbox"
+               checked="@_backchannelLogoutSessionRequired"
+               @onchange="@(e => { _backchannelLogoutSessionRequired = (bool)(e.Value ?? false); _dirty = true; })" />
+        <span>Include <code>sid</code> claim in logout_token (recommended)</span>
+    </label>
+    <span class="app-detail__field-hint" style="margin-top: var(--space-2);">
+        <RdbIcon Name="info" Size="12" />
+        OIDC Back-Channel Logout 1.0 §2.2 — letting the RP invalidate the matching
+        session by id instead of guessing from <code>sub</code>.
+    </span>
+
+    @* Front-channel logout (OIDC FCL 1.0) — server-side enforcement not yet
+       implemented; the field would store but never be POSTed. Skipped from the
+       UI until the server-side cascade is in (Batch 2 RFC). *@
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Certificate</h3>
+
+    <div class="app-detail__field">
+        <label class="app-detail__checkbox">
+            <input type="radio" name="cert-type" value="none"
+                   checked="@(_certType == "none")"
+                   @onchange="@(_ => OnCertTypeChanged("none"))" />
+            <span>None — no client keys (symmetric or PKCE-only)</span>
+        </label>
+        <label class="app-detail__checkbox">
+            <input type="radio" name="cert-type" value="jwks_uri"
+                   checked="@(_certType == "jwks_uri")"
+                   @onchange="@(_ => OnCertTypeChanged("jwks_uri"))" />
+            <span>Use JWKS endpoint — server fetches keys from a URL</span>
+        </label>
+        <label class="app-detail__checkbox">
+            <input type="radio" name="cert-type" value="jwks_inline"
+                   checked="@(_certType == "jwks_inline")"
+                   @onchange="@(_ => OnCertTypeChanged("jwks_inline"))" />
+            <span>Provide JWKS — paste the raw JWKS JSON inline</span>
+        </label>
+        <span class="app-detail__field-hint" style="margin-top: var(--space-2);">
+            <RdbIcon Name="info" Size="12" />
+            Used to verify the client's JWT bearer assertion
+            (<code>client_secret_jwt</code> / <code>private_key_jwt</code>) and
+            to encrypt issued <code>id_token</code>s when ID-Token encryption is on.
+            X.509 single-certificate uploads are not currently supported — use a
+            single-key JWKS payload (kty=RSA / kty=EC) for the same effect.
+        </span>
+    </div>
+
+    @if (_certType == "jwks_uri")
+    {
+        <div class="app-detail__field">
+            <span class="app-detail__field-label">JWKS endpoint URL</span>
+            <input type="text"
+                   class="app-detail__input app-detail__input--mono"
+                   value="@_jwksUri"
+                   @oninput="@(e => { _jwksUri = e.Value?.ToString() ?? string.Empty; _dirty = true; })"
+                   placeholder="https://client.example.com/.well-known/jwks.json" />
+            <span class="app-detail__field-hint">
+                <RdbIcon Name="info" Size="12" />
+                Absolute HTTPS URL. The server fetches this on demand to validate
+                client assertions; the response should be a standard RFC 7517 JWKS
+                document with at least one <code>use=sig</code> key.
+            </span>
+        </div>
+    }
+    else if (_certType == "jwks_inline")
+    {
+        <div class="app-detail__field">
+            <span class="app-detail__field-label">JSON Web Key Set</span>
+            <textarea class="app-detail__input app-detail__input--mono"
+                      rows="6"
+                      value="@_jwks"
+                      @oninput="@(e => { _jwks = e.Value?.ToString() ?? string.Empty; _dirty = true; })"
+                      placeholder='{ "keys": [ { "kty": "RSA", "kid": "…", "n": "…", "e": "AQAB", "use": "sig" } ] }'></textarea>
+            <span class="app-detail__field-hint">
+                <RdbIcon Name="info" Size="12" />
+                RFC 7517 JWKS document. Paste raw JSON; cached server-side until
+                you change this field.
+            </span>
+        </div>
+    }
+</section>
+
+<div class="app-detail__submit-row">
+    <button class="btn btn-primary" @onclick="SaveAsync" disabled="@(!_dirty || _saving)">
+        @(_saving ? "Saving…" : "Update")
+    </button>
+    @if (_dirty)
+    {
+        <button class="btn btn-secondary" @onclick="Reset" disabled="@_saving">Discard</button>
+    }
+    @if (_error is not null)
+    {
+        <span class="text-error">@_error</span>
+    }
+</div>
+
+<UiTypedConfirmDialog @ref="_rotateConfirm" />
+
+@code {
+    [Parameter, EditorRequired] public ApplicationResponse App { get; set; } = default!;
+    [Parameter] public EventCallback OnRefresh { get; set; }
+
+    // Working copy: prefix-split bags, recomposed on save.
+    private readonly HashSet<string> _grantTypes = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _endpoints = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _responseTypes = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _scopes = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _requirements = new(StringComparer.Ordinal);
+    private string _scopesText = "";
+    private string _redirectUrisText = "";
+    private string _postLogoutUrisText = "";
+
+    // A.1: Logout URLs + PAR + Client JWKS — added to UpdateApplicationRequest
+    // alongside the existing permission-bag fields. They live as independent
+    // primitives on ApplicationProps server-side, so we round-trip them straight
+    // (no decompose/recompose) and they're cheaper to track than a HashSet.
+    private string _backchannelLogoutUri = "";
+    private bool _backchannelLogoutSessionRequired = true;
+    private bool _requirePar;
+    private string _jwks = "";
+
+    // A.2: per-client token lifetimes (seconds). Empty string = inherit global default;
+    // 0 = same. Non-empty parsed to int? on save.
+    private string _accessTokenSeconds = "";
+    private string _refreshTokenSeconds = "";
+    private string _idTokenSeconds = "";
+
+    // A.3: extra id_token audiences as a newline-joined multi-line string. Same
+    // shape as _redirectUrisText: SplitLines on save, string.Join("\n") on load.
+    private string _idTokenAudiencesText = "";
+
+    // A.4: derived from ClientType + JWKS presence. Server has no dedicated field;
+    // we project on load and decompose on save.
+    //   none              ↔ ClientType=public
+    //   client_secret     ↔ ClientType=confidential, JWKS empty
+    //   private_key_jwt   ↔ ClientType=confidential, JWKS non-empty
+    private string _authMethod = "none";
+    private string _newClientType = "public";
+
+    // A.6 — Request Object signing / encryption choices. Empty string = "(none)";
+    // PATCH semantics on the wire treat empty as "clear", null as "leave alone",
+    // but here we always send the current value verbatim so the user can pick
+    // (none) and have it stick.
+    private string _reqObjSigningAlg = "";
+    private string _reqObjEncAlg = "";
+    private string _reqObjEncEnc = "";
+
+    // A.7: derived radio. {none|jwks_uri|jwks_inline}. Reset() computes from
+    // the two stored fields; OnCertTypeChanged keeps them in sync as the
+    // operator flips between modes.
+    private string _certType = "none";
+    private string _jwksUri = "";
+
+    // A.8: RFC 9449 — per-client strict-mode opt-in.
+    private bool _requireDpop;
+
+    private bool _dirty;
+    private bool _saving;
+    private bool _rotating;
+    private string? _error;
+    private string? _newSecret;
+    private UiTypedConfirmDialog? _rotateConfirm;
+
+    private sealed record OptionDescriptor(string Permission, string Label, bool Discouraged = false, string? Warning = null);
+
+    // ! Order matches the typical wizard order (most-common first).
+    private static readonly OptionDescriptor[] GrantTypes = new[]
+    {
+        new OptionDescriptor("gt:authorization_code", "Authorization code"),
+        new OptionDescriptor("gt:client_credentials", "Client credentials"),
+        new OptionDescriptor("gt:refresh_token", "Refresh token"),
+        new OptionDescriptor("gt:password", "Resource owner password",
+            Discouraged: true,
+            Warning: "OAuth 2.1 deprecates the password grant — first-party clients only, and only when no other flow is possible."),
+        new OptionDescriptor("gt:implicit", "Implicit",
+            Discouraged: true,
+            Warning: "OAuth 2.1 removes the implicit grant — use authorization_code with PKCE instead."),
+        new OptionDescriptor("gt:urn:ietf:params:oauth:grant-type:device_code", "Device code"),
+        new OptionDescriptor("gt:urn:ietf:params:oauth:grant-type:token-exchange", "Token exchange (RFC 8693)"),
+    };
+
+    private static readonly OptionDescriptor[] Endpoints = new[]
+    {
+        new OptionDescriptor("ept:token", "Token endpoint"),
+        new OptionDescriptor("ept:authorization", "Authorization endpoint"),
+        new OptionDescriptor("ept:revocation", "Revocation endpoint (RFC 7009)"),
+        new OptionDescriptor("ept:introspection", "Introspection endpoint (RFC 7662)"),
+        new OptionDescriptor("ept:device", "Device authorization endpoint (RFC 8628)"),
+        new OptionDescriptor("ept:logout", "End-session endpoint (OIDC RP-init logout)"),
+        new OptionDescriptor("ept:pushed_authorization", "Pushed Authorization endpoint (RFC 9126)"),
+    };
+
+    private static readonly OptionDescriptor[] ResponseTypes = new[]
+    {
+        new OptionDescriptor("rst:code", "code"),
+        new OptionDescriptor("rst:token", "token"),
+        new OptionDescriptor("rst:id_token", "id_token"),
+        new OptionDescriptor("rst:code id_token", "code id_token (hybrid)"),
+        new OptionDescriptor("rst:code token", "code token (hybrid)"),
+        new OptionDescriptor("rst:code id_token token", "code id_token token (hybrid)"),
+        new OptionDescriptor("rst:none", "none (silent renew / probe)"),
+    };
+
+    protected override void OnParametersSet()
+    {
+        Reset();
+    }
+
+    private void Reset()
+    {
+        _grantTypes.Clear();
+        _endpoints.Clear();
+        _responseTypes.Clear();
+        _scopes.Clear();
+        _requirements.Clear();
+
+        foreach (var p in App.Permissions ?? Array.Empty<string>())
+        {
+            if (p.StartsWith("gt:", StringComparison.Ordinal)) _grantTypes.Add(p);
+            else if (p.StartsWith("ept:", StringComparison.Ordinal)) _endpoints.Add(p);
+            else if (p.StartsWith("rst:", StringComparison.Ordinal)) _responseTypes.Add(p);
+            else if (p.StartsWith("scp:", StringComparison.Ordinal)) _scopes.Add(p.Substring(4));
+        }
+
+        foreach (var r in App.Requirements ?? Array.Empty<string>())
+        {
+            _requirements.Add(r);
+        }
+
+        _scopesText = string.Join("\n", _scopes);
+        _redirectUrisText = string.Join("\n", App.RedirectUris ?? Array.Empty<string>());
+        _postLogoutUrisText = string.Join("\n", App.PostLogoutRedirectUris ?? Array.Empty<string>());
+        _backchannelLogoutUri = App.BackchannelLogoutUri ?? string.Empty;
+        _backchannelLogoutSessionRequired = App.BackchannelLogoutSessionRequired ?? true;
+        _requirePar = App.RequirePushedAuthorizationRequests ?? false;
+        _jwks = App.JsonWebKeySet ?? string.Empty;
+        _accessTokenSeconds = App.AccessTokenLifetimeSeconds?.ToString() ?? string.Empty;
+        _refreshTokenSeconds = App.RefreshTokenLifetimeSeconds?.ToString() ?? string.Empty;
+        _idTokenSeconds = App.IdentityTokenLifetimeSeconds?.ToString() ?? string.Empty;
+        _idTokenAudiencesText = string.Join("\n", App.IdTokenAudiences ?? Array.Empty<string>());
+        // A.4: derive auth method from stored ClientType + JWKS presence.
+        _newClientType = App.ClientType ?? "public";
+        var isPublic = string.Equals(_newClientType, "public", StringComparison.OrdinalIgnoreCase);
+        var hasJwks = !string.IsNullOrWhiteSpace(_jwks);
+        _authMethod = (isPublic, hasJwks) switch
+        {
+            (true, _)      => "none",
+            (false, true)  => "private_key_jwt",
+            (false, false) => "client_secret",
+        };
+        _reqObjSigningAlg = App.RequestObjectSigningAlg ?? string.Empty;
+        _reqObjEncAlg = App.RequestObjectEncryptionAlg ?? string.Empty;
+        _reqObjEncEnc = App.RequestObjectEncryptionEnc ?? string.Empty;
+        // A.7: certificate type is derived from which of the two key sources is set.
+        // JwksUri wins over inline if both are non-empty (defence in depth — same
+        // priority the server-side handler enforces).
+        _jwksUri = App.JwksUri ?? string.Empty;
+        _requireDpop = App.RequireDpop ?? false;
+        _certType = (!string.IsNullOrWhiteSpace(_jwksUri), !string.IsNullOrWhiteSpace(_jwks)) switch
+        {
+            (true, _) => "jwks_uri",
+            (false, true) => "jwks_inline",
+            _ => "none",
+        };
+        _dirty = false;
+        _error = null;
+    }
+
+    private void OnLifetimeChanged(Action<string> setter, string? raw)
+    {
+        setter(raw ?? string.Empty);
+        _dirty = true;
+    }
+
+    /// <summary>
+    /// A.4: when the user changes the auth-method dropdown we map it back onto
+    /// the two underlying fields (ClientType + JWKS) so the save body carries
+    /// a coherent state. Switching to private_key_jwt doesn't auto-fill the
+    /// JWKS; the operator must paste it in the Client JWKS section below or
+    /// the next save will round-trip to client_secret again.
+    /// </summary>
+    private void OnAuthMethodChanged(ChangeEventArgs e)
+    {
+        _authMethod = e.Value?.ToString() ?? "none";
+        _newClientType = _authMethod == "none" ? "public" : "confidential";
+        // Switching TO client_secret clears any JWKS (it would otherwise round-trip
+        // us right back to private_key_jwt on Reset); switching TO private_key_jwt
+        // leaves the JWKS field as-is — user is expected to fill it in.
+        if (_authMethod == "client_secret")
+        {
+            _jwks = string.Empty;
+        }
+        _dirty = true;
+    }
+
+    /// <summary>
+    /// A.7: the certificate-type radio is a UI projection of two server fields
+    /// (JwksUri + JsonWebKeySet). When the user picks one mode we clear the other
+    /// so the Reset() classifier on the next render doesn't bounce us into the
+    /// wrong bucket.
+    /// </summary>
+    private void OnCertTypeChanged(string next)
+    {
+        _certType = next;
+        switch (next)
+        {
+            case "none":
+                _jwksUri = string.Empty;
+                _jwks = string.Empty;
+                break;
+            case "jwks_uri":
+                _jwks = string.Empty;
+                break;
+            case "jwks_inline":
+                _jwksUri = string.Empty;
+                break;
+        }
+        _dirty = true;
+    }
+
+    private static int? ParseLifetime(string raw) =>
+        int.TryParse(raw, out var n) && n >= 0 ? n : null;
+
+    private void ToggleGrant(string permission, bool on)
+    {
+        if (on) _grantTypes.Add(permission);
+        else _grantTypes.Remove(permission);
+        _dirty = true;
+    }
+
+    private void ToggleEndpoint(string permission, bool on)
+    {
+        if (on) _endpoints.Add(permission);
+        else _endpoints.Remove(permission);
+        _dirty = true;
+    }
+
+    private void ToggleResponseType(string permission, bool on)
+    {
+        if (on) _responseTypes.Add(permission);
+        else _responseTypes.Remove(permission);
+        _dirty = true;
+    }
+
+    private void ToggleRequirement(string requirement, bool on)
+    {
+        if (on) _requirements.Add(requirement);
+        else _requirements.Remove(requirement);
+        _dirty = true;
+    }
+
+    private void OnScopesChanged(string text)
+    {
+        _scopesText = text;
+        _scopes.Clear();
+        foreach (var s in SplitLines(text))
+        {
+            _scopes.Add(s);
+        }
+        _dirty = true;
+    }
+
+    private void OnRedirectUrisChanged(string text)
+    {
+        _redirectUrisText = text;
+        _dirty = true;
+    }
+
+    private void OnPostLogoutUrisChanged(string text)
+    {
+        _postLogoutUrisText = text;
+        _dirty = true;
+    }
+
+    private static string[] SplitLines(string s) =>
+        string.IsNullOrWhiteSpace(s)
+            ? Array.Empty<string>()
+            : s.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private async Task SaveAsync()
+    {
+        if (!_dirty || _saving) return;
+        _saving = true;
+        _error = null;
+
+        // Recompose Permissions[]: gt:* + ept:* + rst:* + scp:*
+        var permissions = new List<string>(_grantTypes);
+        permissions.AddRange(_endpoints);
+        permissions.AddRange(_responseTypes);
+        foreach (var s in _scopes) permissions.Add("scp:" + s);
+
+        try
+        {
+            await Client.UpdateApplicationAsync(App.Id, new UpdateApplicationRequest
+            {
+                Id = App.Id,
+                // A.4: derive ClientType from the auth-method dropdown so the
+                // public/confidential split stays in sync with the chosen auth.
+                ClientType = _newClientType,
+                Permissions = permissions.ToArray(),
+                RedirectUris = SplitLines(_redirectUrisText),
+                PostLogoutRedirectUris = SplitLines(_postLogoutUrisText),
+                Requirements = _requirements.ToArray(),
+                // A.1: send the empty string explicitly when the user cleared the
+                // field so the server-side PATCH-semantics path applies (null = no
+                // change, empty = clear). For booleans we always send the current
+                // toggle state so server stores it verbatim.
+                BackchannelLogoutUri = _backchannelLogoutUri.Trim(),
+                BackchannelLogoutSessionRequired = _backchannelLogoutSessionRequired,
+                RequirePushedAuthorizationRequests = _requirePar,
+                JsonWebKeySet = _jwks.Trim(),
+                // A.2: empty string maps to 0 which the server treats as "clear
+                // override / revert to global default". Non-numeric input is also
+                // mapped to 0 by ParseLifetime so the field is never sticky-bad.
+                AccessTokenLifetimeSeconds = ParseLifetime(_accessTokenSeconds),
+                RefreshTokenLifetimeSeconds = ParseLifetime(_refreshTokenSeconds),
+                IdentityTokenLifetimeSeconds = ParseLifetime(_idTokenSeconds),
+                // A.3: empty textarea becomes empty array, which the server interprets
+                // as "clear all extras" (the implicit client_id default still wins).
+                IdTokenAudiences = SplitLines(_idTokenAudiencesText),
+                // A.6 — Request Object choices.
+                RequestObjectSigningAlg = _reqObjSigningAlg,
+                RequestObjectEncryptionAlg = _reqObjEncAlg,
+                RequestObjectEncryptionEnc = _reqObjEncEnc,
+                // A.7: JwksUri write-through; JsonWebKeySet was already in the wire body.
+                JwksUri = _jwksUri.Trim(),
+                // A.8
+                RequireDpop = _requireDpop,
+                ConcurrencyToken = App.ConcurrencyToken,
+            });
+            Toast.Success("Protocol settings updated");
+            _dirty = false;
+            await OnRefresh.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task OnRotateClickedAsync()
+    {
+        if (_rotating || _rotateConfirm is null) return;
+
+        var name = App.DisplayName ?? App.ClientId ?? "this application";
+        var ok = await _rotateConfirm.ShowAsync(
+            expectedText: App.ClientId ?? name,
+            title: "Rotate client secret",
+            message: $"A new client_secret will be generated for '{name}'. " +
+                     $"The current secret will stop working immediately — any service " +
+                     $"still using it will start receiving HTTP 401 from the token endpoint.",
+            confirmLabel: "Rotate secret");
+
+        if (!ok) return;
+
+        _rotating = true;
+        _error = null;
+        try
+        {
+            var resp = await Client.RotateApplicationSecretAsync(App.Id);
+            _newSecret = resp.NewSecret
+                ?? throw new InvalidOperationException("Server did not return newSecret");
+            Toast.Success($"Secret rotated for {App.ClientId}");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _rotating = false;
+        }
+    }
+
+    private async Task CopyAsync(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", value);
+            Toast.Success("Copied");
+        }
+        catch
+        {
+            Toast.Error("Copy to clipboard failed");
+        }
+    }
+}

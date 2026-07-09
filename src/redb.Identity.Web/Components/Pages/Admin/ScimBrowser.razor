@@ -1,0 +1,338 @@
+@page "/admin/scim"
+@attribute [Authorize]
+@using redb.Identity.Contracts.Scim
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+<RdbPageHeader Title="SCIM browser" Description="Browse SCIM 2.0 resources and execute bulk operations." />
+
+@* Tab bar *@
+<div style="display:flex; gap:var(--space-1); margin-bottom:var(--space-4); border-bottom:1px solid var(--border);">
+    @foreach (var tab in new[] { "Users", "Groups", "Bulk" })
+    {
+        <button class="btn btn-ghost @(_tab == tab ? "tab-active" : "")"
+                style="border-radius:4px 4px 0 0; @(_tab == tab ? "border-bottom:2px solid var(--primary);" : "")"
+                @onclick="() => SwitchTab(tab)">@tab</button>
+    }
+</div>
+
+@if (_tab == "Users")
+{
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">SCIM Users</span>
+        </div>
+        <div style="display:flex; gap:var(--space-2); padding-bottom:var(--space-3); align-items:flex-end;">
+            <div style="flex:1;">
+                <label class="text-secondary" style="display:block; margin-bottom:4px;">Filter (SCIM syntax)</label>
+                <input class="input" style="width:100%;" @bind="_userFilter"
+                       placeholder="e.g. userName eq alice, emails[type eq work].value sw alice, active eq true" />
+            </div>
+            <div style="min-width:80px;">
+                <label class="text-secondary" style="display:block; margin-bottom:4px;">Count</label>
+                <input class="input" type="number" style="width:80px;" @bind="_userCount" min="1" max="200" />
+            </div>
+            <button class="btn btn-secondary" @onclick="LoadUsers">Apply</button>
+        </div>
+
+        @if (_usersLoading) { <p class="text-secondary">Loading…</p> }
+        else if (_usersError is not null) { <p class="text-error">@_usersError</p> }
+        else if (_usersResult is not null)
+        {
+            <div style="margin-bottom:var(--space-2);">
+                <span class="text-secondary">@_usersResult.TotalResults total — showing startIndex @_usersResult.StartIndex</span>
+                <div style="display:flex; gap:var(--space-2); margin-top:var(--space-1);">
+                    <button class="btn btn-sm" @onclick="UsersPrev" disabled="@(_usersStart <= 1)">&laquo; Prev</button>
+                    <button class="btn btn-sm" @onclick="UsersNext" disabled="@(_usersStart + _usersResult.Resources.Count > _usersResult.TotalResults)">Next &raquo;</button>
+                </div>
+            </div>
+            <table class="data-table">
+                <thead><tr><th>id</th><th>userName</th><th>emails</th><th>active</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var u in _usersResult.Resources)
+                    {
+                        <tr>
+                            <td><code style="font-size:0.8em;">@(u.Id?.Length > 12 ? u.Id[..12] + "…" : u.Id)</code></td>
+                            <td>@u.UserName</td>
+                            <td class="text-secondary">@string.Join(", ", (u.Emails ?? []).Select(e => e.Value))</td>
+                            <td><RdbBadge Text="@(u.Active ? "active" : "inactive")" Variant="@(u.Active ? "online" : "offline")" /></td>
+                            <td><button class="btn btn-sm btn-ghost" @onclick="() => ShowUserDetail(u)">JSON</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            <div style="margin-top:var(--space-2);">
+                <button class="btn btn-ghost btn-sm" @onclick="() => _showUserRaw = !_showUserRaw">
+                    @(_showUserRaw ? "▲ Hide raw" : "▼ Raw ListResponse")
+                </button>
+                @if (_showUserRaw)
+                {
+                    <JsonViewer Json="@_usersRawJson" />
+                }
+            </div>
+        }
+    </div>
+}
+else if (_tab == "Groups")
+{
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">SCIM Groups</span>
+        </div>
+        <div style="display:flex; gap:var(--space-2); padding-bottom:var(--space-3); align-items:flex-end;">
+            <div style="flex:1;">
+                <label class="text-secondary" style="display:block; margin-bottom:4px;">Filter (SCIM syntax)</label>
+                <input class="input" style="width:100%;" @bind="_groupFilter"
+                       placeholder="e.g. displayName eq admins" />
+            </div>
+            <div style="min-width:80px;">
+                <label class="text-secondary" style="display:block; margin-bottom:4px;">Count</label>
+                <input class="input" type="number" style="width:80px;" @bind="_groupCount" min="1" max="200" />
+            </div>
+            <button class="btn btn-secondary" @onclick="LoadGroups">Apply</button>
+        </div>
+
+        @if (_groupsLoading) { <p class="text-secondary">Loading…</p> }
+        else if (_groupsError is not null) { <p class="text-error">@_groupsError</p> }
+        else if (_groupsResult is not null)
+        {
+            <div style="margin-bottom:var(--space-2);">
+                <span class="text-secondary">@_groupsResult.TotalResults total — startIndex @_groupsResult.StartIndex</span>
+                <div style="display:flex; gap:var(--space-2); margin-top:var(--space-1);">
+                    <button class="btn btn-sm" @onclick="GroupsPrev" disabled="@(_groupsStart <= 1)">&laquo; Prev</button>
+                    <button class="btn btn-sm" @onclick="GroupsNext" disabled="@(_groupsStart + _groupsResult.Resources.Count > _groupsResult.TotalResults)">Next &raquo;</button>
+                </div>
+            </div>
+            <table class="data-table">
+                <thead><tr><th>id</th><th>displayName</th><th>members</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var g in _groupsResult.Resources)
+                    {
+                        <tr>
+                            <td><code style="font-size:0.8em;">@(g.Id?.Length > 12 ? g.Id[..12] + "…" : g.Id)</code></td>
+                            <td>@g.DisplayName</td>
+                            <td class="text-secondary">@(g.Members?.Count ?? 0)</td>
+                            <td><button class="btn btn-sm btn-ghost" @onclick="() => ShowGroupDetail(g)">JSON</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            <div style="margin-top:var(--space-2);">
+                <button class="btn btn-ghost btn-sm" @onclick="() => _showGroupRaw = !_showGroupRaw">
+                    @(_showGroupRaw ? "▲ Hide raw" : "▼ Raw ListResponse")
+                </button>
+                @if (_showGroupRaw)
+                {
+                    <JsonViewer Json="@_groupsRawJson" />
+                }
+            </div>
+        }
+    </div>
+}
+else if (_tab == "Bulk")
+{
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">Bulk operation</span>
+        </div>
+        <p class="text-secondary">Execute multiple SCIM operations atomically. Paste a BulkRequest JSON below.</p>
+
+        <div style="display:flex; gap:var(--space-2); margin-bottom:var(--space-2); align-items:center;">
+            <label class="text-secondary">failOnErrors</label>
+            <input class="input" type="number" style="width:80px;" @bind="_failOnErrors" min="0" />
+        </div>
+
+        <textarea class="input mono" rows="16" style="width:100%; font-family:monospace; font-size:0.85em;"
+                  @bind="_bulkJson"
+                  placeholder='{
+  "schemas": ["urn:ietf:params:scim:api:messages:2.0:BulkRequest"],
+  "Operations": [
+    { "method": "POST", "path": "/Users", "bulkId": "u1", "data": {
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+        "userName": "alice@example.com"
+    }}
+  ]
+}'></textarea>
+
+        @if (_bulkErrors.Count > 0)
+        {
+            <div style="margin-top:var(--space-2);" class="text-error">
+                <strong>Validation errors:</strong>
+                <ul>
+                    @foreach (var e in _bulkErrors) { <li>@e</li> }
+                </ul>
+            </div>
+        }
+
+        <div style="display:flex; gap:var(--space-2); margin-top:var(--space-3);">
+            <button class="btn btn-secondary" @onclick="ValidateBulk">Validate</button>
+            <button class="btn btn-primary" @onclick="ExecuteBulk" disabled="@(!_bulkValid || _bulkExecuting)">
+                @(_bulkExecuting ? "Executing…" : "Execute")
+            </button>
+        </div>
+
+        @if (_bulkResponse is not null)
+        {
+            <div style="margin-top:var(--space-4);">
+                <strong>Response (@_bulkResponse.Operations.Count operations):</strong>
+                <table class="data-table" style="margin-top:var(--space-2);">
+                    <thead><tr><th>Method</th><th>bulkId</th><th>Status</th><th>Location</th></tr></thead>
+                    <tbody>
+                        @foreach (var op in _bulkResponse.Operations)
+                        {
+                            <tr>
+                                <td><span class="badge">@op.Method</span></td>
+                                <td class="text-secondary">@op.BulkId</td>
+                                <td><RdbBadge Text="@op.Status" Variant="@(op.Status.StartsWith("2") ? "online" : "error")" /></td>
+                                <td class="text-secondary"><code>@op.Location</code></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+
+@* Detail modal *@
+@if (_detailJson is not null)
+{
+    <div class="modal-backdrop" @onclick="() => _detailJson = null">
+        <div class="modal" style="max-width:700px;" @onclick:stopPropagation="true">
+            <h3>@_detailTitle</h3>
+            <JsonViewer Json="@_detailJson" />
+            <div class="modal-actions">
+                <button class="btn btn-secondary" @onclick="() => _detailJson = null">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string _tab = "Users";
+
+    // Users tab
+    private string? _userFilter;
+    private int _userCount = 25, _usersStart = 1;
+    private bool _usersLoading, _showUserRaw;
+    private string? _usersError, _usersRawJson;
+    private ScimListResponse<ScimUser>? _usersResult;
+
+    // Groups tab
+    private string? _groupFilter;
+    private int _groupCount = 25, _groupsStart = 1;
+    private bool _groupsLoading, _showGroupRaw;
+    private string? _groupsError, _groupsRawJson;
+    private ScimListResponse<ScimGroup>? _groupsResult;
+
+    // Bulk tab
+    private string _bulkJson = "";
+    private int _failOnErrors;
+    private bool _bulkValid, _bulkExecuting;
+    private readonly List<string> _bulkErrors = new();
+    private ScimBulkResponse? _bulkResponse;
+
+    // Detail modal
+    private string? _detailJson, _detailTitle;
+
+    private void SwitchTab(string tab) { _tab = tab; }
+
+    private async Task LoadUsers()
+    {
+        _usersLoading = true; _usersError = null; _usersResult = null; _showUserRaw = false;
+        try
+        {
+            _usersResult = await Client.ListScimUsersAsync(startIndex: _usersStart, count: _userCount, filter: _userFilter);
+            _usersRawJson = Serialize(_usersResult);
+        }
+        catch (Exception ex) { _usersError = ex.Message; }
+        finally { _usersLoading = false; }
+    }
+
+    private async Task UsersPrev() { _usersStart = Math.Max(1, _usersStart - _userCount); await LoadUsers(); }
+    private async Task UsersNext() { _usersStart += _userCount; await LoadUsers(); }
+
+    private async Task LoadGroups()
+    {
+        _groupsLoading = true; _groupsError = null; _groupsResult = null; _showGroupRaw = false;
+        try
+        {
+            _groupsResult = await Client.ListScimGroupsAsync(startIndex: _groupsStart, count: _groupCount, filter: _groupFilter);
+            _groupsRawJson = Serialize(_groupsResult);
+        }
+        catch (Exception ex) { _groupsError = ex.Message; }
+        finally { _groupsLoading = false; }
+    }
+
+    private async Task GroupsPrev() { _groupsStart = Math.Max(1, _groupsStart - _groupCount); await LoadGroups(); }
+    private async Task GroupsNext() { _groupsStart += _groupCount; await LoadGroups(); }
+
+    private void ShowUserDetail(ScimUser u)
+    {
+        _detailTitle = $"User: {u.UserName}";
+        _detailJson = Serialize(u);
+    }
+
+    private void ShowGroupDetail(ScimGroup g)
+    {
+        _detailTitle = $"Group: {g.DisplayName}";
+        _detailJson = Serialize(g);
+    }
+
+    private void ValidateBulk()
+    {
+        _bulkErrors.Clear(); _bulkValid = false;
+        if (string.IsNullOrWhiteSpace(_bulkJson)) { _bulkErrors.Add("Request is empty."); return; }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(_bulkJson);
+            var root = doc.RootElement;
+            // SCIM spec uses camelCase "operations"; DTO uses PascalCase "Operations" — accept both
+            var hasOps = root.TryGetProperty("Operations", out var ops) || root.TryGetProperty("operations", out ops);
+            if (!hasOps || ops.ValueKind != System.Text.Json.JsonValueKind.Array)
+                _bulkErrors.Add("Missing or invalid 'Operations' / 'operations' array.");
+            else
+            {
+                int i = 0;
+                foreach (var op in ops.EnumerateArray())
+                {
+                    var hasMethod = op.TryGetProperty("method", out _) || op.TryGetProperty("Method", out _);
+                    var hasPath = op.TryGetProperty("path", out _) || op.TryGetProperty("Path", out _);
+                    if (!hasMethod) _bulkErrors.Add($"Op [{i}]: missing 'method'.");
+                    if (!hasPath) _bulkErrors.Add($"Op [{i}]: missing 'path'.");
+                    i++;
+                }
+                if (i > 100) _bulkErrors.Add($"Warning: {i} operations — backend may enforce a lower limit.");
+            }
+        }
+        catch (Exception ex) { _bulkErrors.Add($"JSON parse error: {ex.Message}"); }
+
+        _bulkValid = _bulkErrors.Count == 0;
+    }
+
+    private async Task ExecuteBulk()
+    {
+        ValidateBulk();
+        if (!_bulkValid) return;
+        _bulkExecuting = true; _bulkResponse = null;
+        try
+        {
+            var request = System.Text.Json.JsonSerializer.Deserialize<ScimBulkRequest>(_bulkJson,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                ?? throw new InvalidOperationException("Deserialization returned null.");
+            request.FailOnErrors = _failOnErrors;
+            _bulkResponse = await Client.ExecuteScimBulkAsync(request);
+            Toast.Show("Bulk executed.", "online");
+        }
+        catch (Exception ex) { Toast.Show(ex.Message, "error"); }
+        finally { _bulkExecuting = false; }
+    }
+
+    private static string Serialize(object? obj)
+    {
+        try { return System.Text.Json.JsonSerializer.Serialize(obj, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }); }
+        catch { return "{}"; }
+    }
+}

@@ -1,0 +1,83 @@
+@page "/consent"
+@attribute [AllowAnonymous]
+@inject redb.Identity.Web.Auth.ConsentChallengeStateProtector ConsentProtector
+
+<PageTitle>Authorize application — redb.Identity</PageTitle>
+
+<div class="login-backdrop">
+    <div class="login-card">
+        <div class="login-brand">
+            <RdbIcon Name="shield" Size="28" />
+            <span class="login-brand-name">redb.Identity</span>
+        </div>
+
+        @if (!HasState)
+        {
+            <h2 class="login-title">Session expired</h2>
+            <div class="login-error" role="alert" aria-live="polite">
+                <RdbIcon Name="alert-circle" Size="16" />
+                <span>Your sign-in session has expired. Please <a href="/login">start over</a>.</span>
+            </div>
+        }
+        else
+        {
+            <h2 class="login-title">Authorize @AppName</h2>
+            <p class="login-subtitle">
+                @AppName is requesting access to your account. Review the permissions below.
+            </p>
+
+            <ul class="login-scope-list">
+                @foreach (var scope in Scopes)
+                {
+                    <li>@DescribeScope(scope)</li>
+                }
+            </ul>
+
+            <form method="post" action="/api/auth/consent/allow" class="login-form" autocomplete="off">
+                <AntiforgeryToken />
+
+                <div class="login-actions" style="display:flex; gap:var(--space-3);">
+                    <button type="submit" class="btn btn-primary login-btn">
+                        <RdbIcon Name="check" Size="16" />
+                        <span>Allow</span>
+                    </button>
+                    <a href="/api/auth/consent/cancel" class="btn btn-secondary login-btn">
+                        <RdbIcon Name="x" Size="16" />
+                        <span>Deny</span>
+                    </a>
+                </div>
+            </form>
+        }
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] public HttpContext? HttpContext { get; set; }
+
+    private bool HasState;
+    private string AppName = "the application";
+    private string[] Scopes = Array.Empty<string>();
+
+    protected override void OnInitialized()
+    {
+        if (HttpContext is null) { HasState = false; return; }
+        var state = ConsentProtector.ReadCookie(HttpContext);
+        if (state is null) { HasState = false; return; }
+
+        HasState = true;
+        AppName = string.IsNullOrWhiteSpace(state.AppName) ? state.ClientId : state.AppName;
+        Scopes = state.Scopes ?? Array.Empty<string>();
+    }
+
+    private static string DescribeScope(string scope) => scope switch
+    {
+        "openid"          => "Verify your identity (openid)",
+        "profile"         => "View your profile information (profile)",
+        "email"           => "View your email address (email)",
+        "roles"           => "View your role assignments (roles)",
+        "phone"           => "View your phone number (phone)",
+        "address"         => "View your postal address (address)",
+        "offline_access"  => "Stay signed in across sessions (offline_access)",
+        _                 => scope,
+    };
+}

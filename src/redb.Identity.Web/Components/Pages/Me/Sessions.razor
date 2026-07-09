@@ -1,0 +1,163 @@
+@page "/me/sessions"
+@attribute [Authorize]
+@implements IDisposable
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+<RdbPageHeader Title="My sessions" Description="Active sessions for your account across devices." />
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Active sessions</span>
+        <div style="display:flex; gap: var(--space-2);">
+            <button class="btn btn-sm btn-secondary" @onclick="LoadAsync">Refresh</button>
+            @if (_items.Count > 0)
+            {
+                <button class="btn btn-sm btn-danger" @onclick="RevokeOthers" disabled="@_busy">Revoke all other</button>
+            }
+        </div>
+    </div>
+
+    @if (_loading) { <p class="text-secondary">Loading…</p> }
+    else if (_error is not null) { <p class="text-error">@_error</p> }
+    else if (_items.Count == 0) { <p class="text-secondary">No active sessions found.</p> }
+    else
+    {
+        <table class="data-table">
+            <thead><tr><th>Device / UA</th><th>IP</th><th>Started</th><th>Last activity</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var s in _items)
+                {
+                    <tr>
+                        <td>@(GetStr(s, "userAgent") ?? GetStr(s, "device") ?? "—")</td>
+                        <td class="text-secondary">@(GetStr(s, "ip") ?? GetStr(s, "ipAddress") ?? "—")</td>
+                        <td class="text-secondary">@(GetStr(s, "createdAt") ?? GetStr(s, "startedAt") ?? "—")</td>
+                        <td class="text-secondary">@(GetStr(s, "lastActivityAt") ?? GetStr(s, "lastSeenAt") ?? "—")</td>
+                        <td>
+                            @{ var sid = GetLong(s, "sessionId") ?? GetLong(s, "id"); }
+                            @if (sid is long id)
+                            {
+                                <button class="btn btn-sm btn-danger" @onclick="() => Revoke(id)" disabled="@_busy">Revoke</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    private readonly List<JsonElement> _items = new();
+    private bool _loading = true, _busy;
+    private string? _error;
+
+    private PeriodicTimer? _timer;
+    private CancellationTokenSource? _cts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _cts = new CancellationTokenSource();
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+        _ = PollAsync(_cts.Token);
+    }
+
+    private async Task PollAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (await _timer!.WaitForNextTickAsync(ct))
+            {
+                // Background refresh: don't toggle _loading so the table doesn't
+                // flash "Loading…" every 30 seconds; build the new list off-band
+                // and swap atomically.
+                await RefreshSilentAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    public void Dispose()
+    {
+        // Cancel first so PollAsync exits WaitForNextTickAsync via OperationCanceledException.
+        // Do NOT dispose the PeriodicTimer here — racing with an in-flight WaitForNextTickAsync
+        // would surface as ObjectDisposedException, which PollAsync does not catch. The timer
+        // is reachable only from PollAsync's local frame; once cancelled it becomes eligible
+        // for GC together with the cancellation token source.
+        try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
+        _cts?.Dispose();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            var fresh = await FetchAsync();
+            _items.Clear();
+            _items.AddRange(fresh);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task RefreshSilentAsync()
+    {
+        try
+        {
+            var fresh = await FetchAsync();
+            _items.Clear();
+            _items.AddRange(fresh);
+            _error = null;
+        }
+        catch { /* silent on background poll */ }
+    }
+
+    private async Task<List<JsonElement>> FetchAsync()
+    {
+        var list = new List<JsonElement>();
+        var doc = await Client.ListMySessionsAsync();
+        JsonElement arr = doc;
+        if (doc.ValueKind == JsonValueKind.Object && doc.TryGetProperty("items", out var items))
+            arr = items;
+        if (arr.ValueKind == JsonValueKind.Array)
+            foreach (var s in arr.EnumerateArray()) list.Add(s.Clone());
+        return list;
+    }
+
+    private async Task Revoke(long id)
+    {
+        try
+        {
+            await Client.RevokeMySessionAsync(id);
+            Toast.Success("Session revoked");
+            // Silent refresh: avoid the "Loading…" flash right after a successful action;
+            // the toast is the user-visible confirmation.
+            await RefreshSilentAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+
+    private async Task RevokeOthers()
+    {
+        _busy = true;
+        try
+        {
+            await Client.RevokeMyOtherSessionsAsync();
+            Toast.Success("All other sessions revoked");
+            await RefreshSilentAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+        finally { _busy = false; }
+    }
+
+    private static string? GetStr(JsonElement e, string p)
+        => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(p, out var v) && v.ValueKind == JsonValueKind.String
+            ? v.GetString() : null;
+
+    private static long? GetLong(JsonElement e, string p)
+        => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(p, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var l)
+            ? l : null;
+}

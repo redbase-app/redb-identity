@@ -1,0 +1,191 @@
+@page "/admin/roles"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    B.3 — Roles registry admin page. WSO2 IS 7.x layout: paginated list
+    with name search + audience filter; "+ New Role" opens the dedicated
+    /admin/roles/new 2-step wizard.
+*@
+
+<RdbPageHeader Title="Roles"
+               Description="Create and manage roles, assign permissions to them." />
+
+<div class="card" style="margin-bottom: var(--space-4);">
+    <div class="card-header" style="gap: var(--space-3); flex-wrap: wrap;">
+        <div style="display:flex; gap: var(--space-2); align-items:center; flex:1; min-width: 280px;">
+            <RdbIcon Name="search" Size="14" />
+            <input type="text"
+                   class="app-detail__input"
+                   placeholder="Search by role name"
+                   value="@_searchInput"
+                   @oninput="OnSearchChanged"
+                   style="flex:1; min-width:200px;" />
+            <select class="app-detail__input" style="max-width: 200px;"
+                    @bind="_audienceFilter" @bind:after="ReloadAsync">
+                <option value="">Filter By</option>
+                <option value="organization">Organization</option>
+                <option value="application">Application</option>
+            </select>
+        </div>
+        <div style="display:flex; gap: var(--space-2); align-items:center;">
+            <span class="text-secondary" style="font-size: var(--font-size-sm);">
+                @if (_total <= PageSize)
+                {
+                    @($"{_total} role{(_total == 1 ? "" : "s")}")
+                }
+                else
+                {
+                    @($"Showing {_offset + 1}-{Math.Min(_offset + PageSize, _total)} of {_total}")
+                }
+            </span>
+            <button class="btn" disabled="@(_offset == 0 || _loading)" @onclick="PrevPage">‹ Prev</button>
+            <button class="btn" disabled="@(_offset + PageSize >= _total || _loading)" @onclick="NextPage">Next ›</button>
+            <button class="btn btn-primary" @onclick="@(() => Nav.NavigateTo("/admin/roles/new"))">
+                <RdbIcon Name="zap" Size="14" /> New Role
+            </button>
+        </div>
+    </div>
+
+    @if (_loading) { <p class="text-secondary" style="padding: var(--space-4);">Loading…</p> }
+    else if (_error is not null) { <p class="text-error" style="padding: var(--space-4);">@_error</p> }
+    else if (_items.Count == 0)
+    {
+        <UiEmptyState Variant="inline"
+                      Title="@(string.IsNullOrEmpty(_search) ? "No roles yet" : "No roles match the filter")"
+                      Description="@(string.IsNullOrEmpty(_search) ? "Create your first role to start assigning access." : "Try a different name or clear the audience filter.")" />
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="width: 40px;">Role</th>
+                    <th></th>
+                    <th style="width: 200px;">Audience</th>
+                    <th style="width: 120px;">Assignees</th>
+                    <th style="width: 90px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _items)
+                {
+                    <tr style="cursor:pointer;" @onclick="@(() => Nav.NavigateTo($"/admin/roles/{r.Id}"))">
+                        <td>
+                            <div class="apps-list__avatar">@InitialOf(r.Name)</div>
+                        </td>
+                        <td>
+                            <strong>@r.Name</strong>
+                            @if (r.IsSystem)
+                            {
+                                <RdbBadge Text="system" Variant="info" />
+                            }
+                            @if (!string.IsNullOrEmpty(r.DisplayName) && r.DisplayName != r.Name)
+                            {
+                                <div class="text-secondary" style="font-size: var(--font-size-sm); margin-top: var(--space-1);">@r.DisplayName</div>
+                            }
+                            @if (!string.IsNullOrEmpty(r.Description))
+                            {
+                                <div class="text-secondary" style="font-size: var(--font-size-sm); margin-top: var(--space-1);">@r.Description</div>
+                            }
+                        </td>
+                        <td>
+                            <span class="apps-list__chip">@r.Audience</span>
+                            @if (r.Audience == "application" && !string.IsNullOrEmpty(r.ApplicationName))
+                            {
+                                <RdbBadge Text="@r.ApplicationName" Variant="info" />
+                            }
+                        </td>
+                        <td><span class="apps-list__chip">@(r.AssignmentCount ?? 0)</span></td>
+                        <td style="display:flex; gap: var(--space-1); justify-content:flex-end;">
+                            <button class="btn btn-sm" title="Edit"
+                                    @onclick:stopPropagation="true"
+                                    @onclick="@(() => Nav.NavigateTo($"/admin/roles/{r.Id}"))">
+                                <RdbIcon Name="copy" Size="14" />
+                            </button>
+                            @if (!r.IsSystem)
+                            {
+                                <button class="btn btn-sm btn-danger" title="Delete"
+                                        @onclick:stopPropagation="true"
+                                        @onclick="@(() => Delete(r))">
+                                    <RdbIcon Name="alert-triangle" Size="14" />
+                                </button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    private const int PageSize = 25;
+    private const int SearchDebounceMs = 250;
+
+    private readonly List<RoleResponse> _items = new();
+    private int _offset;
+    private int _total;
+    private string _search = "";
+    private string _searchInput = "";
+    private string _audienceFilter = "";
+    private bool _loading = true;
+    private string? _error;
+
+    private System.Threading.Timer? _debounce;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    public void Dispose() => _debounce?.Dispose();
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var page = await Client.SearchRolesAsync(
+                query: string.IsNullOrEmpty(_search) ? null : _search,
+                audience: string.IsNullOrEmpty(_audienceFilter) ? null : _audienceFilter,
+                offset: _offset,
+                count: PageSize);
+            _items.Clear();
+            _items.AddRange(page.Items);
+            _total = page.Total;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private void OnSearchChanged(ChangeEventArgs e)
+    {
+        _searchInput = e.Value?.ToString() ?? "";
+        _debounce?.Dispose();
+        _debounce = new System.Threading.Timer(async _ =>
+        {
+            _search = _searchInput;
+            _offset = 0;
+            await InvokeAsync(ReloadAsync);
+            await InvokeAsync(StateHasChanged);
+        }, null, SearchDebounceMs, System.Threading.Timeout.Infinite);
+    }
+
+    private Task PrevPage() { _offset = Math.Max(0, _offset - PageSize); return ReloadAsync(); }
+    private Task NextPage() { _offset += PageSize; return ReloadAsync(); }
+
+    private async Task Delete(RoleResponse r)
+    {
+        try
+        {
+            await Client.DeleteRoleAsync(r.Id);
+            Toast.Success($"Role '{r.Name}' deleted");
+            await ReloadAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+
+    private static string InitialOf(string? name)
+        => string.IsNullOrEmpty(name) ? "?" : char.ToUpperInvariant(name[0]).ToString();
+}
