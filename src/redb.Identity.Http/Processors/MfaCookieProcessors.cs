@@ -12,7 +12,7 @@ namespace redb.Identity.Http.Processors;
 /// — they emit / consume <c>mfa_state</c> as a body field and these facade processors
 /// bridge that field to/from the cookie. Keeps the core free of
 /// <c>Request</c>/<c>Response</c>/<c>Cookie</c> types while still meeting B3 DoD
-/// ("<c>mfa_state</c> в URL больше нет; cookie <c>__Host-redb.identity.mfa</c>").
+/// ("<c>mfa_state</c> is no longer in the URL; cookie <c>__Host-redb.identity.mfa</c>").
 /// </para>
 /// </summary>
 internal static class MfaCookieProcessors

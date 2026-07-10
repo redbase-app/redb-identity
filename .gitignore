@@ -16,6 +16,7 @@ TestResults/
 appsettings.Development.json
 appsettings.Local.json
 context.json
+redb.license
 *.pem
 *.key
 *.pfx

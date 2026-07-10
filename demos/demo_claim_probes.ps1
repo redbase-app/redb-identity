@@ -156,14 +156,14 @@ $selfTok = Measure-Step "3c. ROPC token for /me (scope=identity:account openid p
 
 # 4) PUT /me — set phone + address.formatted + a custom claim. PhoneNumberVerified
 #    is admin-only, so the demo asserts presence only (value will be "false").
-$ADDRESS_FORMATTED = "ул. Пушкина, дом Колотушкина, кв 42"
+$ADDRESS_FORMATTED = "221B Baker Street, London NW1 6XE"
 Measure-Step "4. PUT /me (phone + address + custom_claims.dept)" {
     Invoke-RestMethod -Method Put "$BASE/api/v1/identity/me" `
       -Headers @{ Authorization = "Bearer $($selfTok.access_token)" } `
       -ContentType "application/json" `
       -Body (@{
         phoneNumber  = "+12025550199"
-        address      = @{ formatted = $ADDRESS_FORMATTED; locality = "Moscow"; country = "RU" }
+        address      = @{ formatted = $ADDRESS_FORMATTED; locality = "London"; country = "GB" }
         customClaims = @{ dept = "engineering" }
       } | ConvertTo-Json -Depth 5) | Out-Null
     Write-Host "  ✓ profile updated" -ForegroundColor Green

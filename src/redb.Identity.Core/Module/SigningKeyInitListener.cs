@@ -17,7 +17,7 @@ namespace redb.Identity.Core.Module;
 /// ring is empty, DataProtection will lazily generate its first key here, which is fine.
 /// </para>
 /// <para>
-/// <b>Cluster coordination (A3 + A6 gap — G12 "distributed-lock на kid"):</b> when
+/// <b>Cluster coordination (A3 + A6 gap — G12 "distributed-lock on kid"):</b> when
 /// <c>IDistributedLock</c> is registered in the root service provider (i.e. when
 /// <c>Tsak:Cluster:Enabled=true</c> and Pro cluster primitives are available), acquires an
 /// exclusive short-TTL lock (<c>identity:keys-init</c>) before invoking

@@ -1,6 +1,6 @@
 # Admin session management — `identity:sessions:write identity:tokens:write` scope axis.
 #
-# Closes the ⚠️ "admin-сценарий не probed" entry in §4 of the coverage matrix.
+# Closes the ⚠️ "admin scenario not probed" entry in §4 of the coverage matrix.
 # All routes go through SessionsController (NOT MeSessionsController), so the admin
 # may revoke ANOTHER user's sessions and the GranularScopeGuard gates on
 # `identity:sessions:write identity:tokens:write` (not Account).

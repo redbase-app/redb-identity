@@ -1,0 +1,78 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.0.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="FluentAssertions" Version="6.12.2" />
+    <PackageReference Include="NSubstitute" Version="5.3.0" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.3" />
+    <!-- NU1603: 10.0.3 didn't ship; resolved to 10.1.0. Pin the actual version. -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\redb.Identity.Core\redb.Identity.Core.csproj" />
+    <ProjectReference Include="..\..\src\redb.Identity.Http\redb.Identity.Http.csproj" />
+    <ProjectReference Include="..\..\src\redb.Identity.Ldap\redb.Identity.Ldap.csproj" />
+    <ProjectReference Include="..\..\src\redb.Identity.Resource.Dpop\redb.Identity.Resource.Dpop.csproj" />
+    <PackageReference Include="redb.Core.Pro" Version="3.3.0" />
+    <PackageReference Include="redb.Postgres" Version="3.3.0" />
+    <PackageReference Include="redb.Postgres.Pro" Version="3.3.0" />
+    <!-- SQLite provider — the default for the test suite. Postgres / MSSQL
+         remain available via REDB_PROVIDER={postgres|mssql} for integration
+         scenarios that specifically need them (broker tests, prod-shape
+         probes). All three project references are required so the runtime
+         can select any of the three. -->
+    <PackageReference Include="redb.SQLite" Version="3.3.0" />
+    <PackageReference Include="redb.SQLite.Pro" Version="3.3.0" />
+    <PackageReference Include="redb.MSSql" Version="3.3.0" />
+    <PackageReference Include="redb.MSSql.Pro" Version="3.3.0" />
+    <PackageReference Include="redb.Route" Version="3.3.0" />
+    <PackageReference Include="redb.Route.Sql" Version="3.3.0" />
+    <PackageReference Include="redb.Route.Elasticsearch" Version="3.3.0" />
+    <PackageReference Include="redb.Route.RabbitMQ" Version="3.3.0" />
+    <PackageReference Include="redb.Route.Kafka" Version="3.3.0" />
+    <PackageReference Include="redb.Route.Redis" Version="3.3.0" />
+    <PackageReference Include="redb.Route.MqttNet" Version="3.3.0" />
+    <PackageReference Include="redb.Route.Amqp" Version="3.3.0" />
+    <PackageReference Include="redb.Route.IbmMq" Version="3.3.0" />
+    <PackageReference Include="redb.Route.Ldap" Version="3.3.0" />
+    <!-- N-4 (Session C): greenmail-backed SMTP integration test exercises the
+         redb.Route.Mail DSL end-to-end through SmtpEmailNotificationChannel. -->
+    <PackageReference Include="redb.Route.Mail" Version="3.3.0" />
+    <!--
+      Tsak host SPI used by tests (e.g. IModuleHealthContributor / HealthStatus). The
+      Identity production projects exclude these at runtime (host provides them); tests
+      bring them in normally so unit tests can construct contributor instances.
+    -->
+    <PackageReference Include="redb.Tsak.Core" Version="3.3.0" />
+    <PackageReference Include="redb.Tsak.Contracts" Version="3.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="xunit.runner.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>
+

@@ -15,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="redb.Identity.Tests" />
   </ItemGroup>
 
 </Project>

@@ -85,7 +85,7 @@ public class ApplicationProps
     /// <summary>Requirements: ["ft:pkce"].</summary>
     public string[]? Requirements { get; set; }
 
-    /// <summary>Localized display names: { "en": "My App", "ru": "Мой App" }.</summary>
+    /// <summary>Localized display names: { "en": "My App", "de": "Meine App" }.</summary>
     public Dictionary<string, string>? DisplayNames { get; set; }
 
     /// <summary>Extensible settings bag (OpenIddict Settings — string values).</summary>

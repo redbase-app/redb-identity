@@ -22,7 +22,7 @@ public class ScopeProps
     /// <summary>Resource servers this scope grants access to.</summary>
     public string[]? Resources { get; set; }
 
-    /// <summary>Localized display names: { "en": "Profile", "ru": "Профиль" }.</summary>
+    /// <summary>Localized display names: { "en": "Profile", "de": "Profil" }.</summary>
     public Dictionary<string, string>? DisplayNames { get; set; }
 
     /// <summary>Localized descriptions.</summary>

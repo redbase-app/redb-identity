@@ -16,7 +16,7 @@ public sealed class FederatedIdentityResponse
     /// successful login through this link, if the IdP exposed it.</summary>
     public string? ExternalEmail { get; init; }
 
-    /// <summary>Display name from the external IdP (e.g. <c>Иван Иванов</c>), if available.</summary>
+    /// <summary>Display name from the external IdP (e.g. <c>Jane Doe</c>), if available.</summary>
     public string? ExternalDisplayName { get; init; }
 
     /// <summary>UTC timestamp when the link was first established.</summary>

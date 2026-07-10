@@ -10,4 +10,9 @@
     <Project Path="src/redb.Identity.Client/redb.Identity.Client.csproj" />
     <Project Path="src/redb.Identity.Web/redb.Identity.Web.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/redb.Identity.Tests/redb.Identity.Tests.csproj" />
+    <Project Path="tests/redb.Identity.Client.Tests/redb.Identity.Client.Tests.csproj" />
+    <Project Path="tests/redb.Identity.Web.Tests/redb.Identity.Web.Tests.csproj" />
+  </Folder>
 </Solution>

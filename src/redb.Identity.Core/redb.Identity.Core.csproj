@@ -85,6 +85,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="redb.Identity.Tests" />
     <InternalsVisibleTo Include="redb.Identity.Http" />
     <!--
       The thin Tsak-entry-point project (redb.Identity.Core.Module) consumes

@@ -769,7 +769,7 @@ public static class RedbIdentityServiceExtensions
 
         var dp = options.DataProtection;
 
-        // Variant Б — KMS / Vault hook. Highest priority because it's the most explicit
+        // Variant B — KMS / Vault hook. Highest priority because it's the most explicit
         // configuration the operator can supply.
         if (dp.CustomEncryptorFactory is not null)
         {
@@ -780,7 +780,7 @@ public static class RedbIdentityServiceExtensions
             return builder;
         }
 
-        // Variant А — X.509 certificate. PFX-on-disk wins over thumbprint when both are set
+        // Variant A — X.509 certificate. PFX-on-disk wins over thumbprint when both are set
         // (operator presumably picked PFX deliberately).
         if (dp.Certificate.IsConfigured)
         {
@@ -792,7 +792,7 @@ public static class RedbIdentityServiceExtensions
             return builder;
         }
 
-        // Variant В — AES-GCM master key. Smallest deployments / dev.
+        // Variant C — AES-GCM master key. Smallest deployments / dev.
         if (!string.IsNullOrWhiteSpace(dp.MasterKey))
         {
             byte[] keyBytes;

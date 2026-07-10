@@ -24,7 +24,7 @@ function Measure-Step {
 
 $total = [System.Diagnostics.Stopwatch]::StartNew()
 
-# 1) DCR — регистрация клиента
+# 1) DCR — client registration
 $reg = Measure-Step "1. DCR /connect/register" {
     Invoke-RestMethod -Method Post http://127.0.0.1:5002/connect/register `
       -ContentType "application/json" `
@@ -38,7 +38,7 @@ $reg = Measure-Step "1. DCR /connect/register" {
 $reg | Format-List client_id, client_secret
 
 
-# 2) Регистрация пользователя (если ещё нет)
+# 2) Register the user (if not already present)
 Measure-Step "2. account/register" {
     try {
         Invoke-RestMethod -Method Post http://127.0.0.1:5002/api/v1/identity/account/register `
@@ -71,7 +71,7 @@ $tok = Measure-Step "3. password grant /connect/token" {
 $tok | Format-List access_token, id_token, refresh_token, expires_in
 
 
-# 4) Декодировать id_token (JWS — читается без ключа)
+# 4) Decode id_token (JWS — readable without a key)
 function Decode-Jwt([string]$jwt) {
   $payload = $jwt.Split('.')[1].Replace('-','+').Replace('_','/')
   $payload += '=' * ((4 - $payload.Length % 4) % 4)
@@ -83,7 +83,7 @@ Measure-Step "4. decode id_token (local)" {
 } | Out-Host
 
 
-# 5) access_token — JWE-encrypted, claims через /connect/userinfo
+# 5) access_token — JWE-encrypted, claims via /connect/userinfo
 Measure-Step "5. /connect/userinfo" {
     Invoke-RestMethod http://127.0.0.1:5002/connect/userinfo `
       -Headers @{ Authorization = "Bearer $($tok.access_token)" } | ConvertTo-Json
