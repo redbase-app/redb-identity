@@ -6,6 +6,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>redb.Identity.Web</RootNamespace>
     <UserSecretsId>redb-identity-web-dev</UserSecretsId>
+    <!-- Reference BFF application host — shipped as source in the public repo,
+         not as a NuGet library (mirrors how redb.Tsak.Web/Worker are excluded). -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>

@@ -3,6 +3,7 @@
   <PropertyGroup>
     <AssemblyName>redb.Identity.Http</AssemblyName>
     <RootNamespace>redb.Identity.Http</RootNamespace>
+    <Description>HTTP / HTTPS facade for redb.Identity — OIDC discovery, token, authorize, userinfo, introspect, revoke, JWKS, PAR, DCR, SCIM, /me and management endpoints.</Description>
   </PropertyGroup>
 
   <ItemGroup>

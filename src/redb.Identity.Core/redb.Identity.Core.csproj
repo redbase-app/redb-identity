@@ -3,6 +3,7 @@
   <PropertyGroup>
     <AssemblyName>redb.Identity.Core</AssemblyName>
     <RootNamespace>redb.Identity.Core</RootNamespace>
+    <Description>OAuth 2.1 / OpenID Connect engine for redb.Identity — OpenIddict pipeline on redb.Route, redb-backed stores, MFA, WebAuthn, federation, DataProtection and signing keys.</Description>
   </PropertyGroup>
 
   <ItemGroup>

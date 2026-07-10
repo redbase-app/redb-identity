@@ -3,6 +3,7 @@
   <PropertyGroup>
     <AssemblyName>redb.Identity.DataProtection</AssemblyName>
     <RootNamespace>redb.Identity.DataProtection</RootNamespace>
+    <Description>redb-backed ASP.NET Core DataProtection key repository (RedbXmlRepository) for redb.Identity facades.</Description>
   </PropertyGroup>
 
   <ItemGroup>

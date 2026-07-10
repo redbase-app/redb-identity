@@ -7,6 +7,9 @@
 [![.NET](https://img.shields.io/badge/.NET-8%20%7C%209%20%7C%2010-purple)](https://dotnet.microsoft.com)
 [![Tests](https://img.shields.io/badge/tests-1767%20passing%20(PG%20%7C%20MSSQL%20%7C%20SQLite)-brightgreen)](#testing)
 [![Providers](https://img.shields.io/badge/storage-PostgreSQL%20%7C%20MSSQL%20%7C%20SQLite-336791)](#provider-matrix-zero-code-changes-between-rows)
+[![NuGet: redb.Identity.Core](https://img.shields.io/nuget/v/redb.Identity.Core?label=nuget%3A%20Core&color=004880)](https://www.nuget.org/packages/redb.Identity.Core)
+[![NuGet: redb.Identity.Http](https://img.shields.io/nuget/v/redb.Identity.Http?label=nuget%3A%20Http&color=004880)](https://www.nuget.org/packages/redb.Identity.Http)
+[![NuGet: redb.Identity.Client](https://img.shields.io/nuget/v/redb.Identity.Client?label=nuget%3A%20Client&color=004880)](https://www.nuget.org/packages/redb.Identity.Client)
 [![Status](https://img.shields.io/badge/status-1.0.1-orange)](#)
 [![OIDC](https://img.shields.io/badge/OpenID_Connect-Core_1.0-1F4E79)](#openid-connect)
 [![OAuth](https://img.shields.io/badge/OAuth-2.1_%2B_RFC_6749-4A148C)](#oauth-2x-core)
@@ -36,7 +39,34 @@
 | SCIM 2.0 provisioning | Users + Groups + Bulk endpoints (RFC 7644). |
 | RFC compliance | OIDC Core, OAuth 2.1, RFC 7662 (Introspection), RFC 7591/7592 (DCR), RFC 8628 (Device Code), RFC 9126 (PAR), RFC 9449 (DPoP), RFC 8417 / OIDC Backchannel Logout. |
 
-**Not on NuGet yet.** The project is in active development; this README documents what is shipped today inside the source tree. NuGet packages and versioning will land with the public release.
+## Install (NuGet)
+
+Published as of **`1.0.1`**. Add the pieces you need — the provider is chosen by the host:
+
+```pwsh
+# Core OIDC / OAuth 2.1 engine (OpenIddict on redb.Route) + a storage provider
+dotnet add package redb.Identity.Core
+dotnet add package redb.Postgres.Pro      # or redb.MSSql.Pro / redb.SQLite.Pro
+
+# HTTP facade (OIDC + management + SCIM endpoints)
+dotnet add package redb.Identity.Http
+
+# Typed client SDK (IIdentityClient) — for BFFs / services calling Identity
+dotnet add package redb.Identity.Client
+```
+
+| Package | Purpose |
+|---|---|
+| [`redb.Identity.Core`](https://www.nuget.org/packages/redb.Identity.Core) | OAuth 2.1 / OIDC engine — OpenIddict pipeline, redb stores, MFA, WebAuthn, federation, signing keys |
+| [`redb.Identity.Http`](https://www.nuget.org/packages/redb.Identity.Http) | HTTP / HTTPS facade — discovery, token, authorize, userinfo, introspect, JWKS, PAR, DCR, SCIM, `/me`, management |
+| [`redb.Identity.Contracts`](https://www.nuget.org/packages/redb.Identity.Contracts) | Wire DTOs + route-name constants (shared by Core, Http, Client) |
+| [`redb.Identity.Client`](https://www.nuget.org/packages/redb.Identity.Client) | Typed HTTP SDK (`IIdentityClient`) + backchannel OIDC client |
+| [`redb.Identity.DataProtection`](https://www.nuget.org/packages/redb.Identity.DataProtection) | redb-backed ASP.NET Core DataProtection key-ring |
+| [`redb.Identity.Core.Module`](https://www.nuget.org/packages/redb.Identity.Core.Module) | redb.Tsak `.tpkg` host glue (only when hosting inside a Tsak worker) |
+| [`redb.Identity.Ldap`](https://www.nuget.org/packages/redb.Identity.Ldap) | LDAP / Active Directory federation provider |
+| [`redb.Identity.Resource.Dpop`](https://www.nuget.org/packages/redb.Identity.Resource.Dpop) | Resource-server DPoP (RFC 9449) validator for downstream APIs |
+
+> The reference BFF + Blazor admin UI (`redb.Identity.Web`) ships as **source** in this repo, not as a package — clone and run it, or lift it as a starting point.
 
 ---
 
@@ -679,7 +709,8 @@ Critical-severity findings from internal review (CLU-1 .. CLU-5) are closed and 
 
 ## Quick start
 
-> Until packages are on NuGet, building from source is the only path. NuGet + Docker images will follow the public release.
+> Packages are on NuGet (see [Install](#install-nuget)). The steps below build the
+> `.tpkg` modules from source for hosting inside a redb.Tsak worker.
 
 ### 1. Build
 

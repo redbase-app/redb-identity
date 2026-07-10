@@ -3,6 +3,7 @@
   <PropertyGroup>
     <AssemblyName>redb.Identity.Core.Module</AssemblyName>
     <RootNamespace>redb.Identity.Core.Module</RootNamespace>
+    <Description>redb.Tsak .tpkg host glue for redb.Identity.Core — IRouteModule entry point, configuration binding and named-redb wiring.</Description>
 
     <!--
       Force NuGet PackageReference assemblies (OpenIddict, Konscious.Argon2,
