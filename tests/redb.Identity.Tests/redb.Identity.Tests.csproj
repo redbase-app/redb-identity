@@ -44,14 +44,14 @@
     <PackageReference Include="redb.MSSql" Version="3.3.0" />
     <PackageReference Include="redb.MSSql.Pro" Version="3.3.0" />
     <PackageReference Include="redb.Route" Version="3.3.1" />
-    <PackageReference Include="redb.Route.Sql" Version="3.3.0" />
-    <PackageReference Include="redb.Route.Elasticsearch" Version="3.3.0" />
-    <PackageReference Include="redb.Route.RabbitMQ" Version="3.3.0" />
-    <PackageReference Include="redb.Route.Kafka" Version="3.3.0" />
+    <PackageReference Include="redb.Route.Sql" Version="3.3.1" />
+    <PackageReference Include="redb.Route.Elasticsearch" Version="3.3.1" />
+    <PackageReference Include="redb.Route.RabbitMQ" Version="3.3.1" />
+    <PackageReference Include="redb.Route.Kafka" Version="3.3.1" />
     <PackageReference Include="redb.Route.Redis" Version="3.3.1" />
-    <PackageReference Include="redb.Route.MqttNet" Version="3.3.0" />
-    <PackageReference Include="redb.Route.Amqp" Version="3.3.0" />
-    <PackageReference Include="redb.Route.IbmMq" Version="3.3.0" />
+    <PackageReference Include="redb.Route.MqttNet" Version="3.3.1" />
+    <PackageReference Include="redb.Route.Amqp" Version="3.3.1" />
+    <PackageReference Include="redb.Route.IbmMq" Version="3.3.1" />
     <PackageReference Include="redb.Route.Ldap" Version="3.3.1" />
     <!-- N-4 (Session C): greenmail-backed SMTP integration test exercises the
          redb.Route.Mail DSL end-to-end through SmtpEmailNotificationChannel. -->
