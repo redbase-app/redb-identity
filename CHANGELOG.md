@@ -51,11 +51,14 @@ First public source release of redb.Identity.
   over `direct-vm://` with zero network, and `redb.Identity.Web` is a reference
   BFF (Contracts + Client only, never Core/Http).
 - **Publication tooling.** `scripts/publish-identity-public.ps1` prepares the
-  public repo — copies the nine OSS source projects, the demo suite and the
-  pack-tpkg helper, patches cross-repo `redb.Core` / `redb.Route.*` /
-  `redb.Tsak.*` ProjectReferences to NuGet PackageReferences, and **excludes**
-  `doc/` (internal notes) and `tests/` (depend on Pro internals + the
-  multi-provider harness).
+  public repo — copies the nine OSS source projects, the demo suite, the dev /
+  build helper scripts **and the full `tests/` tree** (all three test projects,
+  so the 1767-passing multi-provider suite ships for the community to read and
+  run), patches cross-repo `redb.Core*` / `redb.*` provider / `redb.Route.*` /
+  `redb.Tsak.*` ProjectReferences to NuGet PackageReferences, strips the Pro
+  `redb.license` and sanitises sample config, and **excludes** only `doc/`
+  (internal notes). A Cyrillic guard blocks the push if any non-English text
+  slips in.
 
 ## [1.0.0-preview.1] — Unreleased
 
