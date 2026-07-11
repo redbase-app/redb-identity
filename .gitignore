@@ -15,11 +15,13 @@ TestResults/
 # Secrets / local config
 appsettings.Development.json
 appsettings.Local.json
-context.json
 redb.license
 *.pem
 *.key
 *.pfx
+# …but ship ONE throwaway self-signed localhost dev cert so HTTPS works out of the box
+# (password "changeit"). Regenerate / replace it for any real deployment — see HTTPS.md.
+!certs/identity-dev.pfx
 
 # Runtime artifacts
 src/**/Libs/
