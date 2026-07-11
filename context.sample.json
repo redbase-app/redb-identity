@@ -100,8 +100,10 @@
         "//RedbInstanceName": "Must match Contexts.default.RedbInstanceName above. Flip between 'identity-pg' and 'identity-sqlite' (or any other instance you register in Contexts.default.Redb) to switch the whole Identity stack between providers.",
         "RedbInstanceName": "identity-pg",
 
-        "Issuer": "http://127.0.0.1:5002",
+        "Issuer": "https://host.docker.internal:5002",
         "//IssuerNote": "MUST match redb.Identity.Web appsettings.json -> Identity:Authority / Identity:ApiBaseUrl and the Issuer claim emitted in id_token. PROD: front with a TLS-terminating reverse proxy and set Issuer to the public https URL.",
+        "//RequirePkce": "Mandatory PKCE (OAuth 2.1) is the in-code default (true). Set false to ALSO accept plain authorization_code without a code_challenge — required to certify the OpenID 'Basic OP' profile, whose non-PKCE tests expect the OP to accept such requests. PKCE, when sent, is still S256-only. PROD: leave true (or omit).",
+        "RequirePkce": false,
         "AllowEphemeralKeys": false,
         "//UsePropsSigningKeyStore": [
           "When true, signing keys are persisted in the props store (DataProtection-encrypted)",
@@ -559,7 +561,7 @@
     ],
     "identity.http": {
       "IdentityTransport": {
-        "Issuer": "http://127.0.0.1:5002",
+        "Issuer": "https://host.docker.internal:5002",
         "//IssuerNote": "Mirror of Identity:Issuer (identity.core context). Tsak isolates context property buckets, so the HTTP facade can't read identity.core's Identity:Issuer directly. Drives discovery URLs + cookie Secure flag (https => Secure).",
         "Http": {
           "//": [
@@ -575,6 +577,19 @@
           "PublicPort": 5002,
           "//ManagementPort": "PROD: separate firewalled port, e.g. 5003. Null = share PublicPort (DEV only).",
           "ManagementPort": null,
+          "//Ssl": [
+            "Serve the facade over HTTPS natively (Kestrel, via the redb.Route.Http connector).",
+            "When true, SslCertPath MUST point to a PFX and Issuer (both identity.core + identity.http)",
+            "MUST use the matching https URL so discovery, iss claims and the Secure cookie flag are",
+            "emitted correctly. These values are currently set for the LOCAL OpenID conformance suite,",
+            "which runs in Docker and reaches the OP at https://host.docker.internal:5002.",
+            "For plain non-Docker dev, set Ssl=false and Issuer back to http://127.0.0.1:5002.",
+            "SslCertPassword is a SECRET in production — supply via an L5 Override env-var:",
+            "  Tsak__Contexts__identity.http__Override__IdentityTransport__Http__SslCertPassword=<PASSWORD>"
+          ],
+          "Ssl": true,
+          "SslCertPath": "C:/Work/yaml/conformance/certs/redb-identity-dev.pfx",
+          "SslCertPassword": "changeit",
           "CorsEnabled": false,
           "CorsRegisteredClientOriginsEnabled": true,
           "//AdditionalAllowedOrigins": "CSV without trailing slash. Example: 'https://app.dev.local,https://staging.example.com'. NEVER '*'.",

@@ -34,6 +34,7 @@ $interactive = @('demo_device_code.ps1')
 $ordered = @(
     'demo_discovery_jwks.ps1',
     'demo_discovery_shape.ps1',         # Discovery JSON shape lock + RFC 9449 §5 catalog
+    'demo_conformance_discovery_config.ps1', # OpenID Config OP profile — §3 completeness + jwks/alg + PKCE/S256 + cert warnings
     'demo_dcr_lifecycle.ps1',
     'demo_client_credentials.ps1',
     'demo_private_key_jwt.ps1',         # RFC 7523 — private_key_jwt client assertion (DCR + token + introspect + negative)
@@ -50,6 +51,8 @@ $ordered = @(
     'demo_federation_github.ps1',       # GitHub OAuth2-only path (non-OIDC, REST /user + /user/emails) via self-hosted pwsh HttpListener mock
     # ── Grants + token lifecycle ──────────────────────────────────────────────
     'demo_authcode_pkce.ps1',
+    'demo_nonce_state_roundtrip.ps1',   # OIDC Core — nonce→id_token verbatim, state echo
+    'demo_authz_negative_matrix.ps1',   # RFC 6749 §4.1.2.1 — /authorize error contracts + open-redirect guard
     'demo_auth_extras.ps1',             # RFC 9207 iss + prompt=none + form_post + fragment
     'demo_device_code.ps1',
     'demo_device_code_ci.ps1',          # RFC 8628 non-interactive shape + authorization_pending

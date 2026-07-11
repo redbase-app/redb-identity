@@ -12,7 +12,9 @@
 # upstream IdP and is out of scope for a scriptable demo.
 # Usage: pwsh -File demo_federation.ps1
 
-$BASE = "http://127.0.0.1:5002"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $timings = [System.Collections.Generic.List[object]]::new()
 
 function Measure-Step {
@@ -95,26 +97,20 @@ if (-not $firstId) {
 }
 $redirectUrl = "$BASE/connect/external-login?provider=$firstId&returnUrl=/"
 $redirect = Measure-Step "4. GET /connect/external-login?provider=$firstId" {
+    # Raw HttpClient (no auto-redirect, accept the dev TLS cert) so the 302 to the upstream
+    # IdP is observed directly. The upstream Authority may be http://, which would otherwise
+    # trip PowerShell's HTTPS→HTTP redirect guard when the OP runs on an https base.
+    $h = [System.Net.Http.HttpClientHandler]::new()
+    $h.AllowAutoRedirect = $false
+    $h.ServerCertificateCustomValidationCallback = [System.Net.Http.HttpClientHandler]::DangerousAcceptAnyServerCertificateValidator
+    $c = [System.Net.Http.HttpClient]::new($h)
     try {
-        # MaximumRedirection 0 → don't follow; we want to inspect the 302 itself.
-        $resp = Invoke-WebRequest -Uri $redirectUrl -MaximumRedirection 0 -ErrorAction Stop
-        # A 200 here means the server didn't redirect — surface that as a failure.
-        throw "Expected 302 redirect but got $($resp.StatusCode)"
-    } catch [System.Net.Http.HttpRequestException] {
-        # PowerShell 7 surfaces 3xx-when-redirects-disabled as HttpRequestException.
-        # Re-issue with -SkipHttpErrorCheck to capture the response.
-        $resp = Invoke-WebRequest -Uri $redirectUrl -MaximumRedirection 0 -SkipHttpErrorCheck
-        $resp
-    } catch {
-        # Older pwsh hosts: WebException carries the response.
-        if ($_.Exception.Response) {
-            $r = $_.Exception.Response
-            [pscustomobject]@{
-                StatusCode = [int]$r.StatusCode
-                Headers    = @{ Location = $r.Headers.Location.ToString() }
-            }
-        } else { throw }
-    }
+        $resp = $c.GetAsync($redirectUrl).GetAwaiter().GetResult()
+        [pscustomobject]@{
+            StatusCode = [int]$resp.StatusCode
+            Headers    = @{ Location = if ($resp.Headers.Location) { $resp.Headers.Location.ToString() } else { $null } }
+        }
+    } finally { $c.Dispose() }
 }
 
 $status = if ($redirect.StatusCode) { [int]$redirect.StatusCode } else { 0 }

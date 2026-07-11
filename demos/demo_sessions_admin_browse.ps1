@@ -19,7 +19,9 @@
 #   8.  GET /sessions with identity:read scope → 200 (read-only universal)
 #   9.  Cleanup
 
-$BASE = "http://127.0.0.1:5002"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $timings = [System.Collections.Generic.List[object]]::new()
 
 function Measure-Step {

@@ -6,7 +6,10 @@
 #   request_uri, and invalid client rejection.
 # Usage: pwsh -File demo_par.ps1
 
-$BASE    = "http://127.0.0.1:5002"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
+$REDIRECT_CB = if ($BASE -like 'https:*') { 'https://localhost:9999/cb' } else { 'http://localhost:9999/cb' }
 $timings = [System.Collections.Generic.List[object]]::new()
 
 function Measure-Step {
@@ -46,7 +49,7 @@ $reg = Measure-Step "1. DCR /connect/register (authorization_code + PKCE)" {
       -ContentType "application/json" `
       -Body (@{
         client_name   = "par-demo"
-        redirect_uris = @("http://localhost:9999/cb")
+        redirect_uris = @($REDIRECT_CB)
         grant_types   = @("authorization_code","refresh_token")
         scope         = "openid profile email"
       } | ConvertTo-Json)
@@ -65,7 +68,7 @@ $par = Measure-Step "2. POST /connect/par (RFC 9126 §2)" {
         response_type         = "code"
         client_id             = $reg.client_id
         client_secret         = $reg.client_secret
-        redirect_uri          = "http://localhost:9999/cb"
+        redirect_uri          = $REDIRECT_CB
         scope                 = "openid profile email"
         state                 = $state
         nonce                 = $nonce
@@ -135,7 +138,7 @@ Measure-Step "5. PAR with wrong client_secret (expect 400/401)" {
             response_type = "code"
             client_id     = $reg.client_id
             client_secret = "bogus-secret-$(Get-Random)"
-            redirect_uri  = "http://localhost:9999/cb"
+            redirect_uri  = $REDIRECT_CB
             scope         = "openid"
           } | Out-Null
         Write-Host "  ! UNEXPECTED success — invalid secret accepted" -ForegroundColor Red
@@ -175,7 +178,7 @@ Measure-Step "7. PAR with response_type=token (implicit — expect 400)" {
             response_type = "token"
             client_id     = $reg.client_id
             client_secret = $reg.client_secret
-            redirect_uri  = "http://localhost:9999/cb"
+            redirect_uri  = $REDIRECT_CB
             scope         = "openid"
           } | Out-Null
         Write-Host "  ! implicit flow accepted (should be disabled per OAuth 2.1)" -ForegroundColor Yellow

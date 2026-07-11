@@ -72,17 +72,102 @@ internal sealed class HandleAuthorizationRequestHandler : IOpenIddictServerHandl
 
         var prompt = context.Request.Prompt;
 
-        // prompt=login: force re-authentication even if session exists
-        if (prompt?.Contains("login") == true)
-        {
-            var exchange = context.Transaction.GetRouteExchange();
-            if (exchange is not null)
-                exchange.Properties["force_login"] = true;
+        // Set once the re-auth gate below is satisfied; the marker cookie is consumed only on the
+        // FINAL success (not here) so an intervening consent round-trip does not lose it.
+        var reauthGateSatisfied = false;
 
-            context.Reject(
-                error: Errors.LoginRequired,
-                description: "Re-authentication required (prompt=login).");
-            return;
+        // ── Re-authentication gate (OIDC §3.1.2.1) — prompt=login / max_age ──────────────────
+        // Both force the End-User to (re)authenticate: prompt=login unconditionally; max_age when
+        // the last authentication (auth_time) is older than the allowed age. We enforce them the
+        // SAME way — send the user to /login (a plain login_required that the HTTP facade turns
+        // into a /login redirect, NOT an error delivered to the RP) and complete once they have
+        // re-authenticated. The redirect loop is broken WITHOUT a bypass by a DataProtection-signed
+        // re-auth marker cookie (see SessionCookieProcessors.HandleReauthCookie): we stamp "re-auth
+        // requested at T" and only accept the request once the session's auth_time is >= T, i.e. the
+        // End-User authenticated AFTER we asked. The marker is consumed (cookie expired) on success
+        // so a stale marker can never satisfy a later prompt=login. Runs BEFORE the no-principal
+        // check so prompt=login for a logged-out user needs only a single /login (the marker is set
+        // even without a principal — it is just a timestamp).
+        {
+            var promptLogin = prompt?.Contains("login") == true;
+
+            // max_age. OpenIddict normalises max_age=0 to null, but §3.1.2.1 still demands re-auth
+            // in that case, so read the raw parameter as a fallback.
+            long? maxAge = context.Request.MaxAge;
+            if (!maxAge.HasValue)
+            {
+                var rawParam = context.Request.GetParameter("max_age");
+                var raw = rawParam.HasValue ? rawParam.Value.Value?.ToString() : null;
+                if (long.TryParse(raw, System.Globalization.NumberStyles.Integer,
+                                  System.Globalization.CultureInfo.InvariantCulture, out var rawMaxAge)
+                    && rawMaxAge >= 0)
+                {
+                    maxAge = rawMaxAge;
+                }
+            }
+
+            var maxAgeStale = false;
+            if (context.Principal is not null && maxAge.HasValue)
+            {
+                var authTimeClaim = context.Principal.GetClaim(Claims.AuthenticationTime);
+                var nowSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                maxAgeStale = true; // absent auth_time → treat as stale
+                if (long.TryParse(authTimeClaim, System.Globalization.NumberStyles.Integer,
+                                  System.Globalization.CultureInfo.InvariantCulture, out var authTime))
+                {
+                    // `>=` so max_age=0 deterministically forces re-auth even at the second boundary.
+                    maxAgeStale = (nowSeconds - authTime) >= maxAge.Value;
+                }
+            }
+
+            if (promptLogin || maxAgeStale)
+            {
+                var exchange = context.Transaction.GetRouteExchange();
+
+                // The session active on THIS request (0 = none). ReadSessionCookie decodes it from
+                // the session ticket into the "session_id" header.
+                long currentSessionId = 0;
+                if (exchange is not null && exchange.In.Headers.TryGetValue("session_id", out var sidObj))
+                {
+                    currentSessionId = sidObj is long sl ? sl
+                        : (sidObj is string ss && long.TryParse(ss, out var psl) ? psl : 0);
+                }
+
+                // Did the End-User sign in again since we forced re-auth? The signed re-auth marker
+                // (ReadSessionCookie → "reauth_marked_sid") carries the session that was active when
+                // we asked; a fresh /login always mints a NEW session, so a CHANGED active session id
+                // proves the re-authentication. Keying on the session id — not the second-precision
+                // auth_time — removes the same-second window where an unchanged session could be
+                // mistaken for a re-auth.
+                var reauthSatisfied = false;
+                if (exchange is not null && exchange.In.Headers.TryGetValue("reauth_marked_sid", out var markedObj))
+                {
+                    long markedSid = markedObj is long ml ? ml
+                        : (markedObj is string ms && long.TryParse(ms, out var pml) ? pml : 0);
+                    // currentSessionId != 0 covers the logged-out prompt=login case (marked 0, now a
+                    // real session); != markedSid covers the logged-in case (session replaced by /login).
+                    reauthSatisfied = currentSessionId != 0 && currentSessionId != markedSid;
+                }
+
+                if (reauthSatisfied)
+                {
+                    // Re-auth done — proceed. The marker is consumed on the final success below,
+                    // so a consent round-trip in between does not drop it.
+                    reauthGateSatisfied = true;
+                }
+                else
+                {
+                    // Force (re)authentication: mark the current session and reject with a plain
+                    // login_required (no force_login) so the facade redirects to /login.
+                    if (exchange is not null) exchange.Properties["reauth_set"] = currentSessionId;
+                    context.Reject(
+                        error: Errors.LoginRequired,
+                        description: promptLogin
+                            ? "Re-authentication required (prompt=login)."
+                            : "Re-authentication required (max_age exceeded).");
+                    return;
+                }
+            }
         }
 
         // prompt=none: MUST NOT display any UI — if no principal, reject immediately.
@@ -107,53 +192,6 @@ internal sealed class HandleAuthorizationRequestHandler : IOpenIddictServerHandl
                 error: Errors.LoginRequired,
                 description: "User authentication is required. Please log in.");
             return;
-        }
-
-        // OIDC Core §3.1.2.1 — max_age: if supplied, the OP MUST re-authenticate the
-        // End-User when more than `max_age` seconds have elapsed since their last active
-        // authentication. We read from `context.Request.MaxAge` and fall back to the
-        // raw parameter dictionary because OpenIddict's typed property normalises
-        // `max_age=0` to null (treats it as "no constraint") even though OIDC §3.1.2.1
-        // explicitly demands re-auth in that case. We compare against the `auth_time`
-        // claim (NumericDate) emitted by IdentityPrincipalBuilder; an absent auth_time
-        // means the session predates the claim and is treated as stale.
-        long? maxAge = context.Request.MaxAge;
-        if (!maxAge.HasValue)
-        {
-            var rawParam = context.Request.GetParameter("max_age");
-            var raw = rawParam.HasValue ? rawParam.Value.Value?.ToString() : null;
-            if (long.TryParse(raw, System.Globalization.NumberStyles.Integer,
-                              System.Globalization.CultureInfo.InvariantCulture, out var rawMaxAge)
-                && rawMaxAge >= 0)
-            {
-                maxAge = rawMaxAge;
-            }
-        }
-        if (maxAge.HasValue)
-        {
-            var authTimeClaim = context.Principal.GetClaim(Claims.AuthenticationTime);
-            var nowSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            var stale = true;
-            if (long.TryParse(authTimeClaim, System.Globalization.NumberStyles.Integer,
-                              System.Globalization.CultureInfo.InvariantCulture, out var authTime))
-            {
-                // Use `>=` so that `max_age=0` deterministically forces re-auth even when
-                // the clock has not advanced past the second boundary since /login.
-                // OIDC §3.1.2.1 says "MORE than max_age seconds have elapsed" — for the
-                // degenerate max_age=0 case implementations universally treat any elapsed
-                // time (including the boundary) as triggering re-auth, otherwise the
-                // parameter is unusable.
-                stale = (nowSeconds - authTime) >= maxAge.Value;
-            }
-            if (stale)
-            {
-                var exchange = context.Transaction.GetRouteExchange();
-                if (exchange is not null) exchange.Properties["force_login"] = true;
-                context.Reject(
-                    error: Errors.LoginRequired,
-                    description: $"Re-authentication required (max_age={maxAge.Value} exceeded).");
-                return;
-            }
         }
 
         // The public sub claim is now a GUID; the bigint _users._id rides alongside in
@@ -232,6 +270,16 @@ internal sealed class HandleAuthorizationRequestHandler : IOpenIddictServerHandl
                     }
                 }
             }
+        }
+
+        // Re-auth (prompt=login / max_age) completed successfully — consume the marker so it can
+        // never satisfy a LATER prompt=login (that would be a bypass). Done only here, on the final
+        // success after the consent gate, so an intervening /consent round-trip keeps the marker.
+        if (reauthGateSatisfied)
+        {
+            var reauthExchange = context.Transaction.GetRouteExchange();
+            if (reauthExchange is not null)
+                reauthExchange.Properties["reauth_clear"] = true;
         }
 
         // Session is now created at login time (LoginProcessor) and tracked via session_id in cookie.

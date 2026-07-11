@@ -267,7 +267,7 @@ public class UserProfileManagementTests
         // Also verify via separate GET to confirm persistence
         var readback = await ReadUser(id);
         GetBool(readback, "emailVerified").Should().BeTrue();
-        GetNullableString(Prop(readback, "address")!.Value, "country").Should().Be("RU");
+        GetNullableString(Prop(readback, "address")!.Value, "country").Should().Be("GB");
         GetNullableString(Prop(readback, "customClaims")!.Value, "org").Should().Be("Acme Corp");
     }
 

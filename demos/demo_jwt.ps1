@@ -1,6 +1,12 @@
 # Per-step timing wrapper. Use:  pwsh -File demo_jwt.ps1
 # Each step prints its wall-clock duration; a final table summarises.
 
+
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
+$REDIRECT_CB = if ($BASE -like 'https:*') { 'https://localhost:9999/cb' } else { 'http://localhost:9999/cb' }
+
 $timings = [System.Collections.Generic.List[object]]::new()
 
 function Measure-Step {
@@ -26,11 +32,11 @@ $total = [System.Diagnostics.Stopwatch]::StartNew()
 
 # 1) DCR — client registration
 $reg = Measure-Step "1. DCR /connect/register" {
-    Invoke-RestMethod -Method Post http://127.0.0.1:5002/connect/register `
+    Invoke-RestMethod -Method Post $BASE/connect/register `
       -ContentType "application/json" `
       -Body (@{
         client_name   = "jwt-demo"
-        redirect_uris = @("http://localhost:9999/cb")
+        redirect_uris = @($REDIRECT_CB)
         grant_types   = @("password","refresh_token")
         scope         = "openid profile email offline_access"
       } | ConvertTo-Json)
@@ -41,7 +47,7 @@ $reg | Format-List client_id, client_secret
 # 2) Register the user (if not already present)
 Measure-Step "2. account/register" {
     try {
-        Invoke-RestMethod -Method Post http://127.0.0.1:5002/api/v1/identity/account/register `
+        Invoke-RestMethod -Method Post $BASE/api/v1/identity/account/register `
           -ContentType "application/json" `
           -Body (@{
             login       = "testuser2"
@@ -57,7 +63,7 @@ Measure-Step "2. account/register" {
 
 # 3) Password grant → JWT
 $tok = Measure-Step "3. password grant /connect/token" {
-    Invoke-RestMethod -Method Post http://127.0.0.1:5002/connect/token `
+    Invoke-RestMethod -Method Post $BASE/connect/token `
       -ContentType "application/x-www-form-urlencoded" `
       -Body @{
         grant_type    = "password"
@@ -85,14 +91,14 @@ Measure-Step "4. decode id_token (local)" {
 
 # 5) access_token — JWE-encrypted, claims via /connect/userinfo
 Measure-Step "5. /connect/userinfo" {
-    Invoke-RestMethod http://127.0.0.1:5002/connect/userinfo `
+    Invoke-RestMethod $BASE/connect/userinfo `
       -Headers @{ Authorization = "Bearer $($tok.access_token)" } | ConvertTo-Json
 } | Out-Host
 
 
 # 6) Refresh
 $refreshed = Measure-Step "6. refresh_token grant" {
-    Invoke-RestMethod -Method Post http://127.0.0.1:5002/connect/token `
+    Invoke-RestMethod -Method Post $BASE/connect/token `
       -ContentType "application/x-www-form-urlencoded" `
       -Body @{
         grant_type    = "refresh_token"

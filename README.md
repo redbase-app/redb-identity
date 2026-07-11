@@ -38,6 +38,7 @@
 | Backchannel logout that works across replicas | RFC 8417-style revoked-SID list (`/revoked-sids/add` + `/since`) + push-and-poll fallback. |
 | SCIM 2.0 provisioning | Users + Groups + Bulk endpoints (RFC 7644). |
 | RFC compliance | OIDC Core, OAuth 2.1, RFC 7662 (Introspection), RFC 7591/7592 (DCR), RFC 8628 (Device Code), RFC 9126 (PAR), RFC 9449 (DPoP), RFC 8417 / OIDC Backchannel Logout. |
+| Conformance you can check | Preparing for [OpenID Certification](https://openid.net/certification/) — Config OP passes with **0 failures** and the Basic OP modules pass in local runs of the official OIDF suite. [Details.](OPENID_CERTIFICATION.md) |
 
 ## Install (NuGet)
 
@@ -425,6 +426,23 @@ RFC compliance is verified by integration tests (`tests/redb.Identity.Tests/`) �
 | **OIDC RP-Initiated Logout 1.0** | `/connect/logout` with `post_logout_redirect_uri` allow-list. |
 | **OIDC Backchannel Logout 1.0 / RFC 8417** | SET event sink (`BackchannelLogoutEndpoint`), push to RPs **plus** pull-based revoked-SID list (`/revoked-sids/add` + `/revoked-sids/since?cursor=`) for multi-replica RPs — survives lost RP nodes and partitions. |
 | **OIDC Form Post Response Mode** | `response_mode=form_post`. |
+
+### OpenID Certification — in preparation
+
+redb.Identity is being prepared for [OpenID Certification](https://openid.net/certification/).
+We run the **official OpenID Foundation conformance suite** against a live
+server over native HTTPS:
+
+- **Config OP** — **0 failures**.
+- **Basic OP** — the authorization-code-flow modules pass; every automatable
+  module is green.
+
+The drive surfaced — and fixed — real protocol details: errors delivered via
+the *registered* `redirect_uri` only (RFC 6749 §4.1.2.1), `400 invalid_grant`
+on code reuse (§5.2), `Cache-Control: no-store` on token responses (§5.1),
+boolean `email_verified` (OIDC §5.1), session-id-keyed `prompt=login` /
+`max_age` re-authentication (§3.1.2.1), and id_token hygiene. Full state and
+per-module breakdown: **[`OPENID_CERTIFICATION.md`](OPENID_CERTIFICATION.md)**.
 
 ### JOSE / JWT cryptography
 

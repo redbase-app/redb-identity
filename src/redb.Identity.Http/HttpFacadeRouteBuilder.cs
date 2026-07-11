@@ -44,6 +44,13 @@ public class HttpFacadeRouteBuilder : RouteBuilder
     private readonly Contracts.Mfa.IMfaStateInspector? _mfaStateInspector;
     private readonly IRegisteredClientOriginRegistry? _originRegistry;
 
+    // URI scheme and shared TLS query parameters applied to EVERY endpoint below. When
+    // IdentityTransport:Http:Ssl is true these become "https" + "&ssl=true&sslCertPath=…", so all
+    // endpoints on the same host:port agree on TLS (SharedHttpServerManager rejects a mixed
+    // http/https server). Computed once at the top of Configure().
+    private string _scheme = "http";
+    private string _sslParams = "";
+
     public HttpFacadeRouteBuilder(
         SessionTicketService ticketService,
         IOptions<IdentityTransportOptions>? transportOptions = null,
@@ -62,6 +69,18 @@ public class HttpFacadeRouteBuilder : RouteBuilder
     {
         var port = _transportOptions.Http.PublicPort;
         var mgmtPort = _transportOptions.Http.ManagementPort ?? port;
+
+        // TLS: compute scheme + ssl query params once, apply uniformly to every From(...) below.
+        if (_transportOptions.Http.Ssl)
+        {
+            var certPath = _transportOptions.Http.SslCertPath
+                ?? throw new InvalidOperationException(
+                    "IdentityTransport:Http:SslCertPath is required when IdentityTransport:Http:Ssl=true.");
+            _scheme = "https";
+            _sslParams = $"&ssl=true&sslCertPath={Uri.EscapeDataString(certPath)}";
+            if (!string.IsNullOrEmpty(_transportOptions.Http.SslCertPassword))
+                _sslParams += $"&sslCertPassword={Uri.EscapeDataString(_transportOptions.Http.SslCertPassword)}";
+        }
 
         // C15 / per-route CORS: wire up the registered-client origin resolver before any
         // route is registered so that the shared HttpComponent picks it up via its
@@ -237,32 +256,34 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         var useHostPrefix = cookieOpts.UseHostPrefix;
 
         // Token endpoint — POST only, form-encoded client auth
-        From($"http:POST:0.0.0.0:{port}/connect/token?inOut=true{ClientCorsParams()}")
+        From($"{_scheme}:POST:0.0.0.0:{port}/connect/token?inOut=true{_sslParams}{ClientCorsParams()}")
             .RouteId("http-token")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(HttpIdentityProcessors.MapHttpToIdentityHeaders)
             .Process(HttpIdentityProcessors.MapFormToBody)
             .To(IdentityEndpoints.Token)
             .Process(HttpIdentityProcessors.MapOAuthErrorToHttpStatus)
-            .Process(HttpIdentityProcessors.SerializeJsonResponse);
+            .Process(HttpIdentityProcessors.SerializeJsonResponse)
+            .Process(HttpIdentityProcessors.AddNoStoreCacheHeaders); // RFC 6749 §5.1
 
         // Pushed Authorization Request endpoint (RFC 9126 / Z6) — POST only,
         // form-encoded client auth. Mirrors the Token endpoint pipeline.
         if (_transportOptions.Features.EnablePushedAuthorization)
         {
-            From($"http:POST:0.0.0.0:{port}/connect/par?inOut=true{ClientCorsParams()}")
+            From($"{_scheme}:POST:0.0.0.0:{port}/connect/par?inOut=true{_sslParams}{ClientCorsParams()}")
                 .RouteId("http-par")
                 .Process(HttpIdentityProcessors.PropagateCorrelationId)
                 .Process(HttpIdentityProcessors.MapHttpToIdentityHeaders)
                 .Process(HttpIdentityProcessors.MapFormToBody)
                 .To(IdentityEndpoints.PushedAuthorization)
                 .Process(HttpIdentityProcessors.MapOAuthErrorToHttpStatus)
-                .Process(HttpIdentityProcessors.SerializeJsonResponse);
+                .Process(HttpIdentityProcessors.SerializeJsonResponse)
+                .Process(HttpIdentityProcessors.AddNoStoreCacheHeaders); // RFC 6749 §5.1
         }
 
         // Authorization endpoint — GET (query params) + POST (form body)
         // Session cookie is read before routing so AttachSessionPrincipalHandler can use it
-        From($"http:GET:0.0.0.0:{port}/connect/authorize?inOut=true")
+        From($"{_scheme}:GET:0.0.0.0:{port}/connect/authorize?inOut=true{_sslParams}")
             .RouteId("http-authorize-get")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process((e, ct) => SessionCookieProcessors.ReadSessionCookie(e, ct, _ticketService, cookieMaxAge, sessionCookieName))
@@ -271,10 +292,11 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process(HttpIdentityProcessors.HandleRedirectResponse)
             .Process((e, ct) => SessionCookieProcessors.RedirectToLogin(e, ct, loginPath))
             .Process((e, ct) => SessionCookieProcessors.RedirectToConsent(e, ct, consentPath))
+            .Process((e, ct) => SessionCookieProcessors.HandleReauthCookie(e, ct, _ticketService, secureCookie, sessionSameSite, useHostPrefix))
             .Process(HttpIdentityProcessors.MapOAuthErrorToHttpStatus)
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
 
-        From($"http:POST:0.0.0.0:{port}/connect/authorize?inOut=true")
+        From($"{_scheme}:POST:0.0.0.0:{port}/connect/authorize?inOut=true{_sslParams}")
             .RouteId("http-authorize-post")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process((e, ct) => SessionCookieProcessors.ReadSessionCookie(e, ct, _ticketService, cookieMaxAge, sessionCookieName))
@@ -284,17 +306,18 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process(HttpIdentityProcessors.HandleRedirectResponse)
             .Process((e, ct) => SessionCookieProcessors.RedirectToLogin(e, ct, loginPath))
             .Process((e, ct) => SessionCookieProcessors.RedirectToConsent(e, ct, consentPath))
+            .Process((e, ct) => SessionCookieProcessors.HandleReauthCookie(e, ct, _ticketService, secureCookie, sessionSameSite, useHostPrefix))
             .Process(HttpIdentityProcessors.MapOAuthErrorToHttpStatus)
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
 
         // Login page — GET renders form, POST submits credentials → session cookie
-        From($"http:GET:0.0.0.0:{port}{loginPath}?inOut=true")
+        From($"{_scheme}:GET:0.0.0.0:{port}{loginPath}?inOut=true{_sslParams}")
             .RouteId("http-login-get")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process((e, ct) => LoginPageProcessors.RenderLoginPage(e, ct, loginPath, _transportOptions))
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
 
-        From($"http:POST:0.0.0.0:{port}{loginPath}?inOut=true")
+        From($"{_scheme}:POST:0.0.0.0:{port}{loginPath}?inOut=true{_sslParams}")
             .RouteId("http-login-post")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(HttpIdentityProcessors.MapFormToBody)
@@ -312,7 +335,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         var mfaPath = _transportOptions.Paths.Mfa;
         var mfaRecoveryPath = _transportOptions.Paths.MfaRecovery;
 
-        From($"http:GET:0.0.0.0:{port}{mfaPath}?inOut=true")
+        From($"{_scheme}:GET:0.0.0.0:{port}{mfaPath}?inOut=true{_sslParams}")
             .RouteId("http-mfa-get")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             // B3 §4: pull mfa_state out of the __Host-redb.identity.mfa cookie so the page
@@ -321,7 +344,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process((e, ct) => MfaPageProcessors.RenderMfaPage(e, ct, mfaPath, _transportOptions, _mfaStateInspector))
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
 
-        From($"http:POST:0.0.0.0:{port}{mfaPath}?inOut=true")
+        From($"{_scheme}:POST:0.0.0.0:{port}{mfaPath}?inOut=true{_sslParams}")
             .RouteId("http-mfa-post")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(HttpIdentityProcessors.MapFormToBody)
@@ -333,14 +356,14 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
 
         // MFA recovery code page — GET renders form, POST verifies recovery code → session cookie
-        From($"http:GET:0.0.0.0:{port}{mfaRecoveryPath}?inOut=true")
+        From($"{_scheme}:GET:0.0.0.0:{port}{mfaRecoveryPath}?inOut=true{_sslParams}")
             .RouteId("http-mfa-recovery-get")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(MfaCookieProcessors.ReadMfaStateCookie)
             .Process((e, ct) => MfaPageProcessors.RenderMfaRecoveryPage(e, ct, mfaRecoveryPath, mfaPath, _transportOptions))
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
 
-        From($"http:POST:0.0.0.0:{port}{mfaRecoveryPath}?inOut=true")
+        From($"{_scheme}:POST:0.0.0.0:{port}{mfaRecoveryPath}?inOut=true{_sslParams}")
             .RouteId("http-mfa-recovery-post")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(HttpIdentityProcessors.MapFormToBody)
@@ -354,7 +377,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         // MFA challenge dispatch — POST sends OTP via SMS/Email, returns new mfa_state with embedded code.
         // AJAX endpoint (no session cookie set here — that happens after verify).
         var mfaChallengePath = mfaPath.TrimEnd('/') + "/challenge";
-        From($"http:POST:0.0.0.0:{port}{mfaChallengePath}?inOut=true")
+        From($"{_scheme}:POST:0.0.0.0:{port}{mfaChallengePath}?inOut=true{_sslParams}")
             .RouteId("http-mfa-challenge-post")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(HttpIdentityProcessors.MapFormToBody)
@@ -367,7 +390,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         // B9 / BUG-9 — gated MFA method enumeration. Auth0-style: caller must present a
         // valid encrypted mfa_state (issued by login) to learn which factors are configured.
         var mfaMethodsPath = mfaPath.TrimEnd('/') + "/methods";
-        From($"http:POST:0.0.0.0:{port}{mfaMethodsPath}?inOut=true")
+        From($"{_scheme}:POST:0.0.0.0:{port}{mfaMethodsPath}?inOut=true{_sslParams}")
             .RouteId("http-mfa-methods-post")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(HttpIdentityProcessors.MapFormToBody)
@@ -375,13 +398,13 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
 
         // Consent page — GET renders consent form, POST processes decision
-        From($"http:GET:0.0.0.0:{port}{consentPath}?inOut=true")
+        From($"{_scheme}:GET:0.0.0.0:{port}{consentPath}?inOut=true{_sslParams}")
             .RouteId("http-consent-get")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process((e, ct) => ConsentPageProcessors.RenderConsentPage(e, ct, consentPath, _transportOptions))
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
 
-        From($"http:POST:0.0.0.0:{port}{consentPath}?inOut=true")
+        From($"{_scheme}:POST:0.0.0.0:{port}{consentPath}?inOut=true{_sslParams}")
             .RouteId("http-consent-post")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process((e, ct) => SessionCookieProcessors.ReadSessionCookie(e, ct, _ticketService, cookieMaxAge, sessionCookieName))
@@ -394,7 +417,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         // Userinfo — GET and POST with Bearer token. AttachBearerChallengeOnError adds
         // the WWW-Authenticate: Bearer challenge mandated by RFC 6750 §3 on any error
         // response (missing token, invalid token, etc.).
-        From($"http:GET:0.0.0.0:{port}/connect/userinfo?inOut=true{ClientCorsParams()}")
+        From($"{_scheme}:GET:0.0.0.0:{port}/connect/userinfo?inOut=true{_sslParams}{ClientCorsParams()}")
             .RouteId("http-userinfo-get")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(HttpIdentityProcessors.ExtractBearerToken)
@@ -403,7 +426,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process(HttpIdentityProcessors.AttachBearerChallengeOnError)
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
 
-        From($"http:POST:0.0.0.0:{port}/connect/userinfo?inOut=true{ClientCorsParams()}")
+        From($"{_scheme}:POST:0.0.0.0:{port}/connect/userinfo?inOut=true{_sslParams}{ClientCorsParams()}")
             .RouteId("http-userinfo-post")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(HttpIdentityProcessors.ExtractBearerToken)
@@ -413,23 +436,25 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
 
         // Revocation — client-authenticated
-        From($"http:POST:0.0.0.0:{port}/connect/revocation?inOut=true{ClientCorsParams()}")
+        From($"{_scheme}:POST:0.0.0.0:{port}/connect/revocation?inOut=true{_sslParams}{ClientCorsParams()}")
             .RouteId("http-revoke")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(HttpIdentityProcessors.MapHttpToIdentityHeaders)
             .Process(HttpIdentityProcessors.MapFormToBody)
             .To(IdentityEndpoints.Revoke)
-            .Process(HttpIdentityProcessors.SerializeJsonResponse);
+            .Process(HttpIdentityProcessors.SerializeJsonResponse)
+            .Process(HttpIdentityProcessors.AddNoStoreCacheHeaders); // RFC 7009 / 6749 §5.1
 
         // Introspection — client-authenticated
-        From($"http:POST:0.0.0.0:{port}/connect/introspect?inOut=true{ClientCorsParams()}")
+        From($"{_scheme}:POST:0.0.0.0:{port}/connect/introspect?inOut=true{_sslParams}{ClientCorsParams()}")
             .RouteId("http-introspect")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(HttpIdentityProcessors.MapHttpToIdentityHeaders)
             .Process(HttpIdentityProcessors.MapFormToBody)
             .To(IdentityEndpoints.Introspect)
             .Process(HttpIdentityProcessors.MapOAuthErrorToHttpStatus)
-            .Process(HttpIdentityProcessors.SerializeJsonResponse);
+            .Process(HttpIdentityProcessors.SerializeJsonResponse)
+            .Process(HttpIdentityProcessors.AddNoStoreCacheHeaders); // RFC 7662 / 6749 §5.1
 
         // Logout — GET /connect/logout (OIDC RP-Initiated Logout §2: browser redirect)
         // ReadSessionCookie extracts userId from cookie so LogoutProcessor can revoke sessions.
@@ -441,7 +466,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             ? (Func<string, CancellationToken, Task<bool>>?)null
             : _postLogoutValidator.IsAllowedAsync;
 
-        From($"http:GET:0.0.0.0:{port}/connect/logout?inOut=true{ClientCorsParams()}")
+        From($"{_scheme}:GET:0.0.0.0:{port}/connect/logout?inOut=true{_sslParams}{ClientCorsParams()}")
             .RouteId("http-logout-get")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process((e, ct) => SessionCookieProcessors.ReadSessionCookie(e, ct, _ticketService, cookieMaxAge, sessionCookieName))
@@ -453,7 +478,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
 
         // Logout — POST /connect/logout (form submission)
-        From($"http:POST:0.0.0.0:{port}/connect/logout?inOut=true{ClientCorsParams()}")
+        From($"{_scheme}:POST:0.0.0.0:{port}/connect/logout?inOut=true{_sslParams}{ClientCorsParams()}")
             .RouteId("http-logout")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process((e, ct) => SessionCookieProcessors.ReadSessionCookie(e, ct, _ticketService, cookieMaxAge, sessionCookieName))
@@ -467,7 +492,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         // Dynamic Client Registration — POST /connect/register (RFC 7591)
         if (_transportOptions.Features.EnableDynamicRegistration)
         {
-            From($"http:POST:0.0.0.0:{port}{DynamicRegistrationPath}?inOut=true{ClientCorsParams()}")
+            From($"{_scheme}:POST:0.0.0.0:{port}{DynamicRegistrationPath}?inOut=true{_sslParams}{ClientCorsParams()}")
                 .RouteId("http-dynamic-register")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
                 .Process(HttpIdentityProcessors.ExtractBearerToken)
@@ -476,7 +501,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
 
             // Z2 (RFC 7592): Client configuration endpoint — GET/PUT/DELETE /connect/register/{client_id}.
             // Single catch-all route; the op+id extractor derives operation and client_id from method+path.
-            From($"http:0.0.0.0:{port}{DynamicRegistrationPath}/{{**clientId}}?inOut=true{ClientCorsParams()}")
+            From($"{_scheme}:0.0.0.0:{port}{DynamicRegistrationPath}/{{**clientId}}?inOut=true{_sslParams}{ClientCorsParams()}")
                 .RouteId("http-dynamic-register-manage")
                 .Process(HttpIdentityProcessors.PropagateCorrelationId)
                 .Process(HttpIdentityProcessors.ExtractBearerToken)
@@ -488,20 +513,21 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         // Device Authorization — POST /connect/deviceauthorization (RFC 8628)
         if (_transportOptions.Features.EnableDeviceCodeFlow)
         {
-            From($"http:POST:0.0.0.0:{port}/connect/deviceauthorization?inOut=true{ClientCorsParams()}")
+            From($"{_scheme}:POST:0.0.0.0:{port}/connect/deviceauthorization?inOut=true{_sslParams}{ClientCorsParams()}")
                 .RouteId("http-device")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
                 .Process(HttpIdentityProcessors.MapHttpToIdentityHeaders)
                 .Process(HttpIdentityProcessors.MapFormToBody)
                 .To(IdentityEndpoints.Device)
                 .Process(HttpIdentityProcessors.MapOAuthErrorToHttpStatus)
-                .Process(HttpIdentityProcessors.SerializeJsonResponse);
+                .Process(HttpIdentityProcessors.SerializeJsonResponse)
+                .Process(HttpIdentityProcessors.AddNoStoreCacheHeaders); // RFC 8628 / 6749 §5.1
 
             // End-User Verification — POST /connect/device/verify (RFC 8628 §3.3).
             // ExtractBearerToken is required for the BFF-relayed authentication path:
             // HandleVerificationRequestHandler accepts either form credentials (direct
             // host-UI flow) OR an Authorization: Bearer access_token (BFF-relayed flow).
-            From($"http:POST:0.0.0.0:{port}/connect/device/verify?inOut=true")
+            From($"{_scheme}:POST:0.0.0.0:{port}/connect/device/verify?inOut=true{_sslParams}")
                 .RouteId("http-verification")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
                 .Process(HttpIdentityProcessors.MapHttpToIdentityHeaders)
@@ -531,7 +557,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         // RFC 8414 — OAuth 2.0 Authorization Server Metadata (for non-OIDC clients)
         BuildDiscoveryRoute(port, "/.well-known/oauth-authorization-server", "http-discovery-oauth");
 
-        From($"http:GET:0.0.0.0:{port}/.well-known/jwks?inOut=true{PublicCorsParams()}")
+        From($"{_scheme}:GET:0.0.0.0:{port}/.well-known/jwks?inOut=true{_sslParams}{PublicCorsParams()}")
             .RouteId("http-jwks")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .To(IdentityEndpoints.Jwks)
@@ -540,7 +566,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
 
     private void BuildDiscoveryRoute(int port, string path, string routeId)
     {
-        var route = From($"http:GET:0.0.0.0:{port}{path}?inOut=true{PublicCorsParams()}")
+        var route = From($"{_scheme}:GET:0.0.0.0:{port}{path}?inOut=true{_sslParams}{PublicCorsParams()}")
             .RouteId(routeId)
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .To(IdentityEndpoints.Discovery);
@@ -605,7 +631,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         var scimDiscoveryRegistry = new ControllerRegistry();
         scimDiscoveryRegistry.RegisterController(typeof(ScimDiscoveryController));
 
-        From($"http:GET:0.0.0.0:{port}/api/v1/identity/scim/v2/ServiceProviderConfig?inOut=true")
+        From($"{_scheme}:GET:0.0.0.0:{port}/api/v1/identity/scim/v2/ServiceProviderConfig?inOut=true{_sslParams}")
             .RouteId("http-management-scim-discovery-spc")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(HttpIdentityProcessors.StripManagementPrefix)
@@ -613,7 +639,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .RedbHttpController(scimDiscoveryRegistry)
             .Process(ScimHttpProcessors.SerializeScimJsonResponse);
 
-        From($"http:GET:0.0.0.0:{port}/api/v1/identity/scim/v2/ResourceTypes?inOut=true")
+        From($"{_scheme}:GET:0.0.0.0:{port}/api/v1/identity/scim/v2/ResourceTypes?inOut=true{_sslParams}")
             .RouteId("http-management-scim-discovery-rt")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(HttpIdentityProcessors.StripManagementPrefix)
@@ -621,7 +647,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .RedbHttpController(scimDiscoveryRegistry)
             .Process(ScimHttpProcessors.SerializeScimJsonResponse);
 
-        From($"http:GET:0.0.0.0:{port}/api/v1/identity/scim/v2/Schemas?inOut=true")
+        From($"{_scheme}:GET:0.0.0.0:{port}/api/v1/identity/scim/v2/Schemas?inOut=true{_sslParams}")
             .RouteId("http-management-scim-discovery-schemas")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(HttpIdentityProcessors.StripManagementPrefix)
@@ -629,7 +655,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .RedbHttpController(scimDiscoveryRegistry)
             .Process(ScimHttpProcessors.SerializeScimJsonResponse);
 
-        var route = From($"http:0.0.0.0:{port}/api/v1/identity/{{**path}}?inOut=true")
+        var route = From($"{_scheme}:0.0.0.0:{port}/api/v1/identity/{{**path}}?inOut=true{_sslParams}")
             .RouteId("http-management-api");
 
         // Bearer-auth runs in Core's RouteContext via direct-vm. Synchronous, same
@@ -654,7 +680,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         var discoveryRegistry = new ControllerRegistry();
         discoveryRegistry.RegisterController(typeof(ScimDiscoveryController));
 
-        From($"http:GET:0.0.0.0:{port}/scim/v2/ServiceProviderConfig?inOut=true")
+        From($"{_scheme}:GET:0.0.0.0:{port}/scim/v2/ServiceProviderConfig?inOut=true{_sslParams}")
             .RouteId("http-scim-discovery-spc")
             .Process((e, ct) => { System.Diagnostics.Debug.WriteLine("[SCIM-DISCOVERY-SPC] Route matched!"); return Task.CompletedTask; })
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
@@ -662,14 +688,14 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .RedbHttpController(discoveryRegistry)
             .Process(ScimHttpProcessors.SerializeScimJsonResponse);
 
-        From($"http:GET:0.0.0.0:{port}/scim/v2/ResourceTypes?inOut=true")
+        From($"{_scheme}:GET:0.0.0.0:{port}/scim/v2/ResourceTypes?inOut=true{_sslParams}")
             .RouteId("http-scim-discovery-rt")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(ScimHttpProcessors.StripScimPrefix)
             .RedbHttpController(discoveryRegistry)
             .Process(ScimHttpProcessors.SerializeScimJsonResponse);
 
-        From($"http:GET:0.0.0.0:{port}/scim/v2/ResourceTypes/{{**path}}?inOut=true")
+        From($"{_scheme}:GET:0.0.0.0:{port}/scim/v2/ResourceTypes/{{**path}}?inOut=true{_sslParams}")
             .RouteId("http-scim-discovery-rt-id")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(ScimHttpProcessors.StripScimPrefix)
@@ -677,14 +703,14 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process(ScimHttpProcessors.MapScimResponseToHttpStatus)
             .Process(ScimHttpProcessors.SerializeScimJsonResponse);
 
-        From($"http:GET:0.0.0.0:{port}/scim/v2/Schemas?inOut=true")
+        From($"{_scheme}:GET:0.0.0.0:{port}/scim/v2/Schemas?inOut=true{_sslParams}")
             .RouteId("http-scim-discovery-schemas")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(ScimHttpProcessors.StripScimPrefix)
             .RedbHttpController(discoveryRegistry)
             .Process(ScimHttpProcessors.SerializeScimJsonResponse);
 
-        From($"http:GET:0.0.0.0:{port}/scim/v2/Schemas/{{**path}}?inOut=true")
+        From($"{_scheme}:GET:0.0.0.0:{port}/scim/v2/Schemas/{{**path}}?inOut=true{_sslParams}")
             .RouteId("http-scim-discovery-schema-id")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(ScimHttpProcessors.StripScimPrefix)
@@ -699,7 +725,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         if (_transportOptions.Features.EnableScimBulk)
             scimRegistry.RegisterController(typeof(ScimBulkController));
 
-        var route = From($"http:0.0.0.0:{port}/scim/v2/{{**path}}?inOut=true")
+        var route = From($"{_scheme}:0.0.0.0:{port}/scim/v2/{{**path}}?inOut=true{_sslParams}")
             .RouteId("http-scim-api")
             .Process((e, ct) => { System.Diagnostics.Debug.WriteLine("[SCIM-CATCHALL] Route matched!"); return Task.CompletedTask; });
 
@@ -724,7 +750,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
     /// </summary>
     private void ConfigureBootstrapEndpoint(int port)
     {
-        From($"http:POST:0.0.0.0:{port}/internal/bootstrap-admin?inOut=true")
+        From($"{_scheme}:POST:0.0.0.0:{port}/internal/bootstrap-admin?inOut=true{_sslParams}")
             .RouteId("http-bootstrap-admin")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .To(IdentityEndpoints.BootstrapAdmin)
@@ -749,7 +775,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         var useHostPrefix = cookieOpts.UseHostPrefix;
 
         // GET /connect/external-login?provider=xxx&returnUrl=yyy → redirect to IdP
-        From($"http:GET:0.0.0.0:{port}/connect/external-login?inOut=true")
+        From($"{_scheme}:GET:0.0.0.0:{port}/connect/external-login?inOut=true{_sslParams}")
             .RouteId("http-federation-challenge")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process((e, ct) =>
@@ -771,7 +797,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
 
         // GET /connect/federation/callback?code=xxx&state=yyy → token exchange + session
-        From($"http:GET:0.0.0.0:{port}{callbackPath}?inOut=true")
+        From($"{_scheme}:GET:0.0.0.0:{port}{callbackPath}?inOut=true{_sslParams}")
             .RouteId("http-federation-callback")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process((e, ct) =>
@@ -803,7 +829,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
     /// </summary>
     private void ConfigurePublicFederationProvidersEndpoint(int port, string routeIdSuffix)
     {
-        From($"http:GET:0.0.0.0:{port}/api/v1/identity/federation-providers/public?inOut=true")
+        From($"{_scheme}:GET:0.0.0.0:{port}/api/v1/identity/federation-providers/public?inOut=true{_sslParams}")
             .RouteId($"http-federation-providers-public-{routeIdSuffix}")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process((e, ct) =>

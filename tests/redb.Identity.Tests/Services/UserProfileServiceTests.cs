@@ -117,8 +117,11 @@ public class UserProfileServiceTests
         result!.FindFirst(Claims.GivenName)!.Value.Should().Be("Bob");
         result.FindFirst(Claims.FamilyName)!.Value.Should().Be("Smith");
         result.FindFirst(Claims.Picture)!.Value.Should().Be("https://example.com/bob.jpg");
-        result.FindFirst(Claims.EmailVerified)!.Value.Should().Be("true");
-        result.FindFirst(Claims.PhoneNumberVerified)!.Value.Should().Be("true");
+        // email_verified / phone_number_verified are boolean claims (OIDC §5.1) — the
+        // in-memory Claim.Value is bool.ToString() ("True") and serializes to JSON `true`.
+        // Assert the boolean semantics rather than an exact-case string.
+        bool.Parse(result.FindFirst(Claims.EmailVerified)!.Value).Should().BeTrue();
+        bool.Parse(result.FindFirst(Claims.PhoneNumberVerified)!.Value).Should().BeTrue();
         result.FindFirst("department")!.Value.Should().Be("Engineering");
     }
 

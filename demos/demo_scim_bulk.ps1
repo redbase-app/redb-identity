@@ -23,7 +23,9 @@
 # Usage: pwsh -File demo_scim_bulk.ps1
 #requires -Version 7
 
-$BASE   = "http://127.0.0.1:5002"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 # Resource endpoints (Users/Groups/Bulk) mount on the dedicated SCIM root /scim/v2/...
 # (RFC 7644 §3.1, served through scimAuth with the dedicated "scim" scope). The
 # `/api/v1/identity/scim/v2/` namespace covers only the unauthenticated discovery

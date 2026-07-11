@@ -90,6 +90,11 @@ public static class RedbRouteOpenIddictServerBuilderExtensions
         // downstream resource servers in addition to the implicit client_id default.
         AttachAdditionalIdTokenAudiences.Descriptor,
 
+        // Strip OpenIddict's internal oi_au_id (authorization id) reference claim from the
+        // id_token (leaks in a JWT config; kept on the access_token). oi_tkn_id is left in
+        // by design — it drives id_token revocation / back-channel logout. OIDC hygiene.
+        StripInternalClaimsFromIdentityToken.Descriptor,
+
         // S-track: bump SessionProps.LastAccessedAt on the session carried by
         // the principal whenever the token endpoint mints new tokens — proves
         // the session is still alive, drives idle-timeout calculation.

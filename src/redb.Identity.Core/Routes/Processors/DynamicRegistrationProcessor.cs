@@ -224,9 +224,13 @@ internal sealed class DynamicRegistrationProcessor : IProcessor
         // Build permissions array (OpenIddict format)
         var permissions = BuildPermissions(grantTypes, responseTypes, requestedScopes);
 
-        // Build requirements
+        // Build requirements. Force PKCE per-client ONLY when the server mandates it
+        // (RedbIdentityOptions.RequirePkce, default true = OAuth 2.1 hardening). When PKCE is
+        // optional (RequirePkce=false), authorization_code clients register WITHOUT the ft:pkce
+        // requirement — they may still use PKCE, but it is not mandated — so the per-client policy
+        // matches the server policy (e.g. lets the OpenID Basic OP non-PKCE tests register a client).
         var requirements = new List<string>();
-        if (grantTypes.Contains("authorization_code"))
+        if (_options.RequirePkce && grantTypes.Contains("authorization_code"))
             requirements.Add("ft:pkce");
 
         // Generate unique client_id

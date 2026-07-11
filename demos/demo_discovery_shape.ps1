@@ -8,7 +8,9 @@
 #      no `*_internal` keys, etc.)
 # Usage: pwsh -File demo_discovery_shape.ps1
 
-$BASE = "http://127.0.0.1:5002"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $timings = [System.Collections.Generic.List[object]]::new()
 
 function Measure-Step {

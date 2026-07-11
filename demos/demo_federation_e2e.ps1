@@ -22,7 +22,9 @@
 # Usage: pwsh -File demo_federation_e2e.ps1
 #requires -Version 7
 
-$BASE   = "http://127.0.0.1:5002"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 # Use 127.0.0.1 — mock-oauth2-server's discovery doc embeds 127.0.0.1 in issuer / authorize_endpoint,
 # and OIDC clients refuse responses where the issuer doesn't match the configured authority.
 $IDP    = "http://127.0.0.1:9199/default"
@@ -62,7 +64,7 @@ function Hop {
     # NOTE: don't name this `$args` — pwsh aliases that to the function's argument array
     # and `& curl.exe @args` then splats the original args, not our list.
     # Also UPPER-CASE the HTTP method — servers are case-sensitive per RFC 7230 §3.1.1.
-    $curlArgs = @('-s', '-i', '-m', '10', '-X', $Method.ToUpperInvariant())
+    $curlArgs = @('-s', '-k', '-i', '-m', '10', '-X', $Method.ToUpperInvariant())
     if ($Headers) {
         foreach ($k in $Headers.Keys) { $curlArgs += @('-H', "$($k): $($Headers[$k])") }
     }
@@ -122,7 +124,7 @@ function Hop {
 # string on non-2xx so calling code can pattern-match.
 function Get-Json {
     param([string]$Method, [string]$Url, $Body = $null, [hashtable]$Headers = $null, [string]$ContentType = "application/json")
-    $curlArgs = @('-s', '-m', '15', '-w', '||%{http_code}||', '-X', $Method.ToUpperInvariant())
+    $curlArgs = @('-s', '-k', '-m', '15', '-w', '||%{http_code}||', '-X', $Method.ToUpperInvariant())
     if ($Headers) {
         foreach ($k in $Headers.Keys) { $curlArgs += @('-H', "$($k): $($Headers[$k])") }
     }
@@ -172,6 +174,30 @@ try {
     exit 0
 }
 Write-Host "mock IdP at $IDP reachable, proceeding." -ForegroundColor DarkGray
+
+# The OP-issued federation callback targets the OP's ISSUER host, and our session cookies are
+# bound to whatever host we drive — so if the two differ (e.g. the conformance context.json pins
+# the issuer to host.docker.internal while we started on 127.0.0.1) the cross-host callback can't
+# complete. Re-target to the issuer host so the FULL end-to-end flow — real requests and all —
+# actually runs. Only skip if that issuer isn't reachable from here.
+try {
+    $__disc = Get-Json -Method Get -Url "$BASE/.well-known/openid-configuration"
+    $__issuerUri = [uri]$__disc.issuer
+    if ($__issuerUri.Host -and $__issuerUri.Host -ne ([uri]$BASE).Host) {
+        $__issuerBase = "$($__issuerUri.Scheme)://$($__issuerUri.Host):$($__issuerUri.Port)"
+        $__reachable = $false
+        try { $__reachable = $null -ne (Get-Json -Method Get -Url "$__issuerBase/.well-known/openid-configuration").issuer } catch {}
+        if ($__reachable) {
+            Write-Host "Re-targeting to the OP issuer host ($($__issuerUri.Host)) so the federation callback lines up." -ForegroundColor DarkGray
+            $BASE = $__issuerBase
+        } else {
+            Write-Host ""
+            Write-Host "OP issuer host ($($__issuerUri.Host)) differs from the base and isn't reachable here — skipping." -ForegroundColor Yellow
+            Write-Host "Re-run with IDENTITY_BASE pointed at the issuer to exercise the full flow." -ForegroundColor DarkGray
+            exit 0
+        }
+    }
+} catch {}
 
 # 1) DCR admin (just users.manage — we use it to verify provisioning + cleanup).
 $adminReg = Measure-Step "1. DCR admin (users.manage)" {

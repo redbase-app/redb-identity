@@ -135,6 +135,28 @@ public class HttpTransportOptions
     public int? ManagementPort { get; set; }
 
     /// <summary>
+    /// Serve the HTTP facade over HTTPS/TLS natively (Kestrel, via the redb.Route.Http connector)
+    /// instead of plain HTTP. When <c>true</c>, <see cref="SslCertPath"/> MUST point to a PFX
+    /// certificate — every facade endpoint on <see cref="PublicPort"/> (and <see cref="ManagementPort"/>)
+    /// is then bound with TLS. Set the <c>Issuer</c> to the matching <c>https://…</c> URL so discovery
+    /// metadata, <c>iss</c> claims and the <c>Secure</c> cookie flag are emitted correctly.
+    /// Default: <c>false</c> (plain http — intended for local development only).
+    /// </summary>
+    public bool Ssl { get; set; }
+
+    /// <summary>
+    /// Filesystem path to the PFX (PKCS#12) certificate used when <see cref="Ssl"/> is <c>true</c>.
+    /// The certificate's SAN must cover the host clients use to reach the issuer.
+    /// </summary>
+    public string? SslCertPath { get; set; }
+
+    /// <summary>
+    /// Password protecting the PFX in <see cref="SslCertPath"/>. <c>null</c> when the PFX has no
+    /// password. Supply via an L5 Override env-var in production rather than committing it.
+    /// </summary>
+    public string? SslCertPassword { get; set; }
+
+    /// <summary>
     /// Master switch for CORS on browser-facing OIDC endpoints (<c>/.well-known/*</c>,
     /// <c>/connect/token</c>, <c>/connect/userinfo</c>, <c>/connect/revocation</c>,
     /// <c>/connect/introspect</c>, <c>/connect/logout</c>). Required for SPA / native PKCE

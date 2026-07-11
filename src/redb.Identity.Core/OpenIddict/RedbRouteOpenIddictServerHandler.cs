@@ -132,47 +132,52 @@ public sealed class RedbRouteOpenIddictServerHandler
                     ErrorUri = context.ErrorUri
                 };
 
-                // RFC 6749 §4.1.2.1: authorization endpoint errors MUST be reported via the
-                // validated redirect_uri whenever one is present (e.g. prompt=none → login_required,
-                // consent_required from HandleAuthorizationRequest). Fall back to JSON only when
-                // we genuinely have no redirect target (validation failed before redirect_uri
-                // could be resolved). Preserve `state` so the client can correlate the response.
-                //
-                // SECURITY (RFC 6749 §3.1.2.4 / §4.1.2.1): NEVER redirect to a redirect_uri the
-                // server rejected. Using `transaction.Request.RedirectUri` unconditionally is an
-                // open-redirect — the request URI is attacker-supplied and only becomes safe to
-                // use once OpenIddict's validation handlers confirm it matches a registered URI
-                // for the client. If OpenIddict rejected the redirect_uri itself (ID2043/2052/2095/2100
-                // family), we must respond inline (JSON / problem details) and NOT bounce the
-                // browser through the attacker-controlled location with an `error=...` query.
-                var isRedirectUriRejection = !string.IsNullOrEmpty(context.ErrorUri) && (
-                    context.ErrorUri.Contains("ID2043", StringComparison.Ordinal) ||
-                    context.ErrorUri.Contains("ID2052", StringComparison.Ordinal) ||
-                    context.ErrorUri.Contains("ID2095", StringComparison.Ordinal) ||
-                    context.ErrorUri.Contains("ID2100", StringComparison.Ordinal));
+                // RFC 6749 §5.2 — the token endpoint must not report `invalid_token` (a resource-server
+                // error). OpenIddict emits it for an already-redeemed authorization code (ID2010); map
+                // it to `invalid_grant`. (Userinfo etc. legitimately use invalid_token, so scope to token.)
+                if (endpointType == OpenIddictServerEndpointType.Token
+                    && string.Equals(context.Error, OpenIddictConstants.Errors.InvalidToken, StringComparison.Ordinal))
+                {
+                    response.Error = OpenIddictConstants.Errors.InvalidGrant;
+                }
 
-                // OIDC §3.1.2.6: login_required / consent_required have two reasonable
-                // user-agent flows; pick the right one per the flag the request carried.
+                // RFC 6749 §4.1.2.1 / §3.1.2.4 — authorization endpoint errors are reported via the
+                // redirect_uri ONLY when that redirect_uri is a REGISTERED redirect for the client.
+                // transaction.Request.RedirectUri is attacker-supplied; redirecting to it before it
+                // is validated against the client is an open redirect (§4.1.2.1 MUST NOT), and when
+                // the client_id is missing/unknown there is no client to validate against at all.
                 //
-                //   prompt=none (prompt_none=true on exchange)
-                //     The RP opted into "yes/no, never show UI" — the error MUST flow back
-                //     to redirect_uri so the RP can fall back to its own UX. Don't defer.
-                //
-                //   prompt=login (force_login=true on exchange)
-                //     Per §3.1.2.6, the OP "SHOULD prompt the User for reauthentication"
-                //     but if it cannot, "it MUST return an error, typically login_required".
-                //     The "session present, RP wants re-auth" scenario is the canonical
-                //     case: the user is already authenticated, so /login UI would be a
-                //     loop (the cookie reauthenticates them automatically). Surface
-                //     login_required on the redirect_uri so the RP can drive the re-auth
-                //     decision (clear its own session, re-issue authorize without prompt,
-                //     etc). Don't defer.
-                //
-                //   neither flag (no prompt, or prompt with no special value)
-                //     The user simply has no session — redirect to the local /login page
-                //     so they can complete authentication; otherwise the RP gets
-                //     login_required and the user has no way to fix it from the RP side.
-                //     Defer.
+                // We validate the request redirect_uri against the client application here — this
+                // replaces the earlier brittle OpenIddict error-code sniffing (ID2043/2052/…), which
+                // both leaked an open redirect on early validation errors that carried no matching
+                // code (missing client_id / code_challenge → ID2029) AND wrongly forced errors like
+                // invalid_scope (ID2052) inline even when the redirect_uri was perfectly valid.
+                // Now: redirect the error only to a validated redirect_uri; otherwise respond inline.
+                var redirectValidated = false;
+                if (endpointType == OpenIddictServerEndpointType.Authorization
+                    && !string.IsNullOrEmpty(transaction.Request?.RedirectUri)
+                    && !string.IsNullOrEmpty(transaction.Request?.ClientId))
+                {
+                    var applicationManager = sp.GetService<IOpenIddictApplicationManager>();
+                    if (applicationManager is not null)
+                    {
+                        var application = await applicationManager
+                            .FindByClientIdAsync(transaction.Request.ClientId!, cancellationToken);
+                        if (application is not null)
+                        {
+                            redirectValidated = await applicationManager.ValidateRedirectUriAsync(
+                                application, transaction.Request.RedirectUri!, cancellationToken);
+                        }
+                    }
+                }
+
+                // OIDC §3.1.2.6: login_required / consent_required WITHOUT a prompt flag are deferred
+                // to the local /login (or /consent) page by the HTTP facade, not bounced to the RP.
+                //   prompt=none (prompt_none=true) — RP opted into "never show UI"; the error MUST
+                //     flow back to the (validated) redirect_uri so the RP can drive its own UX.
+                //   prompt=login (force_login=true) — session present, RP wants re-auth; surface
+                //     login_required on the redirect_uri (a /login page would just cookie-reauth loop).
+                //   neither flag — the user simply has no session; defer to the local /login page.
                 var promptNone = exchange.Properties.TryGetValue("prompt_none", out var pn) && pn is true;
                 var forceLogin = exchange.Properties.TryGetValue("force_login", out var fl) && fl is true;
                 var interactiveDeferred =
@@ -181,13 +186,11 @@ public sealed class RedbRouteOpenIddictServerHandler
                     && (string.Equals(context.Error, "login_required", StringComparison.Ordinal)
                         || string.Equals(context.Error, "consent_required", StringComparison.Ordinal));
 
-                if (endpointType == OpenIddictServerEndpointType.Authorization
-                    && !isRedirectUriRejection
+                if (redirectValidated
                     && !interactiveDeferred
-                    && !string.IsNullOrEmpty(transaction.Request?.RedirectUri)
                     && exchange.In.Headers.ContainsKey(redb.Route.Http.HttpHeaders.Method))
                 {
-                    if (!string.IsNullOrEmpty(transaction.Request.State))
+                    if (!string.IsNullOrEmpty(transaction.Request!.State))
                         response.State = transaction.Request.State;
 
                     WriteAuthorizationErrorRedirect(
@@ -199,6 +202,13 @@ public sealed class RedbRouteOpenIddictServerHandler
                 }
 
                 RedbRouteOpenIddictServerHelpers.WriteResponseToExchange(exchange, response);
+                // RFC 6749 §5.2 — token-endpoint error status: invalid_client → 401, everything else → 400.
+                if (endpointType == OpenIddictServerEndpointType.Token && exchange.Out is not null
+                    && !string.IsNullOrEmpty(response.Error))
+                {
+                    exchange.Out.Headers[redb.Route.Http.HttpHeaders.ResponseCode] =
+                        string.Equals(response.Error, OpenIddictConstants.Errors.InvalidClient, StringComparison.Ordinal) ? 401 : 400;
+                }
                 return;
             }
 

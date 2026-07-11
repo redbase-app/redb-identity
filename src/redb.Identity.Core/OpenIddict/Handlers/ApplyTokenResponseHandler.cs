@@ -27,11 +27,31 @@ internal sealed class ApplyTokenResponseHandler
             context.Response[OpenIddictConstants.Parameters.TokenType] = "DPoP";
         }
 
+        // RFC 6749 §5.2 — normalise the token-endpoint error contract. `invalid_token` is a
+        // resource-server error (RFC 6750) and is NOT a valid token-endpoint error code; OpenIddict
+        // emits it (HTTP 401) for an already-redeemed authorization code (ID2010), which must instead
+        // be reported as `invalid_grant` with HTTP 400. Rewrite it before serialising.
+        var error = context.Response.Error;
+        if (error == OpenIddictConstants.Errors.InvalidToken)
+        {
+            context.Response.Error = OpenIddictConstants.Errors.InvalidGrant;
+            error = OpenIddictConstants.Errors.InvalidGrant;
+        }
+
         var exchange = context.Transaction.GetRouteExchange();
         if (exchange is null)
             return default;
 
         RedbRouteOpenIddictServerHelpers.WriteResponseToExchange(exchange, context.Response);
+
+        // RFC 6749 §5.2 — token-endpoint error status: `invalid_client` MAY be 401 (with a
+        // WWW-Authenticate challenge); every other error is 400. Set it explicitly so error codes
+        // never leak a resource-server-style 401 from the token endpoint.
+        if (!string.IsNullOrEmpty(error))
+        {
+            exchange.Out!.Headers[redb.Route.Http.HttpHeaders.ResponseCode] =
+                error == OpenIddictConstants.Errors.InvalidClient ? 401 : 400;
+        }
 
         // Z4 P2 (RFC 9449 §8): if the validation pipeline staged a fresh nonce,
         // emit it as the DPoP-Nonce response header for clients to adopt. Done AFTER

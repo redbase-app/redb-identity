@@ -14,7 +14,9 @@
 #
 #requires -Version 7
 
-$BASE = "http://127.0.0.1:5002"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $timings = [System.Collections.Generic.List[object]]::new()
 $totalSw = [System.Diagnostics.Stopwatch]::StartNew()
 

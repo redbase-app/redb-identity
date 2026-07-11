@@ -100,8 +100,13 @@ public static class RedbIdentityServiceExtensions
                 server.AllowClientCredentialsFlow();
                 server.AllowAuthorizationCodeFlow();
                 server.AllowRefreshTokenFlow();
-                server.RequireProofKeyForCodeExchange();
-                // OAuth 2.1 / RFC 7636 §4.2: forbid `plain`, allow only S256.
+                // PKCE. Mandatory by default (OAuth 2.1 hardening). Configurable via
+                // RedbIdentityOptions.RequirePkce=false to also accept plain authorization_code
+                // flows without a code_challenge (legacy clients / OpenID "Basic OP" non-PKCE tests).
+                if (options.RequirePkce)
+                    server.RequireProofKeyForCodeExchange();
+                // RFC 7636 §4.2: forbid `plain`, allow only S256 — always, whether or not PKCE is
+                // mandatory (when a client DOES send a challenge it must be S256).
                 server.Configure(o =>
                 {
                     o.CodeChallengeMethods.Clear();

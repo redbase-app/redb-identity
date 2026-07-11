@@ -2,7 +2,10 @@
 #   POST /connect/register → GET → PUT → DELETE → confirm 404.
 # Usage: pwsh -File demo_dcr_lifecycle.ps1
 
-$BASE = "http://127.0.0.1:5002"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
+$REDIRECT_CB = if ($BASE -like 'https:*') { 'https://localhost:9999/cb' } else { 'http://localhost:9999/cb' }
 $timings = [System.Collections.Generic.List[object]]::new()
 
 function Measure-Step {
@@ -32,7 +35,7 @@ $reg = Measure-Step "1. POST /connect/register (RFC 7591)" {
       -ContentType "application/json" `
       -Body (@{
         client_name   = "lifecycle-demo-v1"
-        redirect_uris = @("http://localhost:9999/cb")
+        redirect_uris = @($REDIRECT_CB)
         grant_types   = @("authorization_code","refresh_token")
         scope         = "openid profile email"
       } | ConvertTo-Json)
@@ -59,7 +62,7 @@ $updated = Measure-Step "3. PUT registration (rename + add offline_access)" {
     $body = @{
         client_id     = $reg.client_id
         client_name   = "lifecycle-demo-v2"
-        redirect_uris = @("http://localhost:9999/cb","http://localhost:9999/cb2")
+        redirect_uris = @($REDIRECT_CB,"http://localhost:9999/cb2")
         grant_types   = @("authorization_code","refresh_token")
         scope         = "openid profile email offline_access"
     } | ConvertTo-Json

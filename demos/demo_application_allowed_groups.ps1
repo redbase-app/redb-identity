@@ -21,7 +21,10 @@
 # Usage: pwsh -File demo_application_allowed_groups.ps1
 #requires -Version 7
 
-$BASE = "http://127.0.0.1:5002"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
+$REDIRECT_CB = if ($BASE -like 'https:*') { 'https://localhost:9999/cb' } else { 'http://localhost:9999/cb' }
 $timings = [System.Collections.Generic.List[object]]::new()
 
 function Measure-Step {
@@ -116,7 +119,7 @@ $ropcReg = Measure-Step "1. admin: POST /applications (confidential ROPC client)
         displayName    = $ropcClientId
         clientType     = "confidential"
         applicationType= "web"
-        redirectUris   = @("http://localhost:9999/cb")
+        redirectUris   = @($REDIRECT_CB)
         permissions    = @(
             "ept:token",
             "ept:authorization",

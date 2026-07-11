@@ -265,19 +265,32 @@ if ($Module -in @("Http", "All")) {
 # only the sections it knows (Core → Identity:*, Http → IdentityTransport:*); shared
 # Redb:identity-pg is wired into both. The slim in-package {Module}.config.json now
 # carries only ContextName + AutoStart (module identity).
-if (-not $NoCopy) {
-    $externalContext = Join-Path $IdentityRoot "context.json"
-    if (Test-Path $externalContext) {
+# context.json is ALWAYS emitted into scripts/output alongside the two .tpkg so that
+# output/ is a self-contained, deployable bundle: { *.tpkg + context.json }. Whoever
+# drops these files into a Tsak host's module folder (e.g. dist worker\modules\) gets the
+# shared Layer-3 config too — without it the modules boot on in-tpkg stub defaults only
+# (AllowEphemeralKeys=false, UsePropsSigningKeyStore=false → "no signing credentials").
+# When -not $NoCopy we ALSO copy into the dev Worker Libs for hot-reload.
+$externalContext = Join-Path $IdentityRoot "context.json"
+if (Test-Path $externalContext) {
+    Write-Host ("`n=== External context.json ===") -ForegroundColor Cyan
+    Write-Host ("  Source : {0}" -f $externalContext) -ForegroundColor DarkGray
+
+    # (1) scripts/output — part of the shippable artifact set (ALWAYS)
+    $outputContext = Join-Path $OutputDir "context.json"
+    Copy-Item $externalContext -Destination $outputContext -Force
+    $outCtxSize = (Get-Item $outputContext).Length
+    Write-Host ("  Output : {0}  ({1:N1} KB)" -f $outputContext, ($outCtxSize / 1KB)) -ForegroundColor Green
+
+    # (2) dev Worker Libs — hot-reload (gated by -NoCopy)
+    if (-not $NoCopy) {
         $contextDest = Join-Path $TsakLibs "context.json"
         Copy-Item $externalContext -Destination $contextDest -Force
         (Get-Item $contextDest).LastWriteTime = Get-Date   # touch → triggers hot-reload
-        $contextSize = (Get-Item $contextDest).Length
-        Write-Host ("`n=== External context.json ===") -ForegroundColor Cyan
-        Write-Host ("  Source : {0}" -f $externalContext) -ForegroundColor DarkGray
-        Write-Host ("  Copied : {0}  ({1:N1} KB)" -f $contextDest, ($contextSize / 1KB)) -ForegroundColor Green
-    } else {
-        Write-Warning "External context.json not found at $externalContext — modules will run with stub defaults only."
+        Write-Host ("  Copied : {0}" -f $contextDest) -ForegroundColor Green
     }
+} else {
+    Write-Warning "External context.json not found at $externalContext — modules will run with stub defaults only."
 }
 
 # ── Summary ────────────────────────────────────────────────────────────

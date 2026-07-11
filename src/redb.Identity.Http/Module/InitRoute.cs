@@ -31,13 +31,19 @@ public static class InitRoute
 {
     public static IRouteContext main(IRouteContext context)
     {
-        // Ensure HttpComponent is registered (may already be by another module).
+        // Ensure the HttpComponent (scheme "http") AND HttpsComponent (scheme "https") are
+        // registered (may already be by another module). Both share ONE SharedHttpServerManager
+        // so a single host:port server is tracked once regardless of scheme — the facade emits
+        // https: URIs when IdentityTransport:Http:Ssl=true, so the "https" component must exist.
         if (!context.HasComponent("http"))
         {
-            context.AddComponent(new HttpComponent
-            {
-                ServerManager = new SharedHttpServerManager()
-            });
+            var serverManager = new SharedHttpServerManager();
+            context.AddComponent(new HttpComponent { ServerManager = serverManager });
+            context.AddComponent(new HttpsComponent { ServerManager = serverManager });
+        }
+        else if (!context.HasComponent("https"))
+        {
+            context.AddComponent(new HttpsComponent { ServerManager = new SharedHttpServerManager() });
         }
 
         // Two boot paths (mirrors Core's InitRoute):

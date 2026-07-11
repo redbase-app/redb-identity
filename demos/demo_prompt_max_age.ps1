@@ -1,35 +1,42 @@
 # OIDC §3.1.2.1 prompt= variants + max_age authorization-request probes.
 #
 # Closes the GAP in §5 of the coverage matrix:
-#   prompt=login           — force re-authentication (login_required)
+#   prompt=login           — force re-authentication → OP routes back to /login (§3.1.2.1)
 #   prompt=consent         — force consent re-prompt (consent_required UI override)
-#   prompt=select_account  — request account selection (login_required when no UI path)
-#   max_age=<seconds>      — re-auth if last auth_time older than max_age
-#                            (OIDC Core §3.1.2.1 — server MUST reject with login_required)
+#   prompt=select_account  — single-account OP proceeds with a code (§3.1.2.1 "SHOULD")
+#   max_age=<seconds>      — re-auth if last auth_time older than max_age → /login re-auth
 #
 # `prompt=none` is already covered by demo_auth_extras.ps1.
 #
 # All probes use the cookie-session + POST /connect/authorize pattern from
-# demo_authcode_pkce.ps1 so no browser is required. The 302 redirect's Location
-# query carries the OIDC error per RFC 6749 §4.1.2.1 (delivered back to redirect_uri
-# with state round-tripped).
+# demo_authcode_pkce.ps1 so no browser is required. Re-authentication prompts
+# (prompt=login / max_age exceeded) 302 the user-agent to /login (they are NOT
+# delivered as an error to the RP's redirect_uri); non-interactive probes get the
+# code/consent outcome on the redirect_uri.
+#
+# NOTE: run this demo against an HTTP base (the default). Over an HTTPS base the
+# redirect to the http:// redirect_uri is an HTTPS→HTTP downgrade that PowerShell's
+# Invoke-WebRequest refuses to surface — a client limitation, not an OP behaviour.
 #
 # Probes (all asserted):
 #   1.  DCR auth_code+PKCE client
 #   2.  self-register user + cookie session via /login
 #   3.  baseline authorize (no prompt, no max_age) → code returned
-#   4.  prompt=login           → 302 with Location?error=login_required, state echoed
+#   4.  prompt=login           → 302 to /login (re-auth), no error/code leaked to RP
 #   5.  prompt=consent (implicit consent client) → code returned (no Explicit consent UI)
-#   6.  prompt=select_account  → 302 with Location?error=login_required (no UI path)
-#   7.  max_age=0 (force re-auth now) → 302 with Location?error=login_required
+#   6.  prompt=select_account  → code returned (single-account auto-select)
+#   7.  max_age=0 (force re-auth now) → 302 to /login (re-auth)
 #   8.  max_age=99999 (large window) → code returned (no re-auth needed)
 #   9.  RFC 7592 cleanup
 #
 # Usage: pwsh -File demo_prompt_max_age.ps1
 #requires -Version 7
 
-$BASE     = "http://127.0.0.1:5002"
-$REDIRECT = "http://localhost:9999/cb"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
+$REDIRECT_CB = if ($BASE -like 'https:*') { 'https://localhost:9999/cb' } else { 'http://localhost:9999/cb' }
+$REDIRECT = $REDIRECT_CB
 $timings  = [System.Collections.Generic.List[object]]::new()
 Add-Type -AssemblyName System.Web
 
@@ -156,17 +163,21 @@ Measure-Step "3. baseline authorize → expect code" {
     Write-Host "  ✓ code received, state round-trip ok" -ForegroundColor Green
 } | Out-Null
 
-# 4) prompt=login → login_required (redirect_uri carries the error per RFC 6749 §4.1.2.1).
-Measure-Step "4. prompt=login → expect login_required" {
+# 4) prompt=login → OIDC §3.1.2.1 re-authentication: the OP MUST route the End-User back
+#    to the login UI (NOT deliver an error to the RP). We assert the 302 targets /login with
+#    the original authorize URL preserved in returnUrl.
+Measure-Step "4. prompt=login → expect /login re-auth redirect" {
     $f = New-FlowState
     $r = Invoke-Authorize -Session $session -ClientId $reg.client_id `
         -State $f.State -Nonce $f.Nonce -CodeChallenge $f.Pkce.Challenge `
         -Extras @{ prompt = "login" }
-    if ($r.Query['error'] -ne 'login_required') {
-        throw "expected error=login_required, got error=$($r.Query['error']) code=$($r.Query['code'])"
+    if ($r.Location -notmatch '/login') {
+        throw "prompt=login must redirect to /login for re-auth, got: $($r.Location)"
     }
-    if ($r.Query['state'] -ne $f.State) { throw "state mismatch on error redirect" }
-    Write-Host "  ✓ login_required + state echoed" -ForegroundColor Green
+    if ($r.Query['error'] -or $r.Query['code']) {
+        throw "prompt=login leaked error/code to the RP instead of re-auth: $($r.Location)"
+    }
+    Write-Host "  ✓ 302 → /login (re-auth), no error/code leaked to RP" -ForegroundColor Green
 } | Out-Null
 
 # 5) prompt=consent on an implicit-consent client → code is returned (no Explicit UI path).
@@ -214,18 +225,31 @@ Measure-Step "6. prompt=select_account → expect login_required (no UI surface)
     }
 } | Out-Null
 
-# 7) max_age=0 → must re-auth right now (login_required).
-Measure-Step "7. max_age=0 → expect login_required (force re-auth)" {
+# 7) max_age=0 → must re-auth right now: OP routes the End-User to /login (OIDC §3.1.2.1),
+#    not an error to the RP.
+#    Use a FRESH session (re-login into a new cookie jar) so the re-auth marker cookie that
+#    probe 4 (prompt=login) minted does not carry over — otherwise, if that marker was minted
+#    in the same wall-clock second as this session's auth_time, the second-precision auth_time
+#    comparison would treat re-auth as already satisfied and the OP would (correctly, given that
+#    signal) issue a code instead of re-prompting.
+Measure-Step "7. max_age=0 → expect /login re-auth redirect" {
+    $freshSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    try {
+        Invoke-WebRequest -Method Post "$BASE/login" -WebSession $freshSession `
+            -ContentType "application/x-www-form-urlencoded" -Body @{ username = $user; password = $pwd } `
+            -MaximumRedirection 0 -SkipHttpErrorCheck -ErrorAction SilentlyContinue | Out-Null
+    } catch {}
     $f = New-FlowState
-    $r = Invoke-Authorize -Session $session -ClientId $reg.client_id `
+    $r = Invoke-Authorize -Session $freshSession -ClientId $reg.client_id `
         -State $f.State -Nonce $f.Nonce -CodeChallenge $f.Pkce.Challenge `
         -Extras @{ max_age = "0" }
-    if ($r.Query['error'] -ne 'login_required') {
-        throw "max_age=0 should force login_required (server didn't honour OIDC §3.1.2.1). " +
-              "Got error=$($r.Query['error']) code=$($r.Query['code'])"
+    if ($r.Location -notmatch '/login') {
+        throw "max_age=0 must force re-auth via /login, got: $($r.Location)"
     }
-    if ($r.Query['state'] -ne $f.State) { throw "state mismatch on error redirect" }
-    Write-Host "  ✓ login_required + state echoed" -ForegroundColor Green
+    if ($r.Query['error'] -or $r.Query['code']) {
+        throw "max_age=0 leaked error/code to the RP instead of re-auth: $($r.Location)"
+    }
+    Write-Host "  ✓ 302 → /login (re-auth), no error/code leaked to RP" -ForegroundColor Green
 } | Out-Null
 
 # 8) max_age=99999 → fresh session, no re-auth needed, code returned.

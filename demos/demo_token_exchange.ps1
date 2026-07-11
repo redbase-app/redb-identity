@@ -6,7 +6,10 @@
 #   Plus negative paths: scope upscoping (must be subset), depth limit, missing subject_token.
 # Usage: pwsh -File demo_token_exchange.ps1
 
-$BASE = "http://127.0.0.1:5002"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
+$REDIRECT_CB = if ($BASE -like 'https:*') { 'https://localhost:9999/cb' } else { 'http://localhost:9999/cb' }
 $timings = [System.Collections.Generic.List[object]]::new()
 $EXCHANGE = "urn:ietf:params:oauth:grant-type:token-exchange"
 $ACCESS_TT = "urn:ietf:params:oauth:token-type:access_token"
@@ -48,7 +51,7 @@ $reg = Measure-Step "1. DCR /connect/register (password + token-exchange)" {
       -ContentType "application/json" `
       -Body (@{
         client_name   = "tx-demo"
-        redirect_uris = @("http://localhost:9999/cb")
+        redirect_uris = @($REDIRECT_CB)
         grant_types   = @("password","refresh_token","client_credentials",$EXCHANGE)
         scope         = "openid profile email offline_access identity:read"
       } | ConvertTo-Json)

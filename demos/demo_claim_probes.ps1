@@ -26,8 +26,11 @@
 # Usage: pwsh -File demo_claim_probes.ps1
 #requires -Version 7
 
-$BASE     = "http://127.0.0.1:5002"
-$REDIRECT = "http://localhost:9999/cb"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
+$REDIRECT_CB = if ($BASE -like 'https:*') { 'https://localhost:9999/cb' } else { 'http://localhost:9999/cb' }
+$REDIRECT = $REDIRECT_CB
 $timings  = [System.Collections.Generic.List[object]]::new()
 Add-Type -AssemblyName System.Web
 

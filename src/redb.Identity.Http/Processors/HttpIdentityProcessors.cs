@@ -392,6 +392,21 @@ internal static class HttpIdentityProcessors
     }
 
     /// <summary>
+    /// RFC 6749 §5.1/§5.2 — the token endpoint MUST send <c>Cache-Control: no-store</c> and
+    /// <c>Pragma: no-cache</c> on every response so intermediaries never cache issued tokens.
+    /// Wire this AFTER <see cref="SerializeJsonResponse"/> on the token endpoint (and the other
+    /// token-bearing endpoints: PAR, introspection, revocation, device authorization). It is
+    /// deliberately NOT applied to discovery/JWKS, which are cacheable by design.
+    /// </summary>
+    internal static Task AddNoStoreCacheHeaders(IExchange e, CancellationToken ct)
+    {
+        var msg = e.HasOut ? e.Out! : e.In;
+        msg.Headers["Cache-Control"] = "no-store";
+        msg.Headers["Pragma"] = "no-cache";
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
     /// Handles post-logout redirect per OIDC RP-Initiated Logout §2.
     /// If the response contains <c>post_logout_redirect_uri</c>, validates it against
     /// registered application URIs and redirects (302) only if valid.

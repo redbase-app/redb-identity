@@ -335,6 +335,20 @@ public class RedbIdentityOptions
     /// </summary>
     public bool EnablePasswordFlow { get; set; }
 
+    // ── PKCE (RFC 7636) ──
+
+    /// <summary>
+    /// Require Proof Key for Code Exchange (PKCE) on EVERY authorization_code request.
+    /// When true (default), an <c>/connect/authorize</c> request without a <c>code_challenge</c>
+    /// is rejected — the OAuth 2.1 hardening posture. Set to false to also accept plain
+    /// authorization_code flows without PKCE (e.g. legacy clients, or to certify the OpenID
+    /// "Basic OP" profile, whose non-PKCE tests require the OP to accept such requests).
+    /// PKCE, when present, is ALWAYS S256-only (RFC 7636 §4.2 — <c>plain</c> is never accepted),
+    /// regardless of this flag.
+    /// Default: <c>true</c>.
+    /// </summary>
+    public bool RequirePkce { get; set; } = true;
+
     // ── Token Exchange (RFC 8693) ──
 
     /// <summary>

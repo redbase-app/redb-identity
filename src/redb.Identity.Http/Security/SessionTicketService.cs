@@ -11,10 +11,12 @@ namespace redb.Identity.Http.Security;
 public sealed class SessionTicketService
 {
     private const string Purpose = "redb.identity.session";
+    private const string ReauthPurpose = "redb.identity.reauth";
     private const byte Version1 = 1;
     private const byte Version2 = 2;
 
     private readonly IDataProtector _protector;
+    private readonly IDataProtector _reauthProtector;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<SessionTicketService>? _logger;
 
@@ -35,8 +37,58 @@ public sealed class SessionTicketService
     {
         ArgumentNullException.ThrowIfNull(provider);
         _protector = provider.CreateProtector(Purpose);
+        _reauthProtector = provider.CreateProtector(ReauthPurpose);
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Signs a re-authentication marker capturing WHICH session was active when the OP forced
+    /// re-authentication (prompt=login / max_age), together with the instant it did so (for
+    /// expiry only). DataProtection-encrypted so a client cannot forge it. On the return trip
+    /// re-auth is satisfied once the ACTIVE session id differs from this one — i.e. the End-User
+    /// signed in again (a fresh /login always mints a new session). Keying on the session id
+    /// rather than the second-precision <c>auth_time</c> avoids a same-second window where an
+    /// unchanged session could otherwise be treated as re-authenticated. <paramref name="markedSessionId"/>
+    /// is <c>0</c> when re-auth was forced with no active session (logged-out prompt=login). A
+    /// distinct protector purpose keeps it non-interchangeable with session tickets.
+    /// </summary>
+    public string ProtectReauth(long markedSessionId)
+    {
+        var payload = new byte[16];
+        BitConverter.TryWriteBytes(payload.AsSpan(0, 8), markedSessionId);
+        BitConverter.TryWriteBytes(payload.AsSpan(8, 8), _timeProvider.GetUtcNow().UtcTicks);
+        return Convert.ToBase64String(_reauthProtector.Protect(payload));
+    }
+
+    /// <summary>
+    /// Verifies and decodes a re-authentication marker produced by <see cref="ProtectReauth"/>.
+    /// Returns the marked session id (and the instant it was requested), or <c>null</c> when the
+    /// marker is missing, tampered, or older than <paramref name="maxAge"/>.
+    /// </summary>
+    public ReauthMarker? UnprotectReauth(string marker, TimeSpan maxAge)
+    {
+        if (string.IsNullOrEmpty(marker))
+            return null;
+
+        try
+        {
+            var payload = _reauthProtector.Unprotect(Convert.FromBase64String(marker));
+            if (payload.Length < 16)
+                return null;
+
+            var markedSessionId = BitConverter.ToInt64(payload, 0);
+            var requestedAt = new DateTimeOffset(BitConverter.ToInt64(payload, 8), TimeSpan.Zero);
+            if (_timeProvider.GetUtcNow() - requestedAt > maxAge)
+                return null;
+
+            return new ReauthMarker(markedSessionId, requestedAt);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "SessionTicketService: failed to decrypt reauth marker.");
+            return null;
+        }
     }
 
     /// <summary>
@@ -125,3 +177,9 @@ public sealed class SessionTicketService
 /// Decrypted session ticket data.
 /// </summary>
 public sealed record SessionTicket(long UserId, string Username, DateTimeOffset IssuedAt, long SessionId = 0);
+
+/// <summary>
+/// Decrypted re-authentication marker: the session that was active when re-auth was forced
+/// (<c>0</c> = none / logged out) and the instant it was requested (expiry only).
+/// </summary>
+public readonly record struct ReauthMarker(long MarkedSessionId, DateTimeOffset RequestedAt);

@@ -28,7 +28,9 @@
 # Usage: pwsh -File demo_throttle_rfc6585.ps1
 #requires -Version 7
 
-$BASE    = "http://127.0.0.1:5002"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $timings = [System.Collections.Generic.List[object]]::new()
 
 function Measure-Step {
@@ -121,6 +123,8 @@ $burstResults = Measure-Step "3. burst × 30 PARALLEL /connect/token same client
     $sec = $reg.client_secret
     $base = $BASE
     $results = 1..30 | ForEach-Object -Parallel {
+        # -Parallel runspaces do NOT inherit $PSDefaultParameterValues — pass
+        # -SkipCertificateCheck explicitly so the burst works against an https base.
         $resp = Invoke-WebRequest -Method Post "$using:base/connect/token" `
             -ContentType "application/x-www-form-urlencoded" `
             -Body @{
@@ -128,7 +132,7 @@ $burstResults = Measure-Step "3. burst × 30 PARALLEL /connect/token same client
                 client_id     = $using:cid
                 client_secret = $using:sec
                 scope         = "identity:read"
-            } -SkipHttpErrorCheck -ErrorAction Stop
+            } -SkipHttpErrorCheck -SkipCertificateCheck -ErrorAction Stop
         $retryAfter = $null
         foreach ($k in $resp.Headers.Keys) {
             if ($k -ieq "Retry-After") {

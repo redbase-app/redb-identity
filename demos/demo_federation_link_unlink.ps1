@@ -28,7 +28,9 @@
 # Skips with exit=0 if mock IdP not reachable (compose stack not up).
 #requires -Version 7
 
-$BASE = "http://127.0.0.1:5002"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $IDP  = "http://127.0.0.1:9199/default"
 $PROV = "mock-idp-e2e"
 $timings = [System.Collections.Generic.List[object]]::new()
@@ -56,7 +58,7 @@ function Measure-Step {
 
 function Hop {
     param([string]$Method, [string]$Url, $Body = $null, [hashtable]$Headers = $null, [string]$ContentType = $null)
-    $curlArgs = @('-s', '-i', '-m', '15', '-X', $Method.ToUpperInvariant())
+    $curlArgs = @('-s', '-k', '-i', '-m', '15', '-X', $Method.ToUpperInvariant())
     if ($Headers) { foreach ($k in $Headers.Keys) { $curlArgs += @('-H', "$($k): $($Headers[$k])") } }
     $tempBodyFile = $null
     if ($null -ne $Body) {
@@ -98,7 +100,7 @@ function Hop {
 
 function Get-Json {
     param([string]$Method, [string]$Url, $Body = $null, [hashtable]$Headers = $null, [string]$ContentType = "application/json")
-    $curlArgs = @('-s', '-m', '15', '-w', '||%{http_code}||', '-X', $Method.ToUpperInvariant())
+    $curlArgs = @('-s', '-k', '-m', '15', '-w', '||%{http_code}||', '-X', $Method.ToUpperInvariant())
     if ($Headers) { foreach ($k in $Headers.Keys) { $curlArgs += @('-H', "$($k): $($Headers[$k])") } }
     $tempBodyFile = $null
     if ($null -ne $Body) {

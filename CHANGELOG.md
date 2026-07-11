@@ -27,6 +27,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > package together. Per-package divergence may begin in the 1.x patch series
 > once the public surface stabilises. NuGet publication follows the source cut.
 
+## [1.1.0] — 2026-07-11
+
+**Preparing for [OpenID Certification](https://openid.net/certification/).** We
+stood up the official OpenID Foundation conformance suite against a live
+redb.Identity and used it to validate — and harden — the OIDC / OAuth surface
+end to end. Full state and per-module breakdown:
+[`OPENID_CERTIFICATION.md`](OPENID_CERTIFICATION.md).
+
+### Verified
+
+- **OpenID conformance — local runs of the official OIDF suite.** **Config OP**
+  reports **zero failures** over native HTTPS; the **Basic OP**
+  authorization-code-flow modules pass. Every automatable module is green — the
+  remainder are interactive re-auth flows (which behave to spec) and automation
+  limits, not server gaps.
+- **.NET suite still green across all three providers** — `Passed: 1767,
+  Skipped: 1, Failed: 0` (PostgreSQL / MSSQL / SQLite), one identical codebase.
+- **Demos run over HTTPS out of the box.** The `demos/` suite is
+  base-URL-switchable (`$env:IDENTITY_BASE`) and TLS-clean end to end.
+
+### Added
+
+- **Native HTTPS for the HTTP facade** — TLS terminated in-process (Kestrel via
+  the redb.Route.Http connector: `ssl=true` + cert path in config), no reverse
+  proxy required. See [`HTTPS.md`](HTTPS.md).
+- **`OPENID_CERTIFICATION.md`** — what redb.Identity implements toward OpenID
+  Certification and the current conformance state.
+- **Configurable PKCE** (`RedbIdentityOptions.RequirePkce`) — enforce proof-key
+  per client, or relax for a non-PKCE Basic-profile run; S256-only when present.
+
+### Fixed
+
+- **Authorization error delivery (RFC 6749 §4.1.2.1).** Errors are returned via
+  the client's *registered* `redirect_uri` only — validated against the client
+  before any redirect — closing an error open-redirect and delivering
+  `invalid_scope` / `invalid_request` on the correct channel.
+- **Token-endpoint error codes (RFC 6749 §5.2).** A reused / already-redeemed
+  authorization code now returns `400 invalid_grant` (was `401 invalid_token`);
+  `invalid_client` maps to 401.
+- **`Cache-Control: no-store` + `Pragma: no-cache` (RFC 6749 §5.1)** on the
+  token, PAR, introspection, revocation and device-authorization responses;
+  discovery and JWKS stay cacheable by design.
+- **`prompt=login` / `max_age` re-authentication (OIDC §3.1.2.1).** Both route
+  the End-User back to `/login` and complete on re-login — never leaked as an
+  error to the RP. The signed re-auth marker is bound to the **session id**, so
+  there is no redirect loop and no same-second bypass.
+- **Boolean claims (OIDC §5.1).** `email_verified` / `phone_number_verified` are
+  emitted as JSON booleans, not strings; `acr` as `"1"` / `"2"`.
+- **id_token hygiene.** OpenIddict's internal `oi_au_id` authorization-reference
+  claim no longer leaks into the id_token (kept on the access_token for
+  introspection linkage).
+- **Discovery metadata completeness** — `acr_values_supported`,
+  `claim_types_supported`, and the full
+  `token`/`introspection`/`revocation_endpoint_auth_methods_supported` sets.
+
 ## [1.0.1] — 2026-07-10
 
 First public source release of redb.Identity.

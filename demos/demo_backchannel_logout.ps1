@@ -14,7 +14,10 @@
 #        - sid  (when backchannel_logout_session_required=true)
 # Usage: pwsh -File demo_backchannel_logout.ps1
 
-$BASE     = "http://127.0.0.1:5002"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
+$REDIRECT_CB = if ($BASE -like 'https:*') { 'https://localhost:9999/cb' } else { 'http://localhost:9999/cb' }
 $LSN_PORT = 9876
 $LSN_URL  = "http://127.0.0.1:$LSN_PORT/bclogout/"
 $timings  = [System.Collections.Generic.List[object]]::new()
@@ -55,7 +58,7 @@ $reg = Measure-Step "1. DCR /connect/register (password + backchannel_logout_uri
       -ContentType "application/json" `
       -Body (@{
         client_name                         = "bclogout-demo"
-        redirect_uris                       = @("http://localhost:9999/cb")
+        redirect_uris                       = @($REDIRECT_CB)
         grant_types                         = @("password","refresh_token")
         scope                               = "openid profile email offline_access"
         backchannel_logout_uri              = "http://127.0.0.1:$LSN_PORT/bclogout/"

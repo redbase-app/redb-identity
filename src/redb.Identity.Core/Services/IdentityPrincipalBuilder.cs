@@ -75,7 +75,10 @@ public static class IdentityPrincipalBuilder
             {
                 identity.SetClaim(Claims.Email, user.Email);
                 var verified = oidcProps?.EmailVerified ?? false;
-                identity.SetClaim(Claims.EmailVerified, verified.ToString().ToLowerInvariant());
+                // OIDC Core §5.1 — email_verified MUST be a JSON boolean. OpenIddict's bool
+                // SetClaim overload stamps ClaimValueTypes.Boolean so it serialises as true/false
+                // (not the string "true"), which the conformance suite requires.
+                identity.SetClaim(Claims.EmailVerified, verified);
             }
         }
 
@@ -86,7 +89,8 @@ public static class IdentityPrincipalBuilder
             {
                 identity.SetClaim(Claims.PhoneNumber, user.Phone);
                 var verified = oidcProps?.PhoneNumberVerified ?? false;
-                identity.SetClaim(Claims.PhoneNumberVerified, verified.ToString().ToLowerInvariant());
+                // OIDC Core §5.1 — phone_number_verified MUST be a JSON boolean (see email_verified above).
+                identity.SetClaim(Claims.PhoneNumberVerified, verified);
             }
         }
 

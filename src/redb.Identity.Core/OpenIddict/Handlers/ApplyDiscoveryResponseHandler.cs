@@ -63,16 +63,38 @@ internal sealed class ApplyDiscoveryResponseHandler
         context.Response["backchannel_logout_supported"] = true;
         context.Response["backchannel_logout_session_supported"] = true;
 
-        // D1: per RFC 8414 §2 these auth-methods fields are recommended (and several
-        // conformance suites flag them as missing). OpenIddict already exposes
-        // token_endpoint_auth_methods_supported; mirror it on revocation/introspection
-        // (we accept the same client_secret_basic/post + none methods on all three).
-        var tokenAuthMethods = context.Response["token_endpoint_auth_methods_supported"];
-        if (tokenAuthMethods is { } existingMethods && existingMethods.Value is not null)
-        {
-            context.Response["revocation_endpoint_auth_methods_supported"] = existingMethods;
-            context.Response["introspection_endpoint_auth_methods_supported"] = existingMethods;
-        }
+        // OIDC Discovery §3 — claim types: we only emit Normal claims (no aggregated/distributed).
+        context.Response["claim_types_supported"] =
+            JsonSerializer.Deserialize<JsonElement>("[\"normal\"]");
+
+        // OIDC Core §2 / §5.5.1.1 — advertise the acr values we can actually return.
+        // IdentityPrincipalBuilder emits "1" (single-factor / password) or "2" (multi-factor
+        // verified). "0" (no authentication) is currently unreachable, so it is not advertised.
+        context.Response["acr_values_supported"] =
+            JsonSerializer.Deserialize<JsonElement>("[\"1\",\"2\"]");
+
+        // Client authentication methods. OpenIddict's built-in discovery under-reports the set
+        // its client-auth pipeline actually accepts (empirically verified: client_secret_basic,
+        // client_secret_post and private_key_jwt all succeed at /connect/token, and public
+        // clients authenticate with 'none' via PKCE). Declare the real set explicitly so the
+        // Basic OP conformance profile — which defaults to client_secret_basic and exercises
+        // public/none clients — sees an accurate document.
+        //   • token endpoint            : basic + post + private_key_jwt + none
+        //   • introspection / revocation: same confidential set WITHOUT 'none' — those
+        //     endpoints require an authenticated client (RFC 7662 / RFC 7009).
+        context.Response.RemoveParameter("token_endpoint_auth_methods_supported");
+        context.Response["token_endpoint_auth_methods_supported"] =
+            JsonSerializer.Deserialize<JsonElement>(
+                "[\"client_secret_basic\",\"client_secret_post\",\"private_key_jwt\",\"none\"]");
+
+        const string mgmtAuthMethods =
+            "[\"client_secret_basic\",\"client_secret_post\",\"private_key_jwt\"]";
+        context.Response.RemoveParameter("introspection_endpoint_auth_methods_supported");
+        context.Response["introspection_endpoint_auth_methods_supported"] =
+            JsonSerializer.Deserialize<JsonElement>(mgmtAuthMethods);
+        context.Response.RemoveParameter("revocation_endpoint_auth_methods_supported");
+        context.Response["revocation_endpoint_auth_methods_supported"] =
+            JsonSerializer.Deserialize<JsonElement>(mgmtAuthMethods);
 
         // RFC 8414 §2 / RFC 7591 §2 — when the server supports `private_key_jwt`
         // (or `client_secret_jwt`) it SHOULD advertise the JWS signing algorithms

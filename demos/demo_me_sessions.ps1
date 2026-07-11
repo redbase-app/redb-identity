@@ -4,7 +4,10 @@
 #   Coverage: GET list, DELETE /{id}, DELETE /others, DELETE /current.
 # Usage: pwsh -File demo_me_sessions.ps1
 
-$BASE = "http://127.0.0.1:5002"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
+$REDIRECT_CB = if ($BASE -like 'https:*') { 'https://localhost:9999/cb' } else { 'http://localhost:9999/cb' }
 $timings = [System.Collections.Generic.List[object]]::new()
 
 function Measure-Step {
@@ -48,7 +51,7 @@ $reg = Measure-Step "1. DCR /connect/register (password + identity:account)" {
       -ContentType "application/json" `
       -Body (@{
         client_name   = "sess-demo"
-        redirect_uris = @("http://localhost:9999/cb")
+        redirect_uris = @($REDIRECT_CB)
         grant_types   = @("password","refresh_token")
         scope         = "openid profile email offline_access identity:account"
       } | ConvertTo-Json)

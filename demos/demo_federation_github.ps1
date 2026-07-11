@@ -26,7 +26,9 @@
 # operator removed it for production).
 #requires -Version 7
 
-$BASE = "http://127.0.0.1:5002"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $PROV = "mock-github-e2e"
 $MOCK_PORT = 9201
 $timings = [System.Collections.Generic.List[object]]::new()
@@ -56,7 +58,7 @@ function Measure-Step {
 # as in demo_federation_e2e). Single-hop, no auto-redirect.
 function Hop {
     param([string]$Method, [string]$Url, $Body = $null, [hashtable]$Headers = $null, [string]$ContentType = $null)
-    $curlArgs = @('-s', '-i', '-m', '15', '-X', $Method.ToUpperInvariant())
+    $curlArgs = @('-s', '-k', '-i', '-m', '15', '-X', $Method.ToUpperInvariant())
     if ($Headers) { foreach ($k in $Headers.Keys) { $curlArgs += @('-H', "$($k): $($Headers[$k])") } }
     $tempBodyFile = $null
     if ($null -ne $Body) {
@@ -94,7 +96,7 @@ function Hop {
 
 function Get-Json {
     param([string]$Method, [string]$Url, $Body = $null, [hashtable]$Headers = $null, [string]$ContentType = "application/json")
-    $curlArgs = @('-s', '-m', '15', '-w', '||%{http_code}||', '-X', $Method.ToUpperInvariant())
+    $curlArgs = @('-s', '-k', '-m', '15', '-w', '||%{http_code}||', '-X', $Method.ToUpperInvariant())
     if ($Headers) { foreach ($k in $Headers.Keys) { $curlArgs += @('-H', "$($k): $($Headers[$k])") } }
     $tempBodyFile = $null
     if ($null -ne $Body) {
@@ -295,6 +297,26 @@ try {
         return $true
     }
     if (-not $advertised) { exit 0 }
+
+    # The OP-issued federation callback targets the OP's ISSUER host; our cookies are bound to
+    # whatever host we drive. If they differ (e.g. the conformance context.json pins the issuer to
+    # host.docker.internal while we started on 127.0.0.1), re-target to the issuer so the FULL
+    # end-to-end flow — real requests and all — actually runs. Only skip if it isn't reachable.
+    $__disc = Get-Json -Method Get -Url "$BASE/.well-known/openid-configuration"
+    $__issuerUri = [uri]$__disc.issuer
+    if ($__issuerUri.Host -and $__issuerUri.Host -ne ([uri]$BASE).Host) {
+        $__issuerBase = "$($__issuerUri.Scheme)://$($__issuerUri.Host):$($__issuerUri.Port)"
+        $__reachable = $false
+        try { $__reachable = $null -ne (Get-Json -Method Get -Url "$__issuerBase/.well-known/openid-configuration").issuer } catch {}
+        if ($__reachable) {
+            Write-Host "Re-targeting to the OP issuer host ($($__issuerUri.Host)) so the federation callback lines up." -ForegroundColor DarkGray
+            $BASE = $__issuerBase
+        } else {
+            Write-Host ""
+            Write-Host "OP issuer host ($($__issuerUri.Host)) differs from the base and isn't reachable here — skipping." -ForegroundColor Yellow
+            exit 0
+        }
+    }
 
     # 1) DCR admin client for verification.
     $adminReg = Measure-Step "1. DCR admin client (users.manage)" {

@@ -6,7 +6,9 @@
 #             /ServiceProviderConfig + /Schemas discovery, filter query.
 # Usage: pwsh -File demo_scim.ps1
 
-$BASE    = "http://127.0.0.1:5002"
+$BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+$PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $SCIM    = "$BASE/api/v1/identity/scim/v2"
 $timings = [System.Collections.Generic.List[object]]::new()
 

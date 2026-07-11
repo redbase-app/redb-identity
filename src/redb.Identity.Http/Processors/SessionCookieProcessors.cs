@@ -16,6 +16,15 @@ internal static class SessionCookieProcessors
     internal const string SessionUsernameHeader = "session_username";
     internal const string SessionIdHeader = "session_id";
 
+    // Re-authentication marker (prompt=login / max_age). A DataProtection-signed cookie carrying
+    // the instant re-auth was forced; on the return trip the authorize handler compares it to the
+    // session's auth_time to decide whether the End-User re-authenticated. See HandleReauthCookie.
+    internal const string ReauthCookieName = "redb.identity.reauth";
+    internal const string ReauthMarkedSidHeader = "reauth_marked_sid"; // in: session id active when re-auth was forced (0 = none)
+    internal const string ReauthSetProperty = "reauth_set";           // out: exchange prop = session id to mark (long)
+    internal const string ReauthClearProperty = "reauth_clear";       // out: exchange prop = true
+    private static readonly TimeSpan ReauthMarkerMaxAge = TimeSpan.FromMinutes(10);
+
     /// <summary>
     /// Reads the session cookie from the HTTP request, decrypts it, and sets
     /// <c>session_user_id</c> and <c>session_username</c> headers on the exchange.
@@ -32,6 +41,19 @@ internal static class SessionCookieProcessors
         if (string.IsNullOrEmpty(cookieHeader))
             return Task.CompletedTask;
 
+        // Re-auth marker (prompt=login / max_age): decode it up-front so the authorize handler can
+        // tell whether the End-User re-authenticated since it forced re-auth. Independent of the
+        // session cookie (it must survive the new session that /login creates).
+        var (reauthPrefixed, reauthBare) = IdentityCookieFormatter.Candidates(ReauthCookieName);
+        var reauthValue = ParseCookieValue(cookieHeader, reauthPrefixed)
+                          ?? ParseCookieValue(cookieHeader, reauthBare);
+        if (reauthValue is not null)
+        {
+            var reauth = ticketService.UnprotectReauth(reauthValue, ReauthMarkerMaxAge);
+            if (reauth.HasValue)
+                e.In.Headers[ReauthMarkedSidHeader] = reauth.Value.MarkedSessionId;
+        }
+
         var (prefixed, bare) = IdentityCookieFormatter.Candidates(bareCookieName);
         var ticketValue = ParseCookieValue(cookieHeader, prefixed)
                           ?? ParseCookieValue(cookieHeader, bare);
@@ -47,6 +69,52 @@ internal static class SessionCookieProcessors
         if (ticket.SessionId > 0)
             e.In.Headers[SessionIdHeader] = ticket.SessionId;
 
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Writes / clears the re-authentication marker cookie on the authorize response, driven by
+    /// exchange properties the OpenIddict authorize handler set:
+    /// <list type="bullet">
+    ///   <item><see cref="ReauthSetProperty"/> (session id, 0 = none) → the handler is forcing re-auth
+    ///   (prompt=login or max_age); mint a signed <c>redb.identity.reauth</c> cookie binding the
+    ///   currently-active session so the return trip can prove the End-User signed in again.</item>
+    ///   <item><see cref="ReauthClearProperty"/> → re-auth was satisfied; consume the marker (expire
+    ///   the cookie) so a stale marker can never satisfy a LATER prompt=login (would be a bypass).</item>
+    /// </list>
+    /// Runs after the redirect processors so it appends its Set-Cookie to the final response (login
+    /// redirect, consent redirect, or the success code redirect).
+    /// </summary>
+    internal static Task HandleReauthCookie(
+        IExchange e, CancellationToken ct,
+        SessionTicketService ticketService,
+        bool secure, CookieSameSiteMode sameSite, bool useHostPrefix)
+    {
+        string? setCookie = null;
+
+        if (e.Properties.TryGetValue(ReauthSetProperty, out var rs) && rs is long markedSessionId)
+        {
+            var marker = ticketService.ProtectReauth(markedSessionId);
+            setCookie = IdentityCookieFormatter.Build(
+                ReauthCookieName, marker,
+                maxAgeSeconds: (int)ReauthMarkerMaxAge.TotalSeconds,
+                secure: secure, sameSite: sameSite, useHostPrefix: useHostPrefix);
+        }
+        else if (e.Properties.TryGetValue(ReauthClearProperty, out var rc) && rc is true)
+        {
+            setCookie = IdentityCookieFormatter.Build(
+                ReauthCookieName, value: string.Empty,
+                maxAgeSeconds: 0,
+                secure: secure, sameSite: sameSite, useHostPrefix: useHostPrefix);
+        }
+
+        if (setCookie is null)
+            return Task.CompletedTask;
+
+        var msg = e.HasOut ? e.Out! : e.In;
+        // A success code-redirect never carries a Set-Cookie of its own; the login/consent
+        // redirects don't either, so a single Set-Cookie is safe here.
+        msg.Headers["Set-Cookie"] = setCookie;
         return Task.CompletedTask;
     }
 
