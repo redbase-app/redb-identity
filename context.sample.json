@@ -589,7 +589,7 @@
           ],
           "Ssl": true,
           "SslCertPath": "C:/Work/yaml/conformance/certs/redb-identity-dev.pfx",
-          "SslCertPassword": "changeit",
+          "SslCertPassword": "<DEV_SECRET_PLACEHOLDER>",
           "CorsEnabled": false,
           "CorsRegisteredClientOriginsEnabled": true,
           "//AdditionalAllowedOrigins": "CSV without trailing slash. Example: 'https://app.dev.local,https://staging.example.com'. NEVER '*'.",
