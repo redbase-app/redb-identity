@@ -67,6 +67,21 @@ public sealed class BackchannelOidcClient
         _log = log;
     }
 
+    /// <summary>
+    /// Handler for the session HttpClients this class builds by hand (manual cookie handling, no
+    /// auto-redirect). These bypass IHttpClientFactory, so the accept-any-cert primary handler
+    /// registered app-wide in Program.cs does NOT apply — carry the dev flag through here, or the
+    /// host's bundled self-signed cert fails login with "UntrustedRoot".
+    /// </summary>
+    private HttpClientHandler CreateSessionHandler() => new()
+    {
+        UseCookies = false,
+        AllowAutoRedirect = false,
+        ServerCertificateCustomValidationCallback = _opts.AcceptAnyServerCert
+            ? HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+            : null,
+    };
+
     public async Task<BackchannelLoginResult> LoginAsync(
         string username, string password, CancellationToken ct = default)
     {
@@ -94,7 +109,7 @@ public sealed class BackchannelOidcClient
         // with the Secure flag while we're talking to it over plain http (dev): the
         // container then silently drops the cookie. Instead we parse Set-Cookie headers
         // ourselves and forward NAME=VALUE on subsequent requests.
-        using var handler = new HttpClientHandler { UseCookies = false, AllowAutoRedirect = false };
+        using var handler = CreateSessionHandler();
         using var sessionHttp = new HttpClient(handler) { BaseAddress = _http.BaseAddress };
         var hostCookies = new Dictionary<string, string>(StringComparer.Ordinal);
 
@@ -517,7 +532,7 @@ public sealed class BackchannelOidcClient
             return Fail("oidc_discovery_failed", "Identity provider discovery failed.");
         }
 
-        using var handler = new HttpClientHandler { UseCookies = false, AllowAutoRedirect = false };
+        using var handler = CreateSessionHandler();
         using var sessionHttp = new HttpClient(handler) { BaseAddress = _http.BaseAddress };
 
         var hostCookies = ParseCookieHeader(inflight.HostMfaStateCookie);
@@ -680,7 +695,7 @@ public sealed class BackchannelOidcClient
             return Fail("oidc_discovery_failed", "Identity provider discovery failed.");
         }
 
-        using var handler = new HttpClientHandler { UseCookies = false, AllowAutoRedirect = false };
+        using var handler = CreateSessionHandler();
         using var sessionHttp = new HttpClient(handler) { BaseAddress = _http.BaseAddress };
 
         var hostCookies = ParseCookieHeader(inflight.HostSessionCookieHeader);
@@ -789,7 +804,7 @@ public sealed class BackchannelOidcClient
     public async Task<bool> RecordConsentGrantAsync(
         ConsentInFlightState inflight, CancellationToken ct = default)
     {
-        using var handler = new HttpClientHandler { UseCookies = false, AllowAutoRedirect = false };
+        using var handler = CreateSessionHandler();
         using var sessionHttp = new HttpClient(handler) { BaseAddress = _http.BaseAddress };
 
         var hostCookies = ParseCookieHeader(inflight.HostSessionCookieHeader);

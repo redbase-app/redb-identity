@@ -91,6 +91,33 @@ public static class ScimSchemaDefinitions
         ]
     };
 
+    /// <summary>
+    /// Enterprise User extension (RFC 7643 §4.3) — the attribute set corporate provisioning sends.
+    /// <c>manager.displayName</c> and <c>manager.$ref</c> are declared readOnly because the provider
+    /// resolves them from the referenced user; a client that writes them is ignored, by design.
+    /// </summary>
+    public static ScimSchema EnterpriseUserSchema { get; } = new()
+    {
+        Id = ScimConstants.EnterpriseUserSchema,
+        Name = "EnterpriseUser",
+        Description = "Enterprise User",
+        Meta = new ScimMeta { ResourceType = "Schema", Location = "/scim/v2/Schemas/" + ScimConstants.EnterpriseUserSchema },
+        Attributes =
+        [
+            Attr("employeeNumber", description: "Numeric or alphanumeric identifier assigned to a person, typically based on order of hire or association with an organization."),
+            Attr("costCenter", description: "Identifies the name of a cost center."),
+            Attr("organization", description: "Identifies the name of an organization."),
+            Attr("division", description: "Identifies the name of a division."),
+            Attr("department", description: "Identifies the name of a department."),
+            Attr("manager", type: "complex", description: "The user's manager.", subAttributes:
+            [
+                Attr("value", description: "The id of the SCIM resource representing the user's manager."),
+                Attr("$ref", type: "reference", description: "The URI of the SCIM resource representing the user's manager."),
+                Attr("displayName", mutability: "readOnly", description: "The displayName of the user's manager, resolved by the service provider.")
+            ])
+        ]
+    };
+
     private static ScimSchemaAttribute Attr(
         string name,
         string type = "string",

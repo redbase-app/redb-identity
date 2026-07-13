@@ -12,6 +12,11 @@ namespace redb.Identity.Core.Models;
 public class UserProps
 {
     // --- OIDC Standard Claims (profile scope) ---
+    //
+    // The full set OIDC Core §5.1 defines for `scope=profile`. The OIDF conformance suite
+    // (oidcc-scope-profile / oidcc-scope-all) checks userinfo against exactly this list and warns
+    // for every one the OP fails to return. They are plain PROPS fields — adding them needed no
+    // migration and no schema deploy; the next request simply saw them.
 
     /// <summary>Given name (first name). OIDC: given_name.</summary>
     public string? GivenName { get; set; }
@@ -19,8 +24,40 @@ public class UserProps
     /// <summary>Family name (last name). OIDC: family_name.</summary>
     public string? FamilyName { get; set; }
 
+    /// <summary>Middle name. OIDC: middle_name.</summary>
+    public string? MiddleName { get; set; }
+
+    /// <summary>Casual name the user prefers to be called (e.g. "Mike" for Michael). OIDC: nickname.</summary>
+    public string? Nickname { get; set; }
+
+    /// <summary>Shorthand name the RP may use to identify the user in its UI. Defaults to the
+    /// login when unset (emitted by <c>IdentityPrincipalBuilder</c>). OIDC: preferred_username.</summary>
+    public string? PreferredUsername { get; set; }
+
+    /// <summary>URL of the user's profile page. OIDC: profile.</summary>
+    public string? Profile { get; set; }
+
     /// <summary>URL of the user's profile picture. OIDC: picture.</summary>
     public string? Picture { get; set; }
+
+    /// <summary>URL of the user's web page or blog. OIDC: website.</summary>
+    public string? Website { get; set; }
+
+    /// <summary>Gender. OIDC: gender ("female" / "male" / other values are allowed).</summary>
+    public string? Gender { get; set; }
+
+    /// <summary>Birthday as ISO 8601 <c>YYYY-MM-DD</c> (year alone is allowed). OIDC: birthdate.</summary>
+    public string? Birthdate { get; set; }
+
+    /// <summary>IANA time-zone name, e.g. "Europe/Moscow". OIDC: zoneinfo.</summary>
+    public string? ZoneInfo { get; set; }
+
+    /// <summary>BCP 47 language tag, e.g. "ru-RU". OIDC: locale.</summary>
+    public string? Locale { get; set; }
+
+    /// <summary>When the profile was last changed. Emitted as the OIDC <c>updated_at</c> claim
+    /// (a JSON number — seconds since the epoch). Falls back to the user's registration date.</summary>
+    public DateTimeOffset? UpdatedAt { get; set; }
 
     // --- OIDC Standard Claims (email scope) ---
 
@@ -46,6 +83,35 @@ public class UserProps
 
     /// <summary>SCIM externalId (RFC 7643 §3.1) — identifier assigned by the provisioning client. NOT related to federation.</summary>
     public string? ScimExternalId { get; set; }
+
+    // --- SCIM Enterprise User extension (RFC 7643 §4.3) ---
+    //
+    // What corporate provisioning (Okta / Entra ID / Workday) pushes on the first sync. Props, so
+    // adding them costs no migration: an existing user simply has them null until someone writes one.
+
+    /// <summary>RFC 7643 §4.3 — employeeNumber.</summary>
+    public string? EmployeeNumber { get; set; }
+
+    /// <summary>RFC 7643 §4.3 — costCenter.</summary>
+    public string? CostCenter { get; set; }
+
+    /// <summary>RFC 7643 §4.3 — organization.</summary>
+    public string? Organization { get; set; }
+
+    /// <summary>RFC 7643 §4.3 — division.</summary>
+    public string? Division { get; set; }
+
+    /// <summary>RFC 7643 §4.3 — department.</summary>
+    public string? Department { get; set; }
+
+    /// <summary>
+    /// RFC 7643 §4.3 — <c>manager.value</c>: the <c>_users._id</c> of this user's manager, as a
+    /// string because SCIM ids are strings on the wire. <c>$ref</c> and <c>displayName</c> are NOT
+    /// stored: the spec marks displayName read-only (the provider resolves it) and $ref is derived
+    /// from the id plus the request's base URL. Storing either would let them rot out of sync with
+    /// the manager's actual record.
+    /// </summary>
+    public string? ManagerId { get; set; }
 
     // --- Federation linking (multi-provider) ---
 

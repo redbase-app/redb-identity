@@ -5,17 +5,22 @@ This document describes what redb.Identity implements toward
 prepare for it, and the current state against the official OpenID Foundation
 conformance suite.
 
-> **Status — preparing for OpenID Certification.** In local runs of the
-> official OIDF conformance suite against a live server over native HTTPS:
-> **Config OP** reports **zero failures**, and the **Basic OP**
-> authorization-code-flow modules pass. Every automatable module is green; the
-> remainder are interactive re-auth flows (which behave to spec) and automation
-> limits, not server gaps. The protocol issues surfaced along the way are all
-> fixed (see §3).
+> **Status — preparing for OpenID Certification.** In local runs of the official
+> OIDF conformance suite against a live server over native HTTPS:
+> **Config OP — zero failures**, and **Basic OP — 35 modules, zero failures**
+> (29 PASSED, 4 REVIEW awaiting a screenshot, 1 WARNING that is a deliberate
+> extension, 1 SKIPPED optional feature). Every defect the suite found is fixed;
+> §4.1 lists them, including the ones we had previously — and wrongly — written
+> off as harness limitations.
 
 It is a **status / spec** document, not a marketing claim: it tracks our own
 local conformance runs and the protocol work that makes redb.Identity
 certifiable.
+
+> **We do not carry the OpenID Certified™ mark.** That is a trademark, granted by
+> the OpenID Foundation through a formal (and paid) submission. What is claimed
+> here is only what is true: the server is run against the official OIDF
+> conformance suite, and these are the results.
 
 ---
 
@@ -161,46 +166,72 @@ suite](https://gitlab.com/openid/conformance-suite) locally (Docker,
 `https://host.docker.internal:5002` over native HTTPS (see §5).
 
 - **Config OP** — passes over HTTPS (0 failures).
-- **Basic OP** — of the 35 plan modules, every module that can be automated
-  passes; the remainder are limited by our local automation driver, the suite
-  configuration, or manual certification steps — not by OP defects:
+- **Basic OP** — **35 modules, 0 failures.**
 
-  | Category | Count | Notes |
-  |----------|-------|-------|
-  | PASSED | 19 | code flow, userinfo (get/post-header), display, `prompt=none` ×2, `max_age=10000`, `id_token_hint`, `login_hint`, `ui/claims_locales`, `acr_values`, **code reuse** ×2, valid PKCE, negative cases |
-  | WARNING (finished, automated checks green) | 9 | `server`, userinfo-post-body, `scope` profile/email/**address/phone/all**, alternate-happy-flow, claims-essential |
-  | SKIPPED (optional feature) | 1 | unsigned request object |
-  | WAITING — manual screenshot (OP correct) | 2 | `prompt=login`, `max_age=1` |
-  | WAITING — automation-driver limit | 2 | ensure-registered-redirect-uri, request-object-with-redirect-uri |
-  | FAILED — harness/driver (OP verified capable) | 2 | refresh-token (two-client), client-secret-post |
+  | Result | Modules | Notes |
+  |--------|---------|-------|
+  | PASSED | 29 | |
+  | REVIEW | 4 | the suite requires a human-uploaded screenshot — pass-equivalent |
+  | WARNING | 1 | `oidcc-server` — two deliberate id_token claims (below) |
+  | SKIPPED | 1 | unsigned request object (RFC 9101) — we do not advertise it, so the suite correctly skips |
+  | **FAILED** | **0** | |
 
-  `prompt=login` and `max_age` behave correctly (the suite reaches the "server
-  must ask the user to login for a second time" state); those two modules
-  additionally require a **manual screenshot upload** for certification
-  evidence and cannot be fully auto-completed.
+  The four REVIEW modules (`prompt-login`, `max-age-1`,
+  `ensure-registered-redirect-uri`, `ensure-request-object-with-redirect-uri`)
+  behave correctly end to end; the suite additionally wants a screenshot as
+  certification evidence and therefore never auto-finishes them.
 
-  id_token hygiene: OpenIddict's internal `oi_au_id` (authorization id) no
-  longer leaks into the id_token (`StripInternalClaimsFromIdentityToken`,
-  kept on the access_token). `oi_tkn_id` is intentionally retained — it is the
-  entry id OpenIddict uses to revoke the id_token / drive back-channel logout.
-  `name` and our `redb:user_id` remain in the id_token by design (the latter so
-  external systems can cross-reference their own user table client-side).
+### 4.1 What the suite actually found
 
-### 4.1 Notes on the non-passing modules
+An earlier revision of this document attributed several non-passing modules to
+"automation-driver limits" and "suite configuration". **That was wrong, and it
+is worth saying so plainly**: when we stopped excusing them and dug in, most
+turned out to be **genuine OP defects**. All are now fixed.
 
-During verification we separated genuine OP defects from limitations of our
-local automation driver / suite configuration:
+| What the suite flagged | What it really was | Fix |
+|------------------------|--------------------|-----|
+| `oidcc-scope-address/phone/all` — WARNING | **Not** "the client wasn't registered with those scopes." The `profile` claim set was **incomplete** — the suite diffs userinfo against the exact OIDC §5.1 list and warns per missing claim | Full §5.1 set emitted; `updated_at` as a JSON number, `*_verified` as JSON booleans |
+| `oidcc-server` — id_token claims | Scope-derived `profile`/`email`/`phone`/`address` claims were **embedded in the id_token**. In the code flow they belong in UserInfo (§5.4). An id_token is forwarded to third parties and logged as proof of sign-in — the user's phone number travelled far further than the RP intended. **A PII leak** | Scope-derived claims are now AccessToken-destination only: served from `/connect/userinfo`, absent from the id_token |
+| userinfo returning extra fields | UserInfo was copying claims through a *deny-list*, leaking token plumbing: OpenIddict's `oi_*` internals, `jti`/`exp`/`iat`/`at_hash`. Those describe the **token**, not the user (§5.3) | Explicit allow-list |
+| `oidcc-userinfo-post-body` | `/connect/userinfo` (POST) did not accept the access token in the form-encoded body (RFC 6750 §2.2) | Route now maps form to body |
+| `oidcc-claims-essential` — WARNING | The test requests `name` as an essential claim via the **`claims` parameter** (§5.5), which we had **not implemented at all** — and our own discovery said so: `claims_parameter_supported: false` | §5.5 implemented; discovery now says `true` |
+| `oidcc-server-client-secret-post` — FAILED | **Suite config, not an OP defect** — and this one really was the harness. The test does `config.add("client", config.get("client_secret_post"))`, overwriting `client` with a key our plan didn't have, so it died *before* issuing a single request to the OP | Plan config gained a third client under the `client_secret_post` key. Module passes |
 
-| Module | Cause | OP correct? |
-|--------|-------|-------------|
-| `oidcc-prompt-login`, `oidcc-max-age-1` | require a manual screenshot upload | ✅ yes (verified end-to-end) |
-| `oidcc-scope-address/phone/all` | conformance client must be registered **with** those scopes | ✅ yes (OP supports `address`/`phone`) |
-| `oidcc-refresh-token` | uses a **second client**; our automation driver mis-drives the two-client sequence | ✅ yes (manual two-client: 200/200, refresh 200) |
-| `oidcc-server-client-secret-post` | suite config resolution for the post-auth variant | ✅ yes (OP accepts `client_secret_post`: 200) |
-| `oidcc-ensure-registered-redirect-uri`, `…-request-object-with-redirect-uri` | automation-driver limitation | OP rejects unregistered redirect_uri as required |
+Earlier passes also fixed: the error open-redirect (RFC 6749 §4.1.2.1), reused
+authorization code → `400 invalid_grant` (§5.2), `Cache-Control: no-store` on
+token/introspect/revoke (§5.1), and boolean `*_verified` claims (§5.1).
 
-The **one genuine OP defect** found during this pass — the missing
-`Cache-Control: no-store` on the token endpoint — was fixed (§3.8).
+### 4.2 The one remaining WARNING is deliberate
+
+`oidcc-server` finishes WARNING on two non-requested id_token claims:
+
+```
+id_token contains non-requested claim 'oi_tkn_id'
+id_token contains non-requested claim 'redb:user_id'
+```
+
+These are **warnings, not failures**. OIDC Core does not forbid additional
+id_token claims; the suite warns because an extra claim *can* mean user data is
+leaking — and its own message concedes the alternative: *"…or that it implements
+an extension the conformance suite is not aware of."* That is our case. Neither
+claim is data about the user:
+
+- **`oi_tkn_id`** — the id of the token's entry in the store. It is what makes
+  the id_token **revocable** and what drives back-channel logout. Dropping it
+  means giving up id_token revocation: a real capability traded for a clean
+  warning list.
+- **`redb:user_id`** — a namespaced private claim (RFC 7519 §4.3). The public
+  `sub` is a GUID (stable across instances); the hot key in the relational
+  `_users` table is a bigint. This lets a client decode the id_token and join the
+  user to **its own** table without a round-trip back to us.
+
+And the part that makes this a judgement rather than a rationalisation: in the
+same pass we **deleted** a third such claim. OpenIddict was also stamping
+`oi_au_id` — its internal link to the authorization entry — into the id_token.
+That one means nothing to a client and there was no defending it
+(`StripInternalClaimsFromIdentityToken`; kept on the access_token, where
+introspection needs it). We kept the two we can answer for and cut the one we
+could not.
 
 ---
 

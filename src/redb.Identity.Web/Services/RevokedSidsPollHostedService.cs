@@ -32,6 +32,19 @@ public sealed class RevokedSidsPollHostedService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
+        // The poll authenticates as a backchannel service account (client credentials). With no
+        // configured secret it can never obtain a token, so every poll would fail and spam the log.
+        // This is the cluster-wide backchannel-logout blacklist — not needed for a single-node trial
+        // (the SQLite+HTTPS out-of-the-box default). Skip it entirely; set
+        // Identity:BackchannelClient:ClientSecret (+ the host's matching seed secret) to enable it.
+        if (string.IsNullOrWhiteSpace(_opts.Value.BackchannelClient.ClientSecret))
+        {
+            _log.LogInformation(
+                "Revoked-SIDs backchannel poll disabled — no Identity:BackchannelClient:ClientSecret configured. " +
+                "Set it (and the host's SeedBackchannelClient secret) to enable cluster-wide backchannel logout.");
+            return;
+        }
+
         var interval = _opts.Value.RevokedSids.PollInterval;
         if (interval <= TimeSpan.Zero) interval = TimeSpan.FromMinutes(1);
 
@@ -73,8 +86,14 @@ public sealed class RevokedSidsPollHostedService : BackgroundService
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex,
-                "Revoked-SIDs poll failed; will retry on next interval");
+            // Log a concise, actionable reason — NOT a stack trace. Typical causes: the Identity
+            // host isn't up yet (startup), it's unreachable, or the backchannel secret is missing/
+            // mismatched. The full exception is available at Debug for anyone who needs it.
+            var reason = (ex.InnerException ?? ex).Message;
+            _log.LogWarning(
+                "Revoked-SIDs poll skipped: {Reason} (Identity host {Host}). Retrying in {Interval}.",
+                reason, _opts.Value.ApiBaseUrl, _opts.Value.RevokedSids.PollInterval);
+            _log.LogDebug(ex, "Revoked-SIDs poll exception detail");
         }
     }
 }

@@ -27,6 +27,137 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > package together. Per-package divergence may begin in the 1.x patch series
 > once the public surface stabilises. NuGet publication follows the source cut.
 
+## [1.2.0] — 2026-07-14
+
+**Basic OP: 35 modules, zero failures.** The official OpenID Foundation
+conformance suite was run against a live redb.Identity end to end — and it found
+real defects, which are fixed below. We also audited our own RFC catalogue line
+by line against the code, live discovery and the demo probes; what could not be
+proved was either **built** or **struck**. Both outcomes are in this release.
+
+| Result | Modules |
+|--------|---------|
+| PASSED | 29 |
+| REVIEW | 4 — manual-screenshot tests, pass-equivalent |
+| WARNING | 1 — two deliberate id_token claims (see *Notes*) |
+| SKIPPED | 1 — request objects (RFC 9101), which we do not advertise |
+| **FAILED** | **0** |
+
+### ⚠️ Breaking
+
+- **Scope-derived claims are no longer embedded in the id_token.** In the
+  authorization-code flow the `profile` / `email` / `phone` / `address` claims
+  are now delivered from `/connect/userinfo` **only**, per OIDC Core §5.4. This
+  was a **PII leak**: an id_token is routinely forwarded to third parties and
+  logged as proof of the authentication event, so the user's e-mail, phone and
+  address travelled considerably further than the RP intended — and the
+  conformance suite flags it as "may result in user data being exposed in
+  unintended ways".
+  **If your RP read those claims out of the id_token, it will now read empty.**
+  Fetch them from `/connect/userinfo` with the access token (the RP loses
+  nothing — the same claims are served there), or, if you need a specific claim
+  in the id_token, request it explicitly via the new `claims` parameter (below):
+  `claims={"id_token":{"email":null}}`.
+  The id_token keeps what identifies the authentication *event*: `sub`,
+  `auth_time`, `acr`, `sid`, `nonce`, `at_hash`.
+
+### Added
+
+- **OIDC Core §5.5 — the `claims` request parameter.** An RP can now name the
+  exact claims it needs instead of pulling in a whole scope to get one of them,
+  and choose the delivery channel: the `userinfo` member or the `id_token`
+  member. `essential`, `value` and `values` qualifiers are honoured. A claim we
+  hold no value for is omitted (Essential is a statement of need, not a licence
+  to invent); a `value`/`values` constraint we cannot satisfy means the claim is
+  omitted rather than answered with a different value. A `claims` request that
+  pins `sub` to a different End-User is refused. Discovery now advertises
+  `claims_parameter_supported: true` — it said `false` before, honestly.
+  Probe: `demo_claims_parameter.ps1`.
+- **OIDC Core §5.1 — the complete `profile` claim set.** All 14 claims, with
+  `updated_at` as a JSON **number** and the `*_verified` flags as JSON
+  **booleans**, as the spec requires. `UserProps` gains the missing OIDC fields
+  — a props change, so **no migration**.
+- **RFC 7643 §4.3 — SCIM Enterprise User extension.** `department`, `manager`,
+  `employeeNumber`, `costCenter`, `organization`, `division`. This is what
+  corporate provisioning actually sends: Okta, Entra ID and Workday push it on
+  the very first sync, and a provider that advertises only the core schema makes
+  them drop that data on the floor. `manager` is a complex attribute; its `$ref`
+  and `displayName` are **derived, not stored** — §4.3 marks displayName
+  read-only, and a stored copy would rot the moment the manager is renamed.
+  Probe: `demo_scim_enterprise.ps1`.
+- **RFC 8252 §7.3 — loopback redirect URIs, port not compared.** Without this no
+  native or CLI client can use this provider at all: they ask the OS for an
+  ephemeral callback port at launch, so the port differs on every run and cannot
+  be registered in advance. The widening is exactly one port wide — it applies
+  only to a client that already registered a loopback URI; the host must be the
+  literal `127.0.0.1` or `[::1]` (**not** the name `localhost`, which §8.3 warns
+  can be resolved elsewhere); userinfo in the URI is refused; and scheme, host,
+  path, query and fragment must still match exactly. Toggle:
+  `RedbIdentityOptions.AllowLoopbackRedirectPortWildcard` (default `true` — §7.3
+  is a MUST, not an opt-in). Probe: `demo_loopback_redirect.ps1`, deliberately
+  mostly negative.
+- **HTML error page at `/connect/authorize`.** RFC 6749 §4.1.2.1 says that when
+  the `redirect_uri` is missing, unregistered or malformed the server must not
+  redirect — it has nowhere trustworthy to send the user, so it must inform the
+  resource owner itself. We already refused to redirect; we just informed the
+  resource owner with a raw JSON error object. A human staring at
+  `{"error":"invalid_request"}` has not been informed. Content-negotiated:
+  browsers get the page, anything sending `Accept: application/json` or `*/*`
+  (curl, SDKs, the conformance suite) gets the byte-identical JSON it got before.
+
+### Fixed
+
+- **UserInfo leaked token plumbing.** The response was copying claims through a
+  deny-list, so OpenIddict internals (`oi_*`) and JWT protocol claims (`jti`,
+  `exp`, `iat`, `at_hash`, `nonce`…) rode along into the userinfo document.
+  Those describe the **token**, not the user; UserInfo (§5.3) returns the user's
+  claims and nothing else. Now an explicit allow-list.
+- **`/connect/userinfo` (POST) rejected the access token in the request body**
+  (RFC 6750 §2.2) — the route was missing form-to-body mapping.
+- **`prompt=none` could still surface a login form.** When a `claims` request
+  pinned `sub` to a different End-User, the rejection was deferred to the local
+  `/login` page even though the RP had explicitly forbidden any interactive UI
+  (OIDC §3.1.2.6). The error now flows back to the client's `redirect_uri`.
+- **SCIM discovery 404 under the management prefix.** `/api/v1/identity/scim/v2`
+  registered only the *list* endpoints — `ResourceTypes/{id}` and `Schemas/{id}`
+  were missing. A provisioning client is pointed at **one** base URL, walks
+  ResourceTypes and then fetches each Schema **by id** — and got a 404 on the
+  first schema it asked for.
+- **`oi_au_id` no longer leaks into the id_token** (kept on the access_token,
+  where introspection needs it).
+
+### Changed
+
+- **The RFC catalogue in the docs is now audited, not asserted.** Five rows were
+  provably false. Three of them we chose to **build** rather than delete (the
+  `claims` parameter, SCIM Enterprise, loopback). Two were **struck**, with the
+  reasoning stated plainly:
+  - **Front-Channel Logout 1.0** — it signs RPs out through an iframe to each
+    client, so it rides on third-party cookies. Safari's ITP blocks them; Chrome
+    is burying them. The mechanism is broken by design in a modern browser. We
+    ship **Back-Channel Logout** — server to server, signed logout token, plus a
+    pull feed of revoked `sid`s for multi-replica RPs. It is strictly better and
+    cookie-independent. The working mechanism beats the checkbox.
+  - **HOTP (RFC 4226) as a standalone method** — counter-based OTP is
+    effectively unused; the world runs on TOTP. RFC 4226 lives on as the
+    *foundation* of our TOTP (160-bit secret per §4), which is what we now say.
+
+### Notes
+
+- **Two conformance warnings are deliberate.** `oidcc-server` finishes WARNING on
+  two non-requested id_token claims. These are warnings, not failures — OIDC Core
+  does not forbid extra id_token claims, and the suite's own message concedes it
+  may be seeing "an extension the conformance suite is not aware of". Neither is
+  data about the user: `oi_tkn_id` is the token's store-entry id, and it is what
+  makes the id_token **revocable** and drives back-channel logout; `redb:user_id`
+  is a namespaced private claim (RFC 7519 §4.3) that lets a client join our
+  internal bigint to its own user table without a round-trip. In the same run we
+  **deleted** a third such claim (`oi_au_id`), because it was OpenIddict's
+  internal authorization link, meaningless to a client, and there was nothing to
+  defend. Keeping two and cutting one is a judgement, not a rationalisation.
+- **Test suite:** `Passed: 1767, Skipped: 1, Failed: 0` on SQLite; one codebase
+  across PostgreSQL / MSSQL / SQLite.
+
 ## [1.1.0] — 2026-07-11
 
 **Preparing for [OpenID Certification](https://openid.net/certification/).** We

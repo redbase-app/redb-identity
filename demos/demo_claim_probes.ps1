@@ -273,35 +273,22 @@ Measure-Step "7. assert id_token claim shapes" {
         Write-Host "  ✓ azp absent — single-aud token, OIDC §2 permits omission" -ForegroundColor DarkGray
     }
 
-    # email scope
-    if ($idClaims.email -ne "$user@example.com") {
-        throw "email mismatch (got='$($idClaims.email)', expected='$user@example.com')"
+    # OIDC Core §5.4 — in the authorization-code flow the scope-derived identity claims
+    # (profile / email / phone / address) are delivered from the UserInfo endpoint. They are
+    # NOT in the id_token, and their presence there is a defect, not a convenience: the id_token
+    # is routinely forwarded to third parties and logged as proof of the authentication event, so
+    # PII inside it travels further than the RP ever intended. The OIDF conformance suite flags it
+    # as "may result in user data being exposed in unintended ways".
+    #
+    # So this probe asserts the ABSENCE. Step 8 then asserts the same claims ARE served from
+    # /connect/userinfo — the RP loses nothing, the id_token stops carrying the user's phone number.
+    foreach ($leak in @('email', 'email_verified', 'phone_number', 'phone_number_verified', 'address',
+                        'given_name', 'family_name', 'preferred_username', 'picture')) {
+        if ($idClaims.PSObject.Properties[$leak]) {
+            throw "id_token leaks '$leak' (OIDC Core §5.4 — code flow delivers it from UserInfo, got='$($idClaims.$leak)')"
+        }
     }
-    if (-not $idClaims.PSObject.Properties['email_verified']) {
-        throw "id_token missing email_verified"
-    }
-    Write-Host "  ✓ email = $($idClaims.email), email_verified = $($idClaims.email_verified)" -ForegroundColor Green
-
-    # phone scope (we set +1-202-555-0199 in step 4)
-    if ($idClaims.phone_number -ne "+12025550199") {
-        throw "phone_number mismatch (got='$($idClaims.phone_number)')"
-    }
-    if (-not $idClaims.PSObject.Properties['phone_number_verified']) {
-        throw "id_token missing phone_number_verified"
-    }
-    Write-Host "  ✓ phone_number = $($idClaims.phone_number), phone_number_verified = $($idClaims.phone_number_verified)" -ForegroundColor Green
-
-    # address scope — OIDC §5.1.1 — emitted as a JSON object with `formatted`.
-    if (-not $idClaims.PSObject.Properties['address']) { throw "id_token missing address" }
-    $addr = $idClaims.address
-    # Some serializers stringify to JSON-text; accept either object or string.
-    if ($addr -is [string]) {
-        try { $addr = $addr | ConvertFrom-Json } catch { throw "address claim isn't JSON-decodable: $addr" }
-    }
-    if ($addr.formatted -ne $ADDRESS_FORMATTED) {
-        throw "address.formatted mismatch (got='$($addr.formatted)')"
-    }
-    Write-Host "  ✓ address.formatted = $($addr.formatted)" -ForegroundColor Green
+    Write-Host "  ✓ id_token carries no scope-derived PII (§5.4) — it is an auth-event token" -ForegroundColor Green
 
     # custom claim from step 4
     if ($idClaims.dept -ne 'engineering') {
@@ -330,7 +317,13 @@ Measure-Step "8. GET /connect/userinfo (same claims via userinfo endpoint)" {
     if ($uAddr.formatted -ne $ADDRESS_FORMATTED) {
         throw "userinfo.address.formatted mismatch (got='$($uAddr.formatted)')"
     }
-    Write-Host "  ✓ userinfo carries sub/email/phone_number/address" -ForegroundColor Green
+
+    # The *_verified flags travel with their claim — and as JSON booleans, not strings (§5.1).
+    foreach ($f in @('email_verified', 'phone_number_verified')) {
+        if (-not $ui.PSObject.Properties[$f]) { throw "userinfo missing '$f' (OIDC §5.1)" }
+        if ($ui.$f -isnot [bool]) { throw "userinfo.$f must be a JSON boolean, got '$($ui.$f)'" }
+    }
+    Write-Host "  ✓ userinfo carries sub/email/phone_number/address + boolean *_verified" -ForegroundColor Green
 } | Out-Null
 
 # 9) RFC 7592 cleanup (both DCR clients)

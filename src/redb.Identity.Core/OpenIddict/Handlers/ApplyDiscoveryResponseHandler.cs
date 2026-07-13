@@ -67,6 +67,18 @@ internal sealed class ApplyDiscoveryResponseHandler
         context.Response["claim_types_supported"] =
             JsonSerializer.Deserialize<JsonElement>("[\"normal\"]");
 
+        // OIDC Discovery §3 / Core §5.5 — the `claims` request parameter is honoured at
+        // /connect/authorize for both the `userinfo` and `id_token` members, including the
+        // `essential`, `value` and `values` qualifiers. OpenIddict does not implement the parameter
+        // and hard-codes this flag to false, so RemoveParameter first — otherwise the two values
+        // merge and the document ships a contradiction.
+        //
+        // This flag is a promise a reader can check in ten seconds with a single curl. It says true
+        // only because AttachSessionPrincipalHandler + IdentityPrincipalBuilder + this document's
+        // own claims_supported list actually deliver on it.
+        context.Response.RemoveParameter("claims_parameter_supported");
+        context.Response["claims_parameter_supported"] = true;
+
         // OIDC Core §2 / §5.5.1.1 — advertise the acr values we can actually return.
         // IdentityPrincipalBuilder emits "1" (single-factor / password) or "2" (multi-factor
         // verified). "0" (no authentication) is currently unreachable, so it is not advertised.

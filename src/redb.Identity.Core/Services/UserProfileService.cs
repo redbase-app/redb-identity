@@ -5,6 +5,7 @@ using redb.Core.Models.Contracts;
 using redb.Core.Models.Entities;
 using redb.Core.Query;
 using redb.Identity.Core.Models;
+using redb.Identity.Core.OpenIddict;
 
 namespace redb.Identity.Core.Services;
 
@@ -30,6 +31,7 @@ internal sealed class UserProfileService : IUserProfileService
         IEnumerable<string> scopes,
         bool mfaVerified = false,
         string? mfaMethod = null,
+        OidcClaimsRequest? claimsRequest = null,
         CancellationToken ct = default)
     {
         var coreUser = await _redb.UserProvider.GetUserByIdAsync(userId).ConfigureAwait(false);
@@ -80,7 +82,8 @@ internal sealed class UserProfileService : IUserProfileService
         var scopeList = scopes as IReadOnlyList<string> ?? scopes.ToList();
 
         // Build base principal with standard OIDC claims (incl. amr if MFA verified)
-        var principal = IdentityPrincipalBuilder.Build(coreUser, subjectGuid, oidcObj.Props, scopeList, mfaVerified, mfaMethod);
+        var principal = IdentityPrincipalBuilder.Build(
+            coreUser, subjectGuid, oidcObj.Props, scopeList, mfaVerified, mfaMethod, claimsRequest);
 
         // Enrich with group/role claims
         var resolver = new GroupClaimsResolver(_redb);

@@ -107,6 +107,28 @@ public class ScimResourceType
     [JsonPropertyName("schema")]
     public string Schema { get; set; } = null!;
 
+    /// <summary>
+    /// RFC 7643 §6 — the schema extensions this resource type carries. Omitted when there are none,
+    /// so the Group resource type stays byte-identical to what it was.
+    /// </summary>
+    [JsonPropertyName("schemaExtensions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ScimSchemaExtension>? SchemaExtensions { get; set; }
+
     [JsonPropertyName("meta")]
     public ScimMeta? Meta { get; set; }
+}
+
+/// <summary>
+/// A schema extension declared on a ResourceType (RFC 7643 §6). <c>required</c> says whether the
+/// extension MUST be present on every resource of that type — for Enterprise User it is false: a
+/// user without a department is a perfectly ordinary user.
+/// </summary>
+public class ScimSchemaExtension
+{
+    [JsonPropertyName("schema")]
+    public string Schema { get; set; } = null!;
+
+    [JsonPropertyName("required")]
+    public bool Required { get; set; }
 }

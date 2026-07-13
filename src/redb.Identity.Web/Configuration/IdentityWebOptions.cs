@@ -11,6 +11,10 @@ public sealed class IdentityWebOptions
     public string? MetadataAddress { get; set; }
     /// <summary>Disable HTTPS metadata requirement (dev only — when discovery URL is plain http).</summary>
     public bool RequireHttpsMetadata { get; set; } = true;
+    /// <summary>DEV ONLY. Accept ANY server certificate on the BFF's backchannel HTTP calls to the
+    /// Identity host (metadata, token, revoked-sids). Use only with the bundled self-signed dev cert
+    /// on localhost — never in production, where the host must present a chain-trusted certificate.</summary>
+    public bool AcceptAnyBackchannelCert { get; set; }
     /// <summary>Base URL for management API calls.</summary>
     public string ApiBaseUrl { get; set; } = "";
     public string ClientId { get; set; } = "";

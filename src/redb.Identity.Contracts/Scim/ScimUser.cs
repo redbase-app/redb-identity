@@ -57,6 +57,15 @@ public class ScimUser
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<ScimGroupRef>? Groups { get; set; }
 
+    /// <summary>
+    /// Enterprise User extension (RFC 7643 §4.3). Namespaced by its schema URN rather than a plain
+    /// attribute name — that is how SCIM extensions ride on a resource. When populated, the same URN
+    /// must also be listed in <see cref="Schemas"/>.
+    /// </summary>
+    [JsonPropertyName(ScimConstants.EnterpriseUserSchema)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ScimEnterpriseUser? Enterprise { get; set; }
+
     [JsonPropertyName("meta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ScimMeta? Meta { get; set; }

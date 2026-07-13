@@ -433,14 +433,26 @@ public class ScimUserTests
     }
 
     [Fact]
-    public async Task SchemasEndpoint_ReturnsUserAndGroupSchemas()
+    public async Task SchemasEndpoint_ReturnsUserEnterpriseAndGroupSchemas()
     {
         var req = new HttpRequestMessage(HttpMethod.Get, "/scim/v2/Schemas");
         var res = await _http.SendAsync(req);
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
 
         var json = await ReadJson(res);
-        Assert.Equal(2, json.GetProperty("totalResults").GetInt32());
+
+        // Three, not two: core User, core Group, and the Enterprise User extension
+        // (RFC 7643 §4.3). Assert the URNs rather than the count alone — a count check
+        // passes just as happily when the wrong schema is listed.
+        Assert.Equal(3, json.GetProperty("totalResults").GetInt32());
+
+        var ids = json.GetProperty("Resources").EnumerateArray()
+            .Select(r => r.GetProperty("id").GetString())
+            .ToList();
+
+        Assert.Contains("urn:ietf:params:scim:schemas:core:2.0:User", ids);
+        Assert.Contains("urn:ietf:params:scim:schemas:core:2.0:Group", ids);
+        Assert.Contains("urn:ietf:params:scim:schemas:extension:enterprise:2.0:User", ids);
     }
 
     [Fact]

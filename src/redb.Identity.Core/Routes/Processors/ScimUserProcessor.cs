@@ -87,7 +87,8 @@ internal sealed class ScimUserProcessor : IProcessor
                 SetResult(exchange, new ScimListResponse<ScimUser>
                 {
                     TotalResults = 1, StartIndex = startIndex, ItemsPerPage = 1,
-                    Resources = [MapToScimUser(user, oidc, baseUrl: baseUrl)]
+                    Resources = [MapToScimUser(user, oidc, baseUrl: baseUrl,
+                        managerNames: await ResolveManagerNamesAsync(redb, [oidc?.Props]))]
                 });
                 return;
             }
@@ -113,7 +114,8 @@ internal sealed class ScimUserProcessor : IProcessor
                 SetResult(exchange, new ScimListResponse<ScimUser>
                 {
                     TotalResults = 1, StartIndex = startIndex, ItemsPerPage = 1,
-                    Resources = [MapToScimUser(user, oidcObj, baseUrl: baseUrl)]
+                    Resources = [MapToScimUser(user, oidcObj, baseUrl: baseUrl,
+                        managerNames: await ResolveManagerNamesAsync(redb, [oidcObj?.Props]))]
                 });
                 return;
             }
@@ -186,10 +188,12 @@ internal sealed class ScimUserProcessor : IProcessor
             .ToDictionary(o => o.key!.Value);
 
         var scimUsers = new List<ScimUser>(pageUsers.Count);
+        // One resolve for the whole page — not one per row.
+        var pageManagers = await ResolveManagerNamesAsync(redb, oidcDict.Values.Select(o => o?.Props));
         foreach (var u in pageUsers)
         {
             oidcDict.TryGetValue(u.Id, out var oidc);
-            scimUsers.Add(MapToScimUser(u, oidc, baseUrl: baseUrl));
+            scimUsers.Add(MapToScimUser(u, oidc, baseUrl: baseUrl, managerNames: pageManagers));
         }
 
         SetResult(exchange, new ScimListResponse<ScimUser>
@@ -218,7 +222,8 @@ internal sealed class ScimUserProcessor : IProcessor
         var oidc = await LoadOidcProps(redb, coreUser.Id);
         var groups = await LoadUserGroups(redb, coreUser.Id);
 
-        SetResult(exchange, MapToScimUser(coreUser, oidc, groups, GetBaseUrl(exchange)));
+        SetResult(exchange, MapToScimUser(coreUser, oidc, groups, GetBaseUrl(exchange),
+            managerNames: await ResolveManagerNamesAsync(redb, [oidc?.Props])));
         SetETagHeader(exchange, coreUser.Hash);
     }
 
@@ -304,6 +309,7 @@ internal sealed class ScimUserProcessor : IProcessor
             ScimExternalId = scimUser.ExternalId,
             Address = MapScimAddress(scimUser.Addresses?.FirstOrDefault())
         });
+        ApplyEnterprise(scimUser.Enterprise, oidcObj.Props);
         oidcObj.name = coreUser.Login;
         oidcObj.key = coreUser.Id;
         oidcObj.value_guid = Guid.NewGuid();
@@ -318,7 +324,8 @@ internal sealed class ScimUserProcessor : IProcessor
         // RFC 7644 §3.14 requires the version (ETag) to be included on every resource
         // representation when versioning is advertised in ServiceProviderConfig; without
         // it the client cannot acquire the initial ETag for subsequent If-Match writes.
-        SetResult(exchange, MapToScimUser(coreUser, oidcObj, baseUrl: GetBaseUrl(exchange)));
+        SetResult(exchange, MapToScimUser(coreUser, oidcObj, baseUrl: GetBaseUrl(exchange),
+            managerNames: await ResolveManagerNamesAsync(redb, [oidcObj.Props])));
         exchange.Out!.Headers["scim.ResponseCode"] = 201;
         exchange.Out!.Headers["scim.Location"] = $"/scim/v2/Users/{coreUser.Id}";
         SetETagHeader(exchange, coreUser.Hash);
@@ -388,9 +395,14 @@ internal sealed class ScimUserProcessor : IProcessor
             ScimExternalId = scimUser.ExternalId,
             Address = MapScimAddress(scimUser.Addresses?.FirstOrDefault())
         };
+        // PUT is a full replace (RFC 7644 §3.5.1): an absent extension means "the user has none",
+        // so ApplyEnterprise writing nulls into a fresh UserProps is the correct outcome, not a bug.
+        ApplyEnterprise(scimUser.Enterprise, oidcObj.Props);
         await redb.SaveAsync(oidcObj);
 
-        SetResult(exchange, MapToScimUser(coreUser, oidcObj, baseUrl: GetBaseUrl(exchange)));
+        SetResult(exchange, MapToScimUser(coreUser, oidcObj,
+            baseUrl: GetBaseUrl(exchange),
+            managerNames: await ResolveManagerNamesAsync(redb, [oidcObj.Props])));
         SetETagHeader(exchange, coreUser.Hash);
         exchange.Properties["identity-event-type"] = IdentityAuditEventIds.ScimUserReplaced;
         exchange.Properties["identity-event-data"] = new { UserId = coreUser.Id.ToString(), Login = coreUser.Login };
@@ -451,8 +463,55 @@ internal sealed class ScimUserProcessor : IProcessor
             var normalizedOp = op.Op?.ToLowerInvariant();
             var path = op.Path?.ToLowerInvariant();
 
+            // RFC 7644 §3.5.2 — an extension attribute is addressed by its fully-qualified URN, e.g.
+            //   "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:department"
+            // Strip the namespace and fall through to the plain attribute name. We also accept the
+            // bare name ("department"): it is what several provisioning clients send in practice, and
+            // it is unambiguous here because no core User attribute carries any of these names.
+            const string enterprisePrefix = ScimConstants.EnterpriseUserSchema + ":";
+            if (path is not null && path.StartsWith(
+                    enterprisePrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                path = path[enterprisePrefix.Length..];
+            }
+
             switch (path)
             {
+                case "employeenumber":
+                    oidcObj.Props.EmployeeNumber = normalizedOp is "remove" ? null : GetStringValue(op.Value);
+                    oidcChanged = true;
+                    break;
+
+                case "costcenter":
+                    oidcObj.Props.CostCenter = normalizedOp is "remove" ? null : GetStringValue(op.Value);
+                    oidcChanged = true;
+                    break;
+
+                case "organization":
+                    oidcObj.Props.Organization = normalizedOp is "remove" ? null : GetStringValue(op.Value);
+                    oidcChanged = true;
+                    break;
+
+                case "division":
+                    oidcObj.Props.Division = normalizedOp is "remove" ? null : GetStringValue(op.Value);
+                    oidcChanged = true;
+                    break;
+
+                case "department":
+                    oidcObj.Props.Department = normalizedOp is "remove" ? null : GetStringValue(op.Value);
+                    oidcChanged = true;
+                    break;
+
+                // `manager` is complex (§4.3): clients patch either the whole object or manager.value.
+                // Both land on the same stored id — $ref and displayName are derived on read.
+                case "manager":
+                case "manager.value":
+                    oidcObj.Props.ManagerId = normalizedOp is "remove"
+                        ? null
+                        : GetManagerId(op.Value);
+                    oidcChanged = true;
+                    break;
+
                 case "username":
                     // userName (_login) is immutable at DB level (protect_system_users trigger)
                     if (normalizedOp is "add" or "replace")
@@ -559,7 +618,8 @@ internal sealed class ScimUserProcessor : IProcessor
         if (passwordChanged)
             sessionsRevoked = await new SessionService(redb).LogoutAsync(coreUser.Id, ct);
 
-        SetResult(exchange, MapToScimUser(coreUser, oidcObj, baseUrl: GetBaseUrl(exchange)));
+        SetResult(exchange, MapToScimUser(coreUser, oidcObj, baseUrl: GetBaseUrl(exchange),
+            managerNames: await ResolveManagerNamesAsync(redb, [oidcObj.Props])));
         SetETagHeader(exchange, coreUser.Hash);
         exchange.Properties["identity-event-type"] = IdentityAuditEventIds.ScimUserPatched;
         exchange.Properties["identity-event-data"] = new { UserId = coreUser.Id.ToString(), Login = coreUser.Login, PasswordChanged = passwordChanged, SessionsRevoked = sessionsRevoked };
@@ -627,10 +687,11 @@ internal sealed class ScimUserProcessor : IProcessor
             .ToDictionary(o => o.key!.Value);
 
         var result = new List<ScimUser>(users.Count);
+        var bulkManagers = await ResolveManagerNamesAsync(redb, oidcDict.Values.Select(o => o?.Props));
         foreach (var u in users)
         {
             oidcDict.TryGetValue(u.Id, out var oidc);
-            result.Add(MapToScimUser(u, oidc, baseUrl: baseUrl));
+            result.Add(MapToScimUser(u, oidc, baseUrl: baseUrl, managerNames: bulkManagers));
         }
         return result;
     }
@@ -746,7 +807,8 @@ internal sealed class ScimUserProcessor : IProcessor
         IRedbUser user,
         RedbObject<UserProps>? oidc,
         List<IGroupService.UserGroupInfo>? groups = null,
-        string? baseUrl = null)
+        string? baseUrl = null,
+        IReadOnlyDictionary<string, string>? managerNames = null)
     {
         var scimUser = new ScimUser
         {
@@ -801,6 +863,40 @@ internal sealed class ScimUserProcessor : IProcessor
             [
                 new ScimMultiValuedAttribute { Value = oidc!.Props.Picture, Type = "photo", Primary = true }
             ];
+        }
+
+        // Enterprise User extension (RFC 7643 §4.3). Emitted only when something is actually
+        // populated — an empty extension object plus its URN in `schemas` would tell the client
+        // "this user has enterprise data" when it has none.
+        //
+        // `manager.$ref` and `manager.displayName` are derived, never stored: §4.3 marks displayName
+        // read-only (the provider resolves it) and $ref is just the manager's resource URI. Deriving
+        // them means they cannot rot out of sync with the manager's own record.
+        if (oidc?.Props is { } p)
+        {
+            var enterprise = new ScimEnterpriseUser
+            {
+                EmployeeNumber = p.EmployeeNumber,
+                CostCenter = p.CostCenter,
+                Organization = p.Organization,
+                Division = p.Division,
+                Department = p.Department,
+                Manager = string.IsNullOrEmpty(p.ManagerId) ? null : new ScimManager
+                {
+                    Value = p.ManagerId,
+                    Ref = $"{baseUrl}/scim/v2/Users/{p.ManagerId}",
+                    DisplayName = managerNames is not null
+                                  && managerNames.TryGetValue(p.ManagerId, out var mn) ? mn : null
+                }
+            };
+
+            if (!enterprise.IsEmpty)
+            {
+                scimUser.Enterprise = enterprise;
+                // §3 — the extension's URN must be listed in `schemas`; that is what distinguishes
+                // "the extension is present on this resource" from "the server supports it".
+                scimUser.Schemas = [ScimConstants.UserSchema, ScimConstants.EnterpriseUserSchema];
+            }
         }
 
         // Addresses
@@ -955,6 +1051,94 @@ internal sealed class ScimUserProcessor : IProcessor
             var phone = ExtractPrimaryFromElement(phones);
             if (phone is not null) { coreUpdate.Phone = phone; coreChanged = true; }
         }
+
+        // The Enterprise extension arrives as a member keyed by its URN (RFC 7643 §3), which is
+        // exactly how Entra ID sends a no-path PATCH.
+        if (obj.TryGetProperty(ScimConstants.EnterpriseUserSchema, out var ent)
+            && ent.ValueKind == JsonValueKind.Object)
+        {
+            // A partial PATCH touches only what it names — unlike PUT, an absent attribute means
+            // "leave it alone", not "clear it". Hence TryGetProperty per field, not a wholesale copy.
+            if (ent.TryGetProperty("employeeNumber", out var v)) { oidcProps.EmployeeNumber = v.GetString(); oidcChanged = true; }
+            if (ent.TryGetProperty("costCenter", out v)) { oidcProps.CostCenter = v.GetString(); oidcChanged = true; }
+            if (ent.TryGetProperty("organization", out v)) { oidcProps.Organization = v.GetString(); oidcChanged = true; }
+            if (ent.TryGetProperty("division", out v)) { oidcProps.Division = v.GetString(); oidcChanged = true; }
+            if (ent.TryGetProperty("department", out v)) { oidcProps.Department = v.GetString(); oidcChanged = true; }
+            if (ent.TryGetProperty("manager", out var mgr))
+            {
+                oidcProps.ManagerId = mgr.ValueKind switch
+                {
+                    JsonValueKind.Object when mgr.TryGetProperty("value", out var mv) => mv.GetString(),
+                    JsonValueKind.String => mgr.GetString(),
+                    _ => null
+                };
+                oidcChanged = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Copies the Enterprise User extension (RFC 7643 §4.3) onto the stored props. Used by the write
+    /// paths where the whole resource is supplied (POST, PUT), so a null extension legitimately
+    /// clears the fields — that is what "replace the resource" means.
+    /// </summary>
+    private static void ApplyEnterprise(ScimEnterpriseUser? ent, UserProps props)
+    {
+        props.EmployeeNumber = ent?.EmployeeNumber;
+        props.CostCenter = ent?.CostCenter;
+        props.Organization = ent?.Organization;
+        props.Division = ent?.Division;
+        props.Department = ent?.Department;
+        props.ManagerId = ent?.Manager?.Value;
+    }
+
+    /// <summary>
+    /// Reads <c>manager</c> from a PATCH value, accepting both shapes seen in the wild: the spec's
+    /// complex object (<c>{"value":"42"}</c>) and the bare id some clients send.
+    /// </summary>
+    private static string? GetManagerId(JsonElement? value)
+    {
+        if (value is null) return null;
+        return value.Value.ValueKind switch
+        {
+            JsonValueKind.Object when value.Value.TryGetProperty("value", out var v) => v.GetString(),
+            JsonValueKind.String => value.Value.GetString(),
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Resolves <c>manager.displayName</c> for the managers referenced on a page of users. §4.3 marks
+    /// displayName read-only — the provider is expected to resolve it — so we look it up rather than
+    /// storing a copy that would drift when the manager renames.
+    /// <para>
+    /// Bounded by the distinct manager ids actually present (usually a handful per page), so listing
+    /// users does not fan out into a lookup per row.
+    /// </para>
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<string, string>?> ResolveManagerNamesAsync(
+        IRedbService redb, IEnumerable<UserProps?> props)
+    {
+        var ids = props
+            .Select(p => p?.ManagerId)
+            .Where(id => !string.IsNullOrEmpty(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (ids.Count == 0) return null;
+
+        var names = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var id in ids)
+        {
+            if (!long.TryParse(id, out var managerId)) continue;
+            var manager = await redb.UserProvider.GetUserByIdAsync(managerId);
+            // A dangling manager id (deleted user) yields no displayName rather than an error: the
+            // reference itself is still the truth the provisioning client wrote.
+            if (manager is not null)
+                names[id!] = manager.Name ?? manager.Login ?? id!;
+        }
+
+        return names.Count > 0 ? names : null;
     }
 
     private static string? ExtractPrimaryFromElement(JsonElement value)

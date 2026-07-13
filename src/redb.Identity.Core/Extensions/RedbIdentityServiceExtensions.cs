@@ -82,6 +82,15 @@ public static class RedbIdentityServiceExtensions
                 // factory (host bridge or root SP). The cost is a few extra SELECTs per
                 // OAuth flow which is negligible against PROPS query overhead.
                 core.DisableEntityCaching();
+
+                // RFC 8252 §7.3 — loopback redirect URIs are compared without their port, because a
+                // native app cannot know the ephemeral port it will get until it starts. Done by
+                // overriding ValidateRedirectUriAsync rather than a server handler: that method is
+                // the ONE place both OpenIddict's request validation and our own error-redirect gate
+                // ask "does this redirect_uri belong to this client". Widening it anywhere else
+                // would let those two answers disagree — request rejected, error still redirected —
+                // which is the open redirect we closed (RFC 6749 §4.1.2.1).
+                core.ReplaceApplicationManager(typeof(RedbApplicationManager<>));
             })
             .AddServer(server =>
             {

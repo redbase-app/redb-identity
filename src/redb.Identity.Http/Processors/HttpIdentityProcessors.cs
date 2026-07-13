@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using redb.Identity.Contracts.Serialization;
@@ -254,6 +255,101 @@ internal static class HttpIdentityProcessors
         // processors inherit it. SerializeJsonResponse will propagate it to Out.
         e.In.Headers[HttpHeaders.ResponseCode] = statusCode;
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Renders an authorization error as an HTML page for browsers, leaving the JSON body
+    /// untouched for API clients.
+    /// <para>
+    /// RFC 6749 §4.1.2.1: when <c>redirect_uri</c> is missing, unregistered or malformed, the
+    /// authorization server MUST NOT redirect — it has no trustworthy place to send the user, so
+    /// it must inform the resource owner itself. The end user is sitting in a browser at that
+    /// moment, and a raw JSON error object is not "informing the resource owner". Same for a bad
+    /// <c>client_id</c>, an unsupported <c>response_type</c>, and every other authorize-time
+    /// failure that cannot be bounced back to the client.
+    /// </para>
+    /// <para>
+    /// Content negotiation, not a blanket switch: we only render HTML when the request actually
+    /// prefers it (<c>Accept: text/html</c>). Machine callers that ask for JSON — or send no
+    /// Accept at all — keep the exact OAuth error object they had before, so nothing on the API
+    /// side changes shape. Wire AFTER <see cref="MapOAuthErrorToHttpStatus"/> (so the status code
+    /// is already decided) and BEFORE <see cref="SerializeJsonResponse"/> (which would otherwise
+    /// turn the dictionary into JSON bytes).
+    /// </para>
+    /// </summary>
+    internal static Task RenderAuthorizeErrorPage(
+        IExchange e, CancellationToken ct, IdentityTransportOptions opts)
+    {
+        var body = e.HasOut ? e.Out!.Body : e.In.Body;
+
+        string? error = null, description = null, uri = null;
+        if (body is IDictionary<string, object?> dictN)
+        {
+            if (dictN.TryGetValue("error", out var v)) error = v as string;
+            if (dictN.TryGetValue("error_description", out var d)) description = d as string;
+            if (dictN.TryGetValue("error_uri", out var u)) uri = u as string;
+        }
+        else if (body is IDictionary<string, object> dictV)
+        {
+            if (dictV.TryGetValue("error", out var v)) error = v as string;
+            if (dictV.TryGetValue("error_description", out var d)) description = d as string;
+            if (dictV.TryGetValue("error_uri", out var u)) uri = u as string;
+        }
+
+        if (string.IsNullOrEmpty(error)) return Task.CompletedTask;
+        if (!PrefersHtml(e)) return Task.CompletedTask;
+
+        var status = e.In.Headers.TryGetValue(HttpHeaders.ResponseCode, out var rc) ? rc : 400;
+
+        var details = new StringBuilder();
+        details.Append("<p class=\"error\">")
+               .Append(WebUtility.HtmlEncode(
+                   string.IsNullOrEmpty(description)
+                       ? "The authorization request could not be completed."
+                       : description))
+               .Append("</p>");
+
+        // The error code is what an operator greps their logs for, and what the client developer
+        // has to look up in the spec — surface it verbatim rather than burying it.
+        details.Append("<p><code>").Append(WebUtility.HtmlEncode(error)).Append("</code></p>");
+
+        if (!string.IsNullOrEmpty(uri))
+        {
+            var safe = WebUtility.HtmlEncode(uri);
+            details.Append("<p><a href=\"").Append(safe).Append("\" rel=\"noopener noreferrer\">")
+                   .Append("More about this error</a></p>");
+        }
+
+        // Deliberately no "go back" / "retry" link: the whole point of §4.1.2.1 is that we do not
+        // trust the URI we were handed, so we must not offer to navigate to it.
+        var card = $"<h1>Authorization Error</h1>{details}";
+
+        var msg = EnsureOut(e);
+        msg.Body = IdentityPageTemplates.WrapPage("Authorization Error", card, opts);
+        msg.ContentType = "text/html; charset=utf-8";
+        msg.Headers[HttpHeaders.ResponseContentType] = "text/html; charset=utf-8";
+        msg.Headers[HttpHeaders.ResponseCode] = status;
+        e.In.Headers[HttpHeaders.ResponseContentType] = "text/html; charset=utf-8";
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// True when the caller is a browser rendering a page rather than a client consuming an API:
+    /// <c>Accept</c> lists <c>text/html</c> and does not rank an explicit <c>application/json</c>
+    /// above it. A missing or wildcard-only Accept counts as "not a browser" so that curl, SDKs
+    /// and the conformance suite's HTTP client keep receiving JSON.
+    /// </summary>
+    private static bool PrefersHtml(IExchange e)
+    {
+        var accept = e.In.GetHeader<string>(HttpHeaders.Accept);
+        if (string.IsNullOrEmpty(accept)) return false;
+
+        var html = accept.IndexOf("text/html", StringComparison.OrdinalIgnoreCase);
+        if (html < 0) return false;
+
+        var json = accept.IndexOf("application/json", StringComparison.OrdinalIgnoreCase);
+        return json < 0 || html < json;
     }
 
     /// <summary>

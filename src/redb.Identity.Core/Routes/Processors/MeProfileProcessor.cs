@@ -219,8 +219,12 @@ internal sealed class MeProfileProcessor : IProcessor
         // on an e-mail change, even if the request carried no other OIDC fields.
         var resetEmailVerified = emailChanged && ShouldResetEmailVerifiedOnChange(exchange);
 
-        if (oidcObj is null && (resetEmailVerified || request.GivenName != null || request.FamilyName != null
-            || request.Picture != null || request.Address != null
+        if (oidcObj is null && (resetEmailVerified
+            || request.GivenName != null || request.FamilyName != null || request.MiddleName != null
+            || request.Nickname != null || request.PreferredUsername != null || request.Profile != null
+            || request.Picture != null || request.Website != null || request.Gender != null
+            || request.Birthdate != null || request.ZoneInfo != null || request.Locale != null
+            || request.Address != null
             || request.CustomClaims is { Count: > 0 }))
         {
             oidcObj = new RedbObject<UserProps>(new UserProps());
@@ -236,9 +240,19 @@ internal sealed class MeProfileProcessor : IProcessor
                 oidcObj.Props.EmailVerified = false;
                 oidcChanged = true;
             }
+            // OIDC Core §5.1 `profile` claims — the full set, so userinfo can return it.
             if (request.GivenName != null) { oidcObj.Props.GivenName = request.GivenName; oidcChanged = true; }
             if (request.FamilyName != null) { oidcObj.Props.FamilyName = request.FamilyName; oidcChanged = true; }
+            if (request.MiddleName != null) { oidcObj.Props.MiddleName = request.MiddleName; oidcChanged = true; }
+            if (request.Nickname != null) { oidcObj.Props.Nickname = request.Nickname; oidcChanged = true; }
+            if (request.PreferredUsername != null) { oidcObj.Props.PreferredUsername = request.PreferredUsername; oidcChanged = true; }
+            if (request.Profile != null) { oidcObj.Props.Profile = request.Profile; oidcChanged = true; }
             if (request.Picture != null) { oidcObj.Props.Picture = request.Picture; oidcChanged = true; }
+            if (request.Website != null) { oidcObj.Props.Website = request.Website; oidcChanged = true; }
+            if (request.Gender != null) { oidcObj.Props.Gender = request.Gender; oidcChanged = true; }
+            if (request.Birthdate != null) { oidcObj.Props.Birthdate = request.Birthdate; oidcChanged = true; }
+            if (request.ZoneInfo != null) { oidcObj.Props.ZoneInfo = request.ZoneInfo; oidcChanged = true; }
+            if (request.Locale != null) { oidcObj.Props.Locale = request.Locale; oidcChanged = true; }
             if (request.Address != null)
             {
                 oidcObj.Props.Address = new AddressClaim
@@ -261,7 +275,11 @@ internal sealed class MeProfileProcessor : IProcessor
             }
 
             if (oidcChanged)
+            {
+                // Backs the OIDC `updated_at` claim (userinfo, profile scope).
+                oidcObj.Props.UpdatedAt = DateTimeOffset.UtcNow;
                 await redb.SaveAsync(oidcObj);
+            }
         }
 
         exchange.Out ??= new Message();

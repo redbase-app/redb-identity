@@ -104,12 +104,27 @@ internal sealed class AttachSessionPrincipalHandler
             }
         }
 
+        // OIDC Core §5.5 — the `claims` request parameter. Parsed here because the authorization
+        // endpoint is the only place it can arrive (a PAR request is replayed through this same
+        // handler), and because its meaning is protocol, not transport: the HTTP façade's job ended
+        // when it mapped the query string onto the exchange.
+        //
+        // A malformed value is the RP's bug and must be told so — silently dropping it would leave
+        // the RP believing it requested claims that will never arrive.
+        if (!OidcClaimsRequest.TryParse(
+                context.Request.GetParameter(Parameters.Claims)?.ToString(),
+                out var claimsRequest, out var claimsError))
+        {
+            context.Reject(error: Errors.InvalidRequest, description: claimsError);
+            return;
+        }
+
         var profileService = _sp.GetService<IUserProfileService>();
         if (profileService is not null)
         {
             context.Principal = await profileService.BuildPrincipalAsync(
                 userId, context.Request.GetScopes(),
-                sessionMfaVerified, sessionMfaMethod).ConfigureAwait(false);
+                sessionMfaVerified, sessionMfaMethod, claimsRequest).ConfigureAwait(false);
         }
         else
         {
@@ -140,7 +155,43 @@ internal sealed class AttachSessionPrincipalHandler
             }
             context.Principal = IdentityPrincipalBuilder.Build(
                 coreUser, oidcObj.value_guid!.Value, oidcObj.Props, context.Request.GetScopes(),
-                sessionMfaVerified, sessionMfaMethod);
+                sessionMfaVerified, sessionMfaMethod, claimsRequest);
+        }
+
+        // OIDC Core §5.5.1 — a `claims` request that pins `sub` to a value is not a request for a
+        // claim, it is an assertion about WHICH End-User must be signed in ("re-authenticate as
+        // this user"). The spec is unambiguous: the OP must only respond positively if that End-User
+        // is the one authenticated. Our session says otherwise, so we refuse rather than hand the RP
+        // an id_token for somebody else — which is exactly the confusion the constraint exists to
+        // prevent. login_required is the honest answer: a different login would satisfy the request.
+        var requestedSub = claimsRequest!.IdToken.TryGetValue(Claims.Subject, out var idSub)
+            ? idSub.Value
+            : claimsRequest.UserInfo.TryGetValue(Claims.Subject, out var uiSub) ? uiSub.Value : null;
+
+        if (!string.IsNullOrEmpty(requestedSub)
+            && context.Principal?.GetClaim(Claims.Subject) is { } actualSub
+            && !string.Equals(requestedSub, actualSub, StringComparison.Ordinal))
+        {
+            // §5.5.1 allows the End-User to be "Authenticated as a result of the request", so the
+            // default answer is login_required — the HTTP façade turns that into the local /login
+            // page and the human can sign in as the requested sub. That is the useful outcome.
+            //
+            // Except under prompt=none (§3.1.2.6), where the RP has said "never show UI". The
+            // façade's RedirectToLogin bails out on the `prompt_none` flag, but the flag is only
+            // raised for the "nobody is signed in" case — here somebody IS signed in, just the
+            // wrong person, so we must raise it ourselves or we would put a login form in front of
+            // an RP that explicitly forbade one.
+            if (context.Request.HasPromptValue(PromptValues.None))
+                exchange.Properties["prompt_none"] = true;
+
+            _logger.LogInformation(
+                "Rejecting authorize: 'claims' pinned sub={RequestedSub} but the session belongs to another user",
+                requestedSub);
+            context.Reject(
+                error: Errors.LoginRequired,
+                description: "The 'claims' parameter requested a specific 'sub' that does not match " +
+                             "the currently authenticated End-User.");
+            return;
         }
 
         _logger.LogDebug(

@@ -9,6 +9,14 @@ public static class ScimConstants
 
     public const string UserSchema = "urn:ietf:params:scim:schemas:core:2.0:User";
     public const string GroupSchema = "urn:ietf:params:scim:schemas:core:2.0:Group";
+
+    /// <summary>
+    /// Enterprise User extension (RFC 7643 §4.3) — department / manager / employeeNumber and friends.
+    /// Doubles as the JSON member name on the User resource: an extension is namespaced by its URN,
+    /// not by a plain attribute name.
+    /// </summary>
+    public const string EnterpriseUserSchema = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User";
+
     public const string ServiceProviderConfigSchema = "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig";
     public const string ResourceTypeSchema = "urn:ietf:params:scim:schemas:core:2.0:ResourceType";
     public const string SchemaSchema = "urn:ietf:params:scim:schemas:core:2.0:Schema";

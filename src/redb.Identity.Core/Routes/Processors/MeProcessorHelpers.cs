@@ -95,7 +95,16 @@ internal static class MeProcessorHelpers
         PhoneNumberVerified = oidc?.PhoneNumberVerified ?? false,
         GivenName = oidc?.GivenName,
         FamilyName = oidc?.FamilyName,
+        MiddleName = oidc?.MiddleName,
+        Nickname = oidc?.Nickname,
+        PreferredUsername = oidc?.PreferredUsername ?? user.Login,
+        Profile = oidc?.Profile,
         Picture = oidc?.Picture,
+        Website = oidc?.Website,
+        Gender = oidc?.Gender,
+        Birthdate = oidc?.Birthdate,
+        ZoneInfo = oidc?.ZoneInfo,
+        Locale = oidc?.Locale,
         Address = oidc?.Address is { } addr ? new AddressDto
         {
             StreetAddress = addr.StreetAddress,

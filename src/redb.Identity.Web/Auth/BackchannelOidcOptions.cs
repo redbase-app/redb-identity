@@ -33,4 +33,10 @@ public sealed class BackchannelOidcOptions
 
     /// <summary>How long the BFF keeps the in-flight PKCE state cached.</summary>
     public TimeSpan FlowTtl { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>DEV ONLY. Accept ANY server certificate on the session HttpClients this class
+    /// builds by hand (they bypass IHttpClientFactory, so the app-wide accept-any-cert default
+    /// configured in Program.cs does NOT reach them). Mirrors Identity:AcceptAnyBackchannelCert;
+    /// needed when the host presents the bundled self-signed dev cert on localhost.</summary>
+    public bool AcceptAnyServerCert { get; set; }
 }

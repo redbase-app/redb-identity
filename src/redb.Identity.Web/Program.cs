@@ -33,6 +33,20 @@ builder.Services.Configure<IdentityWebLinksOptions>(builder.Configuration.GetSec
 var idOpts = builder.Configuration.GetSection("Identity").Get<IdentityWebOptions>()
     ?? throw new InvalidOperationException("Missing 'Identity' configuration section");
 
+// DEV ONLY: when the Identity host presents a self-signed dev cert on localhost (the bundled
+// standalone/Docker default), the BFF's backchannel HttpClients would reject it. This applies an
+// accept-any-server-cert primary handler to EVERY IHttpClientFactory client at once (backchannel
+// OIDC, IdentityClient, revoked-sids, bootstrap). The metadata ConfigurationManager below gets the
+// same handler explicitly (it doesn't come from the factory). Never enable in production.
+if (idOpts.AcceptAnyBackchannelCert)
+{
+    builder.Services.ConfigureHttpClientDefaults(b => b.ConfigurePrimaryHttpMessageHandler(
+        () => new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+        }));
+}
+
 // --- Razor + Blazor Server ---
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddCascadingAuthenticationState();
@@ -58,6 +72,10 @@ builder.Services.Configure<BackchannelOidcOptions>(o =>
         o.ClientSecret = secret;
     if (idOpts.Scopes is { Length: > 0 } sc)
         o.Scopes = sc;
+    // The login flow builds its own session HttpClients by hand (manual cookie handling), which
+    // bypass IHttpClientFactory — so the accept-any-cert default above can't reach them. Pass the
+    // dev flag through so they trust the host's self-signed cert too.
+    o.AcceptAnyServerCert = idOpts.AcceptAnyBackchannelCert;
 });
 builder.Services.AddHttpClient<BackchannelOidcClient>((sp, http) =>
 {
@@ -95,10 +113,18 @@ builder.Services.AddSingleton<IConfigurationManager<OpenIdConnectConfiguration>>
     var metadata = !string.IsNullOrWhiteSpace(idOpts.MetadataAddress)
         ? idOpts.MetadataAddress
         : $"{idOpts.Authority.TrimEnd('/')}/.well-known/openid-configuration";
+    // Same dev cert-trust as the factory clients above — this HttpClient is created here, not by
+    // the factory, so ConfigureHttpClientDefaults doesn't reach it.
+    var docRetriever = idOpts.AcceptAnyBackchannelCert
+        ? new HttpDocumentRetriever(new HttpClient(new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+        })) { RequireHttps = idOpts.RequireHttpsMetadata }
+        : new HttpDocumentRetriever { RequireHttps = idOpts.RequireHttpsMetadata };
     return new ConfigurationManager<OpenIdConnectConfiguration>(
         metadata,
         new OpenIdConnectConfigurationRetriever(),
-        new HttpDocumentRetriever { RequireHttps = idOpts.RequireHttpsMetadata });
+        docRetriever);
 });
 
 // --- Bootstrap seeder (HostedService, no-op if disabled) ---
@@ -152,6 +178,15 @@ builder.Services.AddAuthentication(options =>
         if (!string.IsNullOrWhiteSpace(idOpts.MetadataAddress))
             options.MetadataAddress = idOpts.MetadataAddress;
         options.RequireHttpsMetadata = idOpts.RequireHttpsMetadata;
+        // DEV: trust the host's self-signed dev cert on the OIDC handler's own backchannel
+        // (metadata + code→token exchange). Same localhost-only dev flag as above.
+        if (idOpts.AcceptAnyBackchannelCert)
+        {
+            options.BackchannelHttpHandler = new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+            };
+        }
         options.ClientId = idOpts.ClientId;
         // Public OIDC client (PKCE-only). Send client_secret only when explicitly configured
         // with a real value — appsettings.Development.json carries a placeholder

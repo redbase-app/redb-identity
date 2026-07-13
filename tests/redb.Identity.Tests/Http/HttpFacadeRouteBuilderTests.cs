@@ -73,12 +73,16 @@ public class HttpFacadeRouteBuilderTests
         //   mfa-get, mfa-post, mfa-recovery-get, mfa-recovery-post,
         //   mfa-challenge-post, mfa-methods-post,
         //   bootstrap-admin (B1 emergency-admin endpoint, mounted on management port),
-        //   scim/v2/ServiceProviderConfig, scim/v2/ResourceTypes, scim/v2/Schemas
+        //   scim/v2/ServiceProviderConfig, scim/v2/ResourceTypes, scim/v2/Schemas,
+        //   scim/v2/ResourceTypes/{id}, scim/v2/Schemas/{id}
         //     (RFC 7644 §4 SCIM discovery — unauthenticated and mounted UNCONDITIONALLY
         //      on the management port so RPs can discover the SCIM surface even when
-        //      EnableScim=false; the resource endpoints under /scim/v2 stay gated)
-        //                                                                                  = 27
-        _builder.Definitions.Should().HaveCount(27);
+        //      EnableScim=false; the resource endpoints under /scim/v2 stay gated.
+        //      The two single-resource routes were missing: a provisioning client is pointed
+        //      at ONE base URL, walks ResourceTypes and then fetches each Schema BY ID —
+        //      which 404'd. Same registry, same controller; only the routes were absent.)
+        //                                                                                  = 29
+        _builder.Definitions.Should().HaveCount(29);
     }
 
     [Theory]

@@ -37,6 +37,16 @@ public class ScimDiscoveryController : RedbController
         return Task.FromResult<object?>(config);
     }
 
+    /// <summary>
+    /// RFC 7643 §4.3 — Enterprise User rides on the User resource type. Not required: a user with no
+    /// department is still a valid user, so a provisioning client is never forced to send it.
+    /// </summary>
+    private static ScimSchemaExtension EnterpriseExtension => new()
+    {
+        Schema = ScimConstants.EnterpriseUserSchema,
+        Required = false
+    };
+
     [HttpGet("ResourceTypes")]
     public Task<object?> ResourceTypes()
     {
@@ -53,6 +63,7 @@ public class ScimDiscoveryController : RedbController
                     Endpoint = "/Users",
                     Schema = ScimConstants.UserSchema,
                     Description = "User Account",
+                    SchemaExtensions = [EnterpriseExtension],
                     Meta = new ScimMeta { ResourceType = "ResourceType", Location = "/scim/v2/ResourceTypes/User" }
                 },
                 new ScimResourceType
@@ -78,6 +89,7 @@ public class ScimDiscoveryController : RedbController
             {
                 Id = "User", Name = "User", Endpoint = "/Users",
                 Schema = ScimConstants.UserSchema, Description = "User Account",
+                SchemaExtensions = [EnterpriseExtension],
                 Meta = new ScimMeta { ResourceType = "ResourceType", Location = "/scim/v2/ResourceTypes/User" }
             },
             "Group" => new ScimResourceType
@@ -100,9 +112,14 @@ public class ScimDiscoveryController : RedbController
     {
         var schemas = new ScimListResponse<ScimSchema>
         {
-            TotalResults = 2,
-            ItemsPerPage = 2,
-            Resources = [ScimSchemaDefinitions.UserSchema, ScimSchemaDefinitions.GroupSchema]
+            TotalResults = 3,
+            ItemsPerPage = 3,
+            Resources =
+            [
+                ScimSchemaDefinitions.UserSchema,
+                ScimSchemaDefinitions.EnterpriseUserSchema,
+                ScimSchemaDefinitions.GroupSchema
+            ]
         };
         return Task.FromResult<object?>(schemas);
     }
@@ -113,6 +130,7 @@ public class ScimDiscoveryController : RedbController
         ScimSchema? schema = id switch
         {
             ScimConstants.UserSchema => ScimSchemaDefinitions.UserSchema,
+            ScimConstants.EnterpriseUserSchema => ScimSchemaDefinitions.EnterpriseUserSchema,
             ScimConstants.GroupSchema => ScimSchemaDefinitions.GroupSchema,
             _ => null
         };

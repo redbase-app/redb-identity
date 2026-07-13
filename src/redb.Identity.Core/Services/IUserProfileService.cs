@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using redb.Core.Models.Contracts;
 using redb.Identity.Core.Models;
+using redb.Identity.Core.OpenIddict;
 
 namespace redb.Identity.Core.Services;
 
@@ -20,6 +21,10 @@ public interface IUserProfileService
     /// <param name="scopes">Requested OIDC scopes (profile, email, phone, address, groups, roles, etc.).</param>
     /// <param name="mfaVerified">Whether the current session passed MFA. Adds the appropriate <c>amr</c> claim.</param>
     /// <param name="mfaMethod">MFA method id used for verification ("totp", "sms", "email", "webauthn", "recovery").</param>
+    /// <param name="claimsRequest">
+    /// Parsed <c>claims</c> request parameter (OIDC Core §5.5), when the RP sent one. Only the
+    /// authorization endpoint can carry it; every other grant passes null.
+    /// </param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Fully populated <see cref="ClaimsPrincipal"/> or null if user not found / disabled.</returns>
     Task<ClaimsPrincipal?> BuildPrincipalAsync(
@@ -27,6 +32,7 @@ public interface IUserProfileService
         IEnumerable<string> scopes,
         bool mfaVerified = false,
         string? mfaMethod = null,
+        OidcClaimsRequest? claimsRequest = null,
         CancellationToken ct = default);
 
     /// <summary>

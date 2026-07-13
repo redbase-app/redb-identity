@@ -349,6 +349,27 @@ public class RedbIdentityOptions
     /// </summary>
     public bool RequirePkce { get; set; } = true;
 
+    /// <summary>
+    /// RFC 8252 §7.3 — accept any port on a client's registered loopback redirect URI.
+    /// <para>
+    /// A native or CLI app (think <c>az login</c>, <c>gh auth login</c>) cannot know its callback
+    /// port before it starts: it asks the OS for an ephemeral one, so the port changes on every run
+    /// and cannot be registered ahead of time. §7.3 requires the authorization server to compare
+    /// everything about a loopback redirect URI EXCEPT the port. With this off, desktop clients
+    /// simply cannot use this provider.
+    /// </para>
+    /// <para>
+    /// The widening is narrow by construction: it applies only when the client has ALREADY
+    /// registered a redirect URI whose host is the loopback literal <c>127.0.0.1</c> or
+    /// <c>[::1]</c> (never the name <c>localhost</c> — §8.3 warns that a name goes through
+    /// resolution and can be pointed elsewhere), and only the port is ignored — scheme, host, path,
+    /// query and fragment must still match exactly. A web client registered at
+    /// <c>https://app.example.com/cb</c> has no loopback URI to match, so nothing about it changes.
+    /// </para>
+    /// Default: <c>true</c> — this is a MUST in RFC 8252 §7.3, not an opt-in feature.
+    /// </summary>
+    public bool AllowLoopbackRedirectPortWildcard { get; set; } = true;
+
     // ── Token Exchange (RFC 8693) ──
 
     /// <summary>

@@ -294,6 +294,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process((e, ct) => SessionCookieProcessors.RedirectToConsent(e, ct, consentPath))
             .Process((e, ct) => SessionCookieProcessors.HandleReauthCookie(e, ct, _ticketService, secureCookie, sessionSameSite, useHostPrefix))
             .Process(HttpIdentityProcessors.MapOAuthErrorToHttpStatus)
+            .Process((e, ct) => HttpIdentityProcessors.RenderAuthorizeErrorPage(e, ct, _transportOptions))
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
 
         From($"{_scheme}:POST:0.0.0.0:{port}/connect/authorize?inOut=true{_sslParams}")
@@ -308,6 +309,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process((e, ct) => SessionCookieProcessors.RedirectToConsent(e, ct, consentPath))
             .Process((e, ct) => SessionCookieProcessors.HandleReauthCookie(e, ct, _ticketService, secureCookie, sessionSameSite, useHostPrefix))
             .Process(HttpIdentityProcessors.MapOAuthErrorToHttpStatus)
+            .Process((e, ct) => HttpIdentityProcessors.RenderAuthorizeErrorPage(e, ct, _transportOptions))
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
 
         // Login page — GET renders form, POST submits credentials → session cookie
@@ -429,6 +431,13 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         From($"{_scheme}:POST:0.0.0.0:{port}/connect/userinfo?inOut=true{_sslParams}{ClientCorsParams()}")
             .RouteId("http-userinfo-post")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
+            // RFC 6750 §2.2 also allows the access token as a form-encoded body parameter, not just
+            // the Authorization header. Without MapFormToBody the POST body never reached the
+            // handler, so `access_token=…` in the body came back as "missing_token" (the OIDF suite
+            // reports this as "does not appear to support access tokens passed in the POST body").
+            // The header still wins when both are present — ExtractUserinfoRequestHandler only falls
+            // back to it when the request carries no access_token parameter.
+            .Process(HttpIdentityProcessors.MapFormToBody)
             .Process(HttpIdentityProcessors.ExtractBearerToken)
             .To(IdentityEndpoints.Userinfo)
             .Process(HttpIdentityProcessors.MapOAuthErrorToHttpStatus)
@@ -647,12 +656,35 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .RedbHttpController(scimDiscoveryRegistry)
             .Process(ScimHttpProcessors.SerializeScimJsonResponse);
 
+        // Single-resource discovery. These existed on the public /scim/v2 surface but not here, so a
+        // provisioning client pointed at the management base URL — which is how Okta / Entra are
+        // actually configured: one base URL, and they walk ResourceTypes then fetch each Schema by
+        // id — got a 404 on the very first schema it asked for. Same registry, same controller; only
+        // the route was missing.
+        From($"{_scheme}:GET:0.0.0.0:{port}/api/v1/identity/scim/v2/ResourceTypes/{{**path}}?inOut=true{_sslParams}")
+            .RouteId("http-management-scim-discovery-rt-id")
+            .Process(HttpIdentityProcessors.PropagateCorrelationId)
+            .Process(HttpIdentityProcessors.StripManagementPrefix)
+            .Process(ScimHttpProcessors.StripScimPrefix)
+            .RedbHttpController(scimDiscoveryRegistry)
+            .Process(ScimHttpProcessors.MapScimResponseToHttpStatus)
+            .Process(ScimHttpProcessors.SerializeScimJsonResponse);
+
         From($"{_scheme}:GET:0.0.0.0:{port}/api/v1/identity/scim/v2/Schemas?inOut=true{_sslParams}")
             .RouteId("http-management-scim-discovery-schemas")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process(HttpIdentityProcessors.StripManagementPrefix)
             .Process(ScimHttpProcessors.StripScimPrefix)
             .RedbHttpController(scimDiscoveryRegistry)
+            .Process(ScimHttpProcessors.SerializeScimJsonResponse);
+
+        From($"{_scheme}:GET:0.0.0.0:{port}/api/v1/identity/scim/v2/Schemas/{{**path}}?inOut=true{_sslParams}")
+            .RouteId("http-management-scim-discovery-schema-id")
+            .Process(HttpIdentityProcessors.PropagateCorrelationId)
+            .Process(HttpIdentityProcessors.StripManagementPrefix)
+            .Process(ScimHttpProcessors.StripScimPrefix)
+            .RedbHttpController(scimDiscoveryRegistry)
+            .Process(ScimHttpProcessors.MapScimResponseToHttpStatus)
             .Process(ScimHttpProcessors.SerializeScimJsonResponse);
 
         var route = From($"{_scheme}:0.0.0.0:{port}/api/v1/identity/{{**path}}?inOut=true{_sslParams}")

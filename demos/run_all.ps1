@@ -61,7 +61,9 @@ $ordered = @(
     'demo_introspect_revoke.ps1',
     'demo_jwt.ps1',
     'demo_userinfo.ps1',                # RFC 6750 §3 — GET/POST + 400/401 + WWW-Authenticate challenge on errors
-    'demo_claim_probes.ps1',            # OIDC §2/§5.1.1 + RFC 8176 — id_token claim shapes (auth_time, amr, nonce, azp, phone/address)
+    'demo_claim_probes.ps1',            # OIDC §2/§5.1.1 + RFC 8176 — id_token claim shapes; §5.4 — asserts scope-derived PII is NOT in the id_token
+    'demo_claims_parameter.ps1',        # OIDC §5.5 — the `claims` request parameter: userinfo/id_token members, essential/value/values, pinned-sub refusal
+    'demo_loopback_redirect.ps1',       # RFC 8252 §7.3 — loopback redirect, port not compared; mostly negatives (localhost, path, scheme, off-box all refused)
     'demo_prompt_max_age.ps1',          # OIDC §3.1.2.1 prompt=login/consent/select_account + max_age (auth_time enforcement)
     'demo_admin_scopes.ps1',            # IdentityScopes granular admin probes (identity:read cross-path GET, identity:audit:read narrow)
     'demo_sessions_admin.ps1',          # admin /sessions list/revoke/all (identity:sessions:write identity:tokens:write + dryRun)
@@ -79,6 +81,7 @@ $ordered = @(
     'demo_acr_values.ps1',              # OIDC Core §2 acr claim probe (single-factor=1, MFA=2) + acr_values voluntary contract
     'demo_scim_bulk.ps1',               # RFC 7644 §3.7 Bulk: POST + DELETE mix, failOnErrors early-stop, continue-on-error
     'demo_scim_etag.ps1',               # RFC 7644 §3.14 ETag concurrency: POST emits ETag, PUT If-Match honoured, 412 on stale
+    'demo_scim_enterprise.ps1',         # RFC 7643 §4.3 Enterprise User: department/manager/employeeNumber, PATCH by URN, PUT-clears-extension
     'demo_throttle_rfc6585.ps1',        # RFC 6585 §4 + RFC 7231 §7.1.3 — 429 + Retry-After on rate-limit (KeyedThrottle.RejectOnOverflow)
     'demo_jwks_rotation.ps1',           # signing-key lifecycle: admin rotate/retire + live JWKS observability + old-token validation across the grace window
     # ── Self-service + MFA ────────────────────────────────────────────────────

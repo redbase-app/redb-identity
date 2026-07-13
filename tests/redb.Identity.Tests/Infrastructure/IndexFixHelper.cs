@@ -6,6 +6,13 @@ namespace redb.Identity.Tests.Infrastructure;
 /// Fixes btree indexes on _values that include _string in the index tuple.
 /// Without this fix, tokens with large Payload values (e.g., 4+ scope authorization codes)
 /// exceed the btree 2704-byte row limit and cause PostgresException 54000.
+/// <para>
+/// <b>PostgreSQL only.</b> The 2704-byte limit is a PostgreSQL btree implementation detail;
+/// neither SQLite nor SQL Server has it, and the SQL below is Postgres-specific
+/// (<c>INCLUDE</c>, <c>deduplicate_items</c>). Every fixture calls this unconditionally, so
+/// the provider check lives HERE rather than at the five call sites — a check a caller can
+/// forget is a check that will be forgotten. Under sqlite/mssql this is a no-op.
+/// </para>
 /// </summary>
 internal static class IndexFixHelper
 {
@@ -19,6 +26,12 @@ internal static class IndexFixHelper
 
     public static async Task FixValueStringIndexAsync(string connectionString)
     {
+        // Not our storage engine, not our problem — and opening an Npgsql connection here would
+        // drag a PostgreSQL dependency into a run the operator explicitly pointed at SQLite,
+        // failing every fixture at InitializeAsync before a single test body runs.
+        if (TestRedbSetup.SelectedProvider != TestRedbSetup.Provider.Postgres)
+            return;
+
         await _lock.WaitAsync();
         try
         {
