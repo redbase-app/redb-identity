@@ -81,6 +81,27 @@ public sealed class RedbRouteOpenIddictServerHandler
             sp = privateScope.ServiceProvider;
         }
 
+        // Bind this scope to the exchange BEFORE anything resolves IRedbService.
+        //
+        // Everything OpenIddict is about to touch — RedbTokenStore, RedbAuthorizationStore,
+        // RedbApplicationStore — is Scoped and pulls IRedbService out of `sp`. Until this line
+        // existed, the private scope's HostRedbScope opened a host scope of its OWN, i.e. a SECOND
+        // connection. A route-level redb transaction runs on the connection redb.Route caches on the
+        // exchange, so every store write landed outside it: no atomicity — and the second connection
+        // then blocked on the row locks the first one held while the first awaited this very call.
+        // Deadlock, cleared only by the 30s transaction timeout. That is rule 1 of doc/PERF_RULES.md,
+        // and it is why WithRedbTx had to be stripped from the token route.
+        //
+        // With the exchange in hand, HostRedbScope binds IRedbService to the exchange's instance —
+        // the one BeginRedbTransaction opened the transaction on. One connection, one transaction,
+        // the stores enlisted in it.
+        //
+        // Best-effort: the in-process single-SP path has no HostRedbScope (IRedbService comes
+        // straight from AddRedbPro on the exchange scope) and no accessor to seed. Nothing to do
+        // there — it was already on the right connection.
+        if (sp.GetService<Module.IdentityExchangeAccessor>() is { } accessor)
+            accessor.Exchange = exchange;
+
         try
         {
             _logger?.LogDebug(

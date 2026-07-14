@@ -95,6 +95,26 @@ public static class IdentityRouteContextExtensions
                 + "context.RegisterIdentityScopeFactory(...) during module bootstrap.");
     }
 
+    /// <summary>
+    /// Tells a freshly opened Identity child scope which exchange it belongs to.
+    /// <para>
+    /// <c>HostRedbScope</c> reads this to bind <c>IRedbService</c> to the exchange's connection —
+    /// the one a route-level <c>BeginRedbTransaction</c> opened its transaction on — instead of
+    /// opening a second connection of its own. Without the seed, everything inside the child
+    /// container (including every OpenIddict store) writes outside the route transaction, and, worse,
+    /// deadlocks against it. See <c>doc/PERF_RULES.md</c> rule 1.
+    /// </para>
+    /// <para>
+    /// Best-effort by design: fixtures and single-SP hosts may not register the accessor at all, and
+    /// they have no route transaction to join either — so a miss is not an error.
+    /// </para>
+    /// </summary>
+    private static void SeedExchange(IServiceProvider scopeSp, IExchange exchange)
+    {
+        if (scopeSp.GetService<IdentityExchangeAccessor>() is { } accessor)
+            accessor.Exchange = exchange;
+    }
+
     private static IServiceProvider? TryResolveServiceProvider(IRouteContext context, IExchange? exchange, string? name)
     {
         var clean = Clean(name);
@@ -112,6 +132,7 @@ public static class IdentityRouteContextExtensions
             {
                 var scope = factory.CreateScope();
                 exchange.Properties[cacheKey] = scope;
+                SeedExchange(scope.ServiceProvider, exchange);
                 return scope.ServiceProvider;
             }
 
@@ -134,6 +155,7 @@ public static class IdentityRouteContextExtensions
                 {
                     var scope = rootFactory.CreateScope();
                     exchange.Properties[cacheKey] = scope;
+                    SeedExchange(scope.ServiceProvider, exchange);
                     return scope.ServiceProvider;
                 }
                 return rootSp;

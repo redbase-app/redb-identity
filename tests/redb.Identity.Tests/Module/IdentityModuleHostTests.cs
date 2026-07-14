@@ -130,4 +130,93 @@ public sealed class IdentityModuleHostTests
         Action act = () => childSp.GetRequiredService<IOptions<RedbIdentityOptions>>();
         act.Should().Throw<ObjectDisposedException>();
     }
+
+    // ── The transaction-enlistment contract ───────────────────────────────────────────────────
+    //
+    // These two are the proof that `WithRedbTx` on the token route is meaningful again, and they
+    // are deliberately written at the layer where the bug actually lived: the .tpkg child
+    // container. A test built on a single-SP host would pass with OR without the fix — in that
+    // topology the OpenIddict handler already runs on the exchange's own scope — and would prove
+    // nothing while looking like proof.
+    //
+    // The host factory below hands out a DISTINCT IRedbService per scope, exactly like production
+    // (each scope = its own DB connection). That is what makes "same reference" a real assertion
+    // rather than an artefact of the fixture.
+
+    /// <summary>
+    /// Route context whose named redb factory yields a FRESH <see cref="IRedbService"/> per scope —
+    /// one connection per scope, as in production. Reference equality therefore means "the same
+    /// connection", which is the whole question here.
+    /// </summary>
+    private static RouteContext MakeContextWithDistinctRedbPerScope()
+    {
+        var rootServices = new ServiceCollection();
+        rootServices.AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
+        rootServices.AddLogging();
+        var rootSp = rootServices.BuildServiceProvider();
+
+        var ctx = new RouteContext(rootSp, "_test_tx", NullLoggerFactory.Instance);
+
+        var hostServices = new ServiceCollection();
+        hostServices.AddScoped<IRedbService>(_ => Substitute.For<IRedbService>());
+        hostServices.AddScoped<redb.Core.Query.ISqlDialect>(_ => Substitute.For<redb.Core.Query.ISqlDialect>());
+        var hostSp = hostServices.BuildServiceProvider();
+
+        ctx.AddToRegistry("redb-factory:identity-pg", hostSp.GetRequiredService<IServiceScopeFactory>());
+        return ctx;
+    }
+
+    private static RedbIdentityOptions TxOptions() => new()
+    {
+        RedbInstanceName = "identity-pg",
+        AllowEphemeralKeys = true,
+        DisableAccessTokenEncryption = true
+    };
+
+    [Fact]
+    public void ChildScope_BoundToExchange_ResolvesTheExchangeRedbService()
+    {
+        var ctx = MakeContextWithDistinctRedbPerScope();
+        using var childSp = IdentityModuleHost.Build(ctx, TxOptions());
+
+        var exchange = new Exchange();
+
+        // The instance a route-level BeginRedbTransaction opens its transaction on. redb.Route
+        // caches its scope on the exchange, so every later ask for the same name returns this one.
+        var transactionService = ctx.GetRedbService("identity-pg", exchange);
+
+        // What an OpenIddict store gets: a child-container scope, told which exchange it serves.
+        using var scope = childSp.CreateScope();
+        scope.ServiceProvider.GetRequiredService<IdentityExchangeAccessor>().Exchange = exchange;
+        var storeService = scope.ServiceProvider.GetRequiredService<IRedbService>();
+
+        ReferenceEquals(storeService, transactionService).Should().BeTrue(
+            "the OpenIddict stores must write on the SAME IRedbService — and therefore the same DB " +
+            "connection — that the route transaction was opened on. When they did not, the wrap " +
+            "covered a connection nobody was writing on (no atomicity at all), and the stores' own " +
+            "connection then deadlocked against the row locks the transaction held while the " +
+            "transaction awaited them. That is why WithRedbTx had to be stripped from the token " +
+            "route; this assertion is what lets it come back. See doc/PERF_RULES.md rule 1.");
+    }
+
+    [Fact]
+    public void ChildScope_WithoutExchange_GetsItsOwnRedbService()
+    {
+        var ctx = MakeContextWithDistinctRedbPerScope();
+        using var childSp = IdentityModuleHost.Build(ctx, TxOptions());
+
+        // Out-of-route callers — cleanup timers, hosted services, schema init — have no exchange and
+        // therefore no ambient transaction to join. They must get their own scope: taking somebody
+        // else's connection would be worse than the bug we just fixed.
+        using var scopeA = childSp.CreateScope();
+        using var scopeB = childSp.CreateScope();
+
+        var a = scopeA.ServiceProvider.GetRequiredService<IRedbService>();
+        var b = scopeB.ServiceProvider.GetRequiredService<IRedbService>();
+
+        ReferenceEquals(a, b).Should().BeFalse(
+            "with no exchange there is no transaction to enlist in, so each scope must keep its own " +
+            "connection — otherwise concurrent background work would serialise onto one connection " +
+            "(the captive-singleton trap this bridge exists to avoid)");
+    }
 }

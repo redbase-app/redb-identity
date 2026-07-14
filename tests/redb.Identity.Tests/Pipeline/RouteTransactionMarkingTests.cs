@@ -102,6 +102,18 @@ public sealed class RouteTransactionMarkingTests
         new object[] { IdentityEndpoints.RouteIds.Logout },        // revokes session + tokens via _context's redb in one tx
         new object[] { IdentityEndpoints.RouteIds.ConsentGrant },  // grants consent through the per-exchange redb
 
+        // Token — RESTORED. It was in the no-longer-transacted list below because the OpenIddict
+        // stores resolved their IRedbService from Identity's child container, which opened a host
+        // scope of its OWN per DI scope: a SECOND connection. The route wrap therefore covered a
+        // different connection from the one doing the writes (no atomicity), and that second
+        // connection deadlocked against the row locks the first one held.
+        //
+        // Fixed at the root: HostRedbScope now binds IRedbService to the exchange's instance (see
+        // IdentityExchangeAccessor), so the stores write on the SAME connection the transaction was
+        // opened on. One connection, one transaction, the stores enlisted in it — and the token
+        // entry plus the authorization entry now either both land or neither does.
+        new object[] { IdentityEndpoints.RouteIds.Token },
+
         // Management mutation endpoints — wrapped via WithIdempotentTx(wrapInRedbTx:true):
         new object[] { IdentityEndpoints.RouteIds.ManageScopes },
         new object[] { IdentityEndpoints.RouteIds.ManageUsers },
@@ -113,14 +125,18 @@ public sealed class RouteTransactionMarkingTests
 
     public static IEnumerable<object[]> MutatingRouteIds_NoLongerTransacted() => new[]
     {
-        // Routes whose primary writers run through a DI-scoped store (OpenIddict
-        // managers / IPasswordHistoryStore / IEmailVerificationTokenStore / etc.)
-        // that resolves its own IRedbService on a separate DI scope — the route-level
-        // wrap covered a different connection from the one doing the actual writes,
-        // and on SQLite produced ~34-second self-deadlocks via the 5s busy_timeout ×
-        // ~7 retries cascade. Removed in commit 02d408a7; see per-callsite comments
-        // in IdentityCoreRouteBuilder + the bifurcation note on the type docstring.
-        new object[] { IdentityEndpoints.RouteIds.Token },
+        // Routes whose primary writers run through a store that opens its OWN DI scope from the
+        // inside (PropsPasswordHistoryStore, ISigningKeyStore, FederationCallbackProcessor, …) and
+        // therefore resolves its own IRedbService on a separate connection. The route-level wrap
+        // would cover a different connection from the one doing the writes, and on SQLite that
+        // produced ~34-second self-deadlocks (5 s busy_timeout × ~7 retries). Removed in 02d408a7.
+        //
+        // NOTE: Token has MOVED to the transacted list above. Its root cause was different — the
+        // second connection came from HostRedbScope in the child container, not from a store calling
+        // CreateScope() on itself — and that is now fixed (IdentityExchangeAccessor binds the child
+        // scope's IRedbService to the exchange). The routes still listed here need the same
+        // treatment: thread the exchange's IRedbService into those stores instead of letting them
+        // open a scope. That is doc/PERF_RULES.md rule 1, and it is the remaining cleanup.
         new object[] { IdentityEndpoints.RouteIds.Authorize },
         new object[] { IdentityEndpoints.RouteIds.Revoke },
         new object[] { IdentityEndpoints.RouteIds.Login },
@@ -154,13 +170,15 @@ public sealed class RouteTransactionMarkingTests
         route.Should().NotBeNull("route '{0}' must be registered", routeId);
 
         route!.IsTransacted.Should().BeFalse(
-            "Route '{0}' had WithRedbTx removed in commit 02d408a7 because its primary " +
-            "writers (OpenIddict managers / DI-scoped stores) resolve their own " +
-            "IRedbService instance from a separate DI scope; the route-level wrap covered " +
-            "a different connection from the one actually writing. If this assert fails " +
-            "because the wrap was reinstated, the ~34-second self-deadlock on SQLite " +
-            "(5 s busy_timeout × OnException retries during Argon2id + OpenIddict pipeline) " +
-            "will return — see the per-callsite comments in IdentityCoreRouteBuilder.",
+            "Route '{0}' had WithRedbTx removed in commit 02d408a7: its primary writers are stores " +
+            "that open their OWN DI scope from the inside (PropsPasswordHistoryStore, " +
+            "ISigningKeyStore, FederationCallbackProcessor, …) and so write on a second connection. " +
+            "A route-level wrap would cover a different connection from the one doing the writes — " +
+            "no atomicity — and the second connection then deadlocks against the row locks the " +
+            "first one holds (~34 s on SQLite: 5 s busy_timeout × OnException retries). " +
+            "Do NOT simply reinstate the wrap to make this assert pass: fix the root cause first, " +
+            "the way Token was fixed — thread the exchange's IRedbService into those stores instead " +
+            "of letting them call CreateScope(). See doc/PERF_RULES.md rule 1.",
             routeId);
     }
 

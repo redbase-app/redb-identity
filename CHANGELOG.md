@@ -27,6 +27,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > package together. Per-package divergence may begin in the 1.x patch series
 > once the public surface stabilises. NuGet publication follows the source cut.
 
+## [1.2.1] — 2026-07-15
+
+**Token issuance is atomic again — and the addon story is now true in a shipped build.** 1.2.0
+documented (and the launch articles describe) an addon that mints a token through
+`direct-vm://identity-token` inside its own `WithRedbTx`, committing its domain write and the token
+issue as one transaction. In 1.2.0 that was not actually the case in the `.tpkg` topology — the fix
+is here.
+
+### Fixed
+
+- **The OpenIddict stores now enlist in the route transaction.** In the `.tpkg` topology Identity
+  resolves its services from a child container, and that container used to open a host scope of its
+  own per DI scope — a **second** DB connection. A route-level redb transaction runs on the
+  connection redb.Route caches on the exchange, so the token/authorization store writes landed on a
+  *different* connection: no atomicity, and — because the second connection blocked on the row locks
+  the first one held while the first awaited the call that opened the second — a **self-deadlock**
+  that cleared only on the 30-second transaction timeout (~34 s on SQLite via the busy-timeout ×
+  retry cascade). This is why `WithRedbTx` had to be stripped from the token route in 1.2.0. It was
+  never a SQLite quirk: the deadlock rule is written about Npgsql; SQLite's single writer only made
+  it louder.
+
+  The child scope now binds its `IRedbService` to the exchange's instance (a new
+  `IdentityExchangeAccessor` carries the exchange in), so the stores write on the **same** connection
+  the transaction was opened on. `WithRedbTx` is restored on the token route: the token entry and the
+  authorization entry either both land or neither does. And an addon that wraps its own route in
+  `WithRedbTx` and calls `direct-vm://identity-token` now gets **one atomic commit** across its own
+  write and Identity's token issue — the claim the docs make, now real. Resolution is also lazy now:
+  a child scope that never touches the DB no longer pays for a connection.
+
+- **Token route was silently losing its RouteId.** Caught by `RouteTransactionMarkingTests` while
+  restoring the wrap: `WithRedbTx(From(...)).RouteId(...)` set the id on the transaction definition,
+  not the route, so `identity-token` would have registered with no id — breaking cluster locks,
+  per-route metrics and the dashboard. Every demo still passed; only the guard test saw it. Fixed by
+  moving `.RouteId(...)` inside `From(...)`.
+
+### Notes
+
+- Out-of-route callers (cleanup timers, hosted services, schema init) still get their own scope —
+  there is no ambient transaction to join, and taking somebody else's connection would be worse than
+  the bug. Covered by a new test (`ChildScope_WithoutExchange_GetsItsOwnRedbService`), and the
+  enlistment itself is proven by `ChildScope_BoundToExchange_ResolvesTheExchangeRedbService`, which
+  was verified to go red when the fix is disabled — a guard that cannot fail is not a guard.
+- The other six routes that carry no `WithRedbTx` (Login, Authorize, Revoke, MfaVerify, MfaRecovery,
+  MfaManage, ManageApps) are **correctly** left unwrapped and their comments now say why: a segment
+  transaction already inside the processor (MFA), a single atomic store operation (Authorize / Revoke
+  / apps), or a single write behind Argon2id where a route-level wrap would hold the writer lock over
+  the CPU verify for no atomicity gain (Login). See `doc/PERF_RULES.md` rule 1.
+- **Test suite:** `Passed: 1769, Skipped: 1, Failed: 0` on PostgreSQL, MSSQL and SQLite.
+
 ## [1.2.0] — 2026-07-14
 
 **Basic OP: 35 modules, zero failures.** The official OpenID Foundation

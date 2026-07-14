@@ -120,14 +120,31 @@ public class IdentityCoreRouteBuilder : RouteBuilder
                 securityLogger)
             : null;
 
-        // 1. Token (OAuth error handling + throttle + WireTap). Writes are atomic at the
-        // OpenIddict store level — RedbTokenStore / RedbAuthorizationStore each run their
-        // own short tx on a DI-scoped IRedbService, NOT on the per-exchange one a
-        // hypothetical WithRedbTx would wrap. A route-level wrap just held a SQLite writer
-        // lock for the duration of Argon2id verify + the whole OpenIddict pipeline (~30s
-        // observed), starving every other writer in the process for no atomicity benefit.
-        var tokenRoute = From(IdentityEndpoints.Token)
-            .RouteId(IdentityEndpoints.RouteIds.Token)
+        // 1. Token — issuance is atomic: the token entry and the authorization entry either both
+        // land or neither does.
+        //
+        // This wrap USED to be impossible. The OpenIddict stores (RedbTokenStore,
+        // RedbAuthorizationStore) resolve IRedbService from Identity's child container, and in the
+        // .tpkg topology that container used to open a host scope of its own per DI scope — a SECOND
+        // connection. The route transaction runs on the connection redb.Route caches on the exchange,
+        // so the stores wrote OUTSIDE it (no atomicity), and the second connection then blocked on the
+        // row locks the first one held while the first awaited the call that opened the second.
+        // Deadlock, cleared only by the 30s transaction timeout — doc/PERF_RULES.md, rule 1. Not a
+        // SQLite quirk: the rule is written about Npgsql; SQLite (single writer) only made it louder.
+        //
+        // HostRedbScope now binds IRedbService to the exchange's instance (see IdentityExchangeAccessor),
+        // so the stores enlist in this transaction instead of fighting it. Same reason the addon
+        // scenario works: an addon that wraps its own route in WithRedbTx and calls
+        // direct-vm://identity-token now gets ONE atomic commit across its own write and the token issue.
+        //
+        // Note on the password grant: Argon2id verify (~250 ms at OWASP parameters) happens inside this
+        // route, hence inside the transaction window. The redb transaction is deferred — the write lock
+        // is taken at the first WRITE, which is after the verify — but this is the thing to watch under
+        // load on SQLite, where there is a single writer per database.
+        // RouteId goes INSIDE From(...), before the wrap: WithRedbTx returns the transaction
+        // definition, and an id set on that would not land on the route the registry looks up.
+        var tokenRoute = WithRedbTx(From(IdentityEndpoints.Token)
+                .RouteId(IdentityEndpoints.RouteIds.Token))
             .Process(trustedProxy);
         if (perIpThrottle is not null) tokenRoute = tokenRoute.Process(perIpThrottle);
         tokenRoute
@@ -148,9 +165,11 @@ public class IdentityCoreRouteBuilder : RouteBuilder
             .EndTraced()
             .WireTap(IdentityEndpoints.Events);
 
-        // 2. Authorize (WireTap). Writes (auth-code row) go through OpenIddict's authorization
-        // store on its own DI-scoped IRedbService — atomicity is at the store level, not the
-        // route. Route-level redb-tx wrap removed (see Token endpoint note).
+        // 2. Authorize (WireTap). Not route-transacted, and correctly so: the only write is a single
+        // authorization-code entry through OpenIddict's authorization store — one store operation,
+        // atomic on its own. There is no multi-row write here for a route transaction to make atomic.
+        // (This is a different situation from Token, which DOES write two coupled entries — token +
+        // authorization — and is therefore wrapped; see its note above.)
         From(IdentityEndpoints.Authorize)
             .RouteId(IdentityEndpoints.RouteIds.Authorize)
             .Process(new AuthorizeEndpointProcessor(handler))
@@ -173,9 +192,10 @@ public class IdentityCoreRouteBuilder : RouteBuilder
             .End()
             .WireTap(IdentityEndpoints.Events);
 
-        // 5. Revoke (WireTap). Revocation writes go through OpenIddict's token store on its
-        // own DI-scoped IRedbService — atomicity is at the store level, not the route.
-        // Route-level redb-tx wrap removed (see Token endpoint note).
+        // 5. Revoke (WireTap). Not route-transacted, correctly: a single token-status write through
+        // OpenIddict's token store — one atomic store operation, no multi-row write for a route
+        // transaction to guard. Do NOT add WithRedbTx here expecting an atomicity gain; there is none
+        // to be had.
         From(IdentityEndpoints.Revoke)
             .RouteId(IdentityEndpoints.RouteIds.Revoke)
             .Process(new RevocationEndpointProcessor(handler, timeProvider))
@@ -290,10 +310,19 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         }
 
         // 10. Login (credential verification → session cookie set by HTTP facade).
-        // LoginProcessor + LoginFailureRecorder both resolve their IRedbService through _sp
-        // (DI scope), NOT through the per-exchange context — route-level redb-tx wrap covers
-        // a different connection. Removed; otherwise it would hold a SQLite writer lock for
-        // the full Argon2id verify + auto-rehash CPU window (~2-4s) for no atomicity benefit.
+        //
+        // Deliberately NOT route-transacted, and this one is a trap worth spelling out. Login always
+        // runs Argon2id verify (~250 ms, up to seconds under load) BEFORE it writes anything. A
+        // route-level WithRedbTx opens the transaction at the top of the route, so on SQLite (single
+        // writer) it would hold the write lock across that whole CPU-bound verify, serialising every
+        // concurrent login — a real, measured stall, not a theoretical one.
+        //
+        // And there is nothing to make atomic anyway: the sole transactional write is one
+        // SessionService.CreateAsync (a single SaveAsync, atomic on its own). The password auto-rehash
+        // is fire-and-forget on its own scope by design and must not be pulled into a login
+        // transaction. So a wrap here would buy zero atomicity at the cost of a writer-lock over
+        // Argon2id. If a future change makes login write multiple coupled rows, wrap THAT write inside
+        // the processor (a segment transaction after the verify), never the whole route.
         var loginRoute = From(IdentityEndpoints.Login)
             .RouteId(IdentityEndpoints.RouteIds.Login)
             .Process(trustedProxy);
@@ -320,8 +349,12 @@ public class IdentityCoreRouteBuilder : RouteBuilder
             });
         var mfaStateProtector = _sp.GetRequiredService<MfaStateProtector>();
 
-        // MfaVerifyProcessor resolves IRedbService through _sp (DI scope), so a route-level
-        // redb-tx wrap on the per-exchange connection covered nothing — removed (see Token note).
+        // MfaVerify: NOT route-transacted, because the processor already opens its OWN segment
+        // transaction exactly where it is needed — BeginTransactionAsync around
+        // LockForUpdate(mfaObj) + verify + persist(FailedAttempts/Lockout). That is the correct
+        // pattern (a transaction around the write, not around the whole route), and it is cheap here
+        // because MFA verify is TOTP, not Argon2id. A route-level WithRedbTx would NEST an outer
+        // transaction over that inner one — strictly worse than leaving the inner one to do its job.
         From(IdentityEndpoints.MfaVerify)
             .RouteId(IdentityEndpoints.RouteIds.MfaVerify)
             .Process(trustedProxy)
@@ -374,8 +407,10 @@ public class IdentityCoreRouteBuilder : RouteBuilder
             .Process(new MfaMethodsFromStateProcessor(_sp));
 
         // 12. MFA recovery code verification — marks recovery code consumed.
-        // MfaRecoveryProcessor resolves IRedbService through _sp (DI scope) — route-level
-        // redb-tx wrap removed (see Token note).
+        // Same as MfaVerify: NOT route-transacted because the processor opens its own segment
+        // transaction around LockForUpdate(mfaObj) + match + mark-consumed, which is exactly where
+        // the atomicity is needed (so two concurrent uses of one code cannot both succeed). No
+        // Argon2id in the window; a route-level wrap would only nest over that inner transaction.
         From(IdentityEndpoints.MfaRecovery)
             .RouteId(IdentityEndpoints.RouteIds.MfaRecovery)
             .Process(trustedProxy)
@@ -394,9 +429,10 @@ public class IdentityCoreRouteBuilder : RouteBuilder
             _options.AccountScope,
             securityLogger);
 
-        // MfaSetupProcessor resolves IRedbService through _sp (DI scope), so a route-level
-        // redb-tx wrap on the per-exchange connection covered nothing — removed (see Token
-        // note). Idempotency pre/post below still apply (cache lookup is independent of tx).
+        // MfaManage (setup / confirm / disable): NOT route-transacted. Each operation is a single
+        // MFA-object mutation through MfaSetupProcessor — one write, atomic on its own — so there is
+        // no multi-row write for a route transaction to guard. The idempotency pre/post below are
+        // independent of any DB transaction (they cache the response), so they stay.
         var mfaManageRoute = From(IdentityEndpoints.MfaManage)
             .RouteId(IdentityEndpoints.RouteIds.MfaManage)
             .Process(mfaSelfOrAdmin);
@@ -409,12 +445,14 @@ public class IdentityCoreRouteBuilder : RouteBuilder
 
         // ── Management endpoints (all with WireTap) ──
 
-        // 8. Manage Apps — E2: Idempotency-Key cache (no redb-tx wrap).
-        // ApplicationManagementProcessor uses 6 OpenIddict service calls (DI-scoped, separate
-        // IRedbService instance) — a route-level redb-tx held the per-exchange writer lock
-        // while OpenIddict's manager opened a SECOND SqliteRedbConnection for the actual
-        // CreateAsync/UpdateAsync/DeleteAsync, eating ~34s observed in admin POST /applications.
-        // wrapInRedbTx:false keeps idempotency caching but skips redb-tx.
+        // 8. Manage Apps — E2: Idempotency-Key cache, no redb-tx wrap (wrapInRedbTx:false).
+        // ApplicationManagementProcessor does its work through OpenIddict's ApplicationManager, and
+        // each Create/Update/Delete is a single atomic manager operation — there is no multi-row
+        // write here for a route transaction to make atomic. The idempotency cache below is
+        // independent of any DB transaction, so it stays. (Historically a route wrap here also
+        // deadlocked the manager's own connection against the route lock — the connection-binding
+        // fix that restored WithRedbTx on Token would remove that hazard, but there is still no
+        // atomicity to gain, so the wrap stays off on purpose.)
         WithIdempotentTx(
             From(IdentityEndpoints.ManageApps).RouteId(IdentityEndpoints.RouteIds.ManageApps),
             "manage-apps",

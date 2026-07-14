@@ -111,8 +111,16 @@ internal static class IdentityModuleHost
         // Wrap the host scope factory in a marker singleton so we DO NOT shadow the
         // child container's own IServiceScopeFactory registration (doing so would make
         // childSp.CreateScope() open scopes against the host container instead).
-        var hostScopeFactoryHolder = new HostRedbScopeFactoryHolder(hostRedbScopeFactory);
+        var hostScopeFactoryHolder = new HostRedbScopeFactoryHolder(hostRedbScopeFactory, redbInstanceName);
         services.AddSingleton(hostScopeFactoryHolder);
+
+        // Carries the exchange this child scope was opened for. Seeded by whoever opens the scope
+        // (IdentityRouteContextExtensions / RedbRouteOpenIddictServerHandler); read by HostRedbScope,
+        // which uses it to bind IRedbService to the exchange's connection instead of opening a
+        // second one. Without this, nothing inside the child container can join a route-level redb
+        // transaction — see HostRedbScope's remarks and doc/PERF_RULES.md rule 1.
+        services.AddScoped<IdentityExchangeAccessor>();
+
         services.AddScoped<HostRedbScope>();
         services.AddScoped<IRedbService>(sp => sp.GetRequiredService<HostRedbScope>().Service);
         // 9f: bridge ISqlDialect from the host scope alongside IRedbService so listeners
@@ -170,37 +178,98 @@ internal sealed class ChildHostDisposeListener : IRouteLifecycleListener
 }
 
 /// <summary>
-/// Per-child-scope wrapper around a host-side <see cref="IServiceScope"/> that exposes
-/// <see cref="IRedbService"/> with deterministic disposal: when the Identity child scope
-/// disposes (end of request), the bridged host scope disposes too, releasing the
-/// underlying Npgsql connection back to the pool.
+/// Bridges <see cref="IRedbService"/> from Tsak's host container into Identity's child container,
+/// and — critically — makes sure that inside a route it is the <b>same</b> instance, and therefore
+/// the same DB connection, that any route-level redb transaction was opened on.
 /// </summary>
 /// <remarks>
-/// This is the bridge between two independent DI universes: Tsak's host container (where
-/// IRedbService is registered Scoped via <c>AddRedbPro</c> or named via <c>RedbInstanceFactory</c>)
-/// and Identity's child container (which OpenIddict uses to resolve its stores per
-/// per-exchange scope opened by redb.Route). Without this 1:1 mapping the alternative
-/// would be a Singleton bridge that captive-captures one IRedbService for the lifetime
-/// of the module — serialising every concurrent OpenIddict store call on a single
-/// connection.
+/// <para>
+/// Two independent DI universes: Tsak's host container (where <see cref="IRedbService"/> is Scoped
+/// via <c>AddRedbPro</c>, or named via <c>RedbInstanceFactory</c>) and Identity's child container,
+/// from which OpenIddict resolves its stores. This class is the bridge.
+/// </para>
+/// <para>
+/// <b>The bug this fixes.</b> It used to open its own host scope in the constructor —
+/// unconditionally, eagerly. That is a <b>second</b> connection. A route-level transaction
+/// (<c>BeginRedbTransaction</c>) runs on the connection redb.Route caches on the exchange, so the
+/// OpenIddict stores were writing on a different one: no atomicity at all, and worse — the second
+/// connection blocks on row locks the first one holds, while the first is awaiting the very call
+/// that opened the second. Deadlock, cleared only by the 30s transaction timeout. That is exactly
+/// rule 1 of <c>doc/PERF_RULES.md</c> ("do not open a fresh DI scope inside a route processor that
+/// runs under a transaction"), and it is why <c>WithRedbTx</c> had to be stripped from the token
+/// route. It is not a SQLite quirk: the rule is written about Npgsql. SQLite (single writer) only
+/// makes the symptom louder.
+/// </para>
+/// <para>
+/// <b>The fix.</b> When the scope belongs to an exchange, ask redb.Route for the exchange's
+/// <see cref="IRedbService"/> — the very instance it caches in <c>IExchange.Properties</c> and hands
+/// to <c>BeginRedbTransaction</c>. One connection, one transaction, everybody enlisted. Only when
+/// there is no exchange (hosted services, cleanup timers, schema init) do we fall back to opening a
+/// host scope of our own, which is correct: there is no ambient transaction to join.
+/// </para>
+/// <para>
+/// Resolution is lazy. A scope that never touches the DB no longer pays for a connection.
+/// </para>
 /// </remarks>
 internal sealed class HostRedbScope : IDisposable, IAsyncDisposable
 {
-    private readonly IServiceScope _hostScope;
-    public IRedbService Service { get; }
-    public ISqlDialect Dialect { get; }
+    private readonly HostRedbScopeFactoryHolder _holder;
+    private readonly IdentityExchangeAccessor _accessor;
+    private readonly IRouteContext _routeContext;
+    private readonly string? _redbName;
 
-    public HostRedbScope(HostRedbScopeFactoryHolder holder)
+    private IServiceScope? _ownScope;   // opened ONLY on the no-exchange path
+    private IRedbService? _service;
+    private ISqlDialect? _dialect;
+
+    public HostRedbScope(
+        HostRedbScopeFactoryHolder holder,
+        IdentityExchangeAccessor accessor,
+        IRouteContext routeContext)
     {
-        _hostScope = holder.Factory.CreateScope();
-        Service = _hostScope.ServiceProvider.GetRequiredService<IRedbService>();
-        Dialect = _hostScope.ServiceProvider.GetRequiredService<ISqlDialect>();
+        _holder = holder;
+        _accessor = accessor;
+        _routeContext = routeContext;
+        _redbName = holder.RedbInstanceName;
     }
 
-    public void Dispose() => _hostScope.Dispose();
+    public IRedbService Service => _service ??= ResolveService();
 
-    public ValueTask DisposeAsync() =>
-        _hostScope is IAsyncDisposable a ? a.DisposeAsync() : new ValueTask(Task.Run(_hostScope.Dispose));
+    public ISqlDialect Dialect => _dialect ??= ResolveDialect();
+
+    private IRedbService ResolveService()
+    {
+        // In-route: take the exchange's instance. This is the whole point — it is the connection
+        // BeginRedbTransaction opened the transaction on, so our writes land inside it.
+        if (_accessor.Exchange is { } exchange)
+            return _routeContext.GetRedbService(_redbName ?? string.Empty, exchange);
+
+        // Out-of-route (timers, hosted services, init): no ambient transaction exists, so an own
+        // scope is both safe and necessary.
+        return EnsureOwnScope().ServiceProvider.GetRequiredService<IRedbService>();
+    }
+
+    private ISqlDialect ResolveDialect()
+    {
+        // The dialect is a stateless SQL-shape helper, not a connection — but resolve it from the
+        // exchange's provider when we can, rather than opening a scope purely to reach it.
+        if (_accessor.Exchange?.ServiceProvider?.GetService<ISqlDialect>() is { } fromExchange)
+            return fromExchange;
+
+        return EnsureOwnScope().ServiceProvider.GetRequiredService<ISqlDialect>();
+    }
+
+    private IServiceScope EnsureOwnScope() => _ownScope ??= _holder.Factory.CreateScope();
+
+    public void Dispose() => _ownScope?.Dispose();
+
+    public ValueTask DisposeAsync()
+    {
+        if (_ownScope is null) return ValueTask.CompletedTask;
+        var scope = _ownScope;
+        _ownScope = null;
+        return scope is IAsyncDisposable a ? a.DisposeAsync() : new ValueTask(Task.Run(scope.Dispose));
+    }
 }
 
 /// <summary>
@@ -212,5 +281,17 @@ internal sealed class HostRedbScope : IDisposable, IAsyncDisposable
 internal sealed class HostRedbScopeFactoryHolder
 {
     public IServiceScopeFactory Factory { get; }
-    public HostRedbScopeFactoryHolder(IServiceScopeFactory factory) => Factory = factory;
+
+    /// <summary>
+    /// The named redb instance this module runs on (already trimmed of the leading '#'), or null
+    /// for the default unnamed one. <see cref="HostRedbScope"/> needs it to ask redb.Route for the
+    /// exchange's instance under the same name the route transaction was opened on.
+    /// </summary>
+    public string? RedbInstanceName { get; }
+
+    public HostRedbScopeFactoryHolder(IServiceScopeFactory factory, string? redbInstanceName = null)
+    {
+        Factory = factory;
+        RedbInstanceName = redbInstanceName;
+    }
 }

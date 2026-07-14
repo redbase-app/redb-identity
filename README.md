@@ -103,17 +103,22 @@ Every public endpoint in Identity is registered on a `direct-vm://identity-*` ro
 // Inside another .tpkg module loaded into the same Tsak worker
 public class CheckoutRoutes : RouteBuilder
 {
+    private IProducerTemplate _identity = null!;   // request-reply into Identity, in-process
+
     protected override void Configure()
     {
+        _identity = new ProducerTemplate(Context!);
+        _identity.Start();
+
         From("rabbitmq:checkout.orders")
             // Need a service-account access token to call a downstream API?
-            // Just hit Identity's token endpoint inline — same process, no socket.
+            // Just hit Identity's token endpoint right here — same process, no socket.
             .Process(async (e, ct) =>
             {
-                var token = await e.Context.RequestBody<TokenResponse>(
+                var token = await _identity.RequestBody<TokenResponse>(
                     IdentityEndpoints.Token,                // "direct-vm://identity-token"
-                    new { grant_type = "client_credentials", client_id = "checkout-svc", ... });
-                e.In.SetHeader("Authorization", $"Bearer {token.AccessToken}");
+                    new { grant_type = "client_credentials", client_id = "checkout-svc", /* ... */ });
+                e.In.SetHeader("Authorization", $"Bearer {token!.AccessToken}");
             })
             .To("http://pricing-api/quote");
     }
