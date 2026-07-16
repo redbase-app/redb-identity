@@ -12,7 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\redb.Identity.Core\redb.Identity.Core.csproj" />
-    <PackageReference Include="redb.Route.Ldap" Version="3.3.1" />
+    <PackageReference Include="redb.Route.Ldap" Version="3.3.3" />
   </ItemGroup>
 
   <ItemGroup>

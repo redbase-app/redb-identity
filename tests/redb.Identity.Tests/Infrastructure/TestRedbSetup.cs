@@ -38,6 +38,7 @@ public static class TestRedbSetup
 
     private static readonly Lazy<string?> LicenseToken = new(LoadLicenseToken);
     private static int _sqliteExtensionResolved;
+    private static int _sqliteScratchCleaned;
 
     public static Provider SelectedProvider =>
         (Environment.GetEnvironmentVariable("REDB_PROVIDER")?.Trim().ToLowerInvariant()) switch
@@ -169,7 +170,25 @@ public static class TestRedbSetup
         if (!string.IsNullOrEmpty(pinned))
             return pinned;
 
-        return BuildSqliteConnectionString(CreateSqliteScratchPath());
+        var path = CreateSqliteScratchPath();
+
+        // Once per test process, before anyone opens it: wipe a scratch DB (and its WAL/SHM) left
+        // behind by a PREVIOUS run. A Ctrl-C during an open transaction leaves the file in
+        // "database is locked" state, and because the scratch path is fixed (intentionally — some
+        // tests need several redb instances pointing at one physical DB) the next run inherits that
+        // lock and stalls on retries until the 30s timeout, cascading across the whole suite.
+        // Guarded with Interlocked so that when concurrent fixtures resolve the same fixed path,
+        // only the FIRST caller deletes — never a live file another fixture has already opened.
+        if (Interlocked.Exchange(ref _sqliteScratchCleaned, 1) == 0)
+        {
+            foreach (var f in new[] { path, path + "-wal", path + "-shm" })
+            {
+                try { if (File.Exists(f)) File.Delete(f); }
+                catch { /* still held by something → leave it, best-effort */ }
+            }
+        }
+
+        return BuildSqliteConnectionString(path);
     }
 
     /// <summary>

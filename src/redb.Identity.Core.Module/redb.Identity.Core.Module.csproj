@@ -51,12 +51,12 @@
       already provides redb.Tsak.Core.dll and redb.Route.* in its own Default
       ALC).
     -->
-    <PackageReference Include="redb.Tsak.Core" Version="3.3.1" />
-    <PackageReference Include="redb.Route" Version="3.3.1" />
-    <PackageReference Include="redb.Route.Core" Version="3.3.1" />
+    <PackageReference Include="redb.Tsak.Core" Version="3.3.3" />
+    <PackageReference Include="redb.Route" Version="3.3.3" />
+    <PackageReference Include="redb.Route.Core" Version="3.3.3" />
     <!-- W1: outbound HTTP transport for webhook delivery via redb.Route. The
          host (Tsak.Worker) already ships redb.Route.Http; compile-time only. -->
-    <PackageReference Include="redb.Route.Http" Version="3.3.1" />
+    <PackageReference Include="redb.Route.Http" Version="3.3.3" />
   </ItemGroup>
 
   <ItemGroup>

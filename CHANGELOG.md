@@ -27,6 +27,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > package together. Per-package divergence may begin in the 1.x patch series
 > once the public surface stabilises. NuGet publication follows the source cut.
 
+## [1.2.2] — 2026-07-15
+
+> **Why the bump.** **No functional changes to redb.Identity** — this release exists to pick up the
+> **fixed redb storage**, and it is a patch because only dependencies moved.
+>
+> `redb.Identity.Core` 1.2.1 depends on **`redb.Core` 3.3.0**, whose embedded `redb_init.sql` carried an
+> `ALTER FUNCTION ... OWNER TO postgres` that failed schema initialization under a non-superuser database
+> owner — the whole first-start init rolled back. Identity is redb-backed (every store — Application,
+> Authorization, Token, Scope, KeyRing, Session, Audit — lives in redb storage), so an Identity
+> deployment on a least-privilege database could not start. The fix landed in `redb.Core` 3.3.3, and
+> without this rebuild it would never reach Identity users.
+>
+> 1.2.2 is built against **redb.Core / redb.Route / redb.Tsak 3.3.3** (was 3.3.0 / 3.3.1 / 3.3.1).
+>
+> **Why not 3.3.3.** redb.Identity keeps its own **1.x** line and does not follow the ecosystem number
+> — but it is **released together with the ecosystem**, because it depends on redb storage. A fix in
+> redb core is always a redb.Identity release too.
+
 ## [1.2.1] — 2026-07-15
 
 **Token issuance is atomic again — and the addon story is now true in a shipped build.** 1.2.0

@@ -127,6 +127,21 @@ public class AuditElasticsearchIntegrationTests : IAsyncLifetime
             Options.Create(auditOptions)));
 
         await _ctx.Start();
+
+        // Purge TestEs* docs left in the index by a PREVIOUS run. MultipleEvents_AllIndexed asserts
+        // an EXACT hit count (sends 3, expects 3), so without this a second run sees 6, a third 9,
+        // and so on — the same "not isolated from the last run" trap as the SQLite scratch file.
+        // Best-effort: a missing index or an ES hiccup must not fail setup (the tests themselves
+        // skip cleanly when ES is unreachable). refresh=true so the delete is visible immediately.
+        try
+        {
+            await _http.PostAsync(
+                $"{EsNodes}/{EsIndex}/_delete_by_query?refresh=true&conflicts=proceed",
+                new StringContent(
+                    "{\"query\":{\"prefix\":{\"eventType.keyword\":\"TestEs\"}}}",
+                    System.Text.Encoding.UTF8, "application/json"));
+        }
+        catch { /* ES not reachable / index absent → nothing to purge */ }
     }
 
     public async Task DisposeAsync()
