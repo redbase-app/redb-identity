@@ -23,9 +23,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > The pre-1.0 history below is preserved as `1.0.0-preview.*` — the engine ran
 > in internal Tsak deployments through the whole `direct-vm://`-first design
 > phase; those entries collapse that history. Versioning is unified across all
-> packages in the table above for the 1.x line — every release bumps every
-> package together. Per-package divergence may begin in the 1.x patch series
-> once the public surface stabilises. NuGet publication follows the source cut.
+> packages in the table above — every release bumps every package together.
+>
+> **From `3.4.0` onward redb.Identity shares the ecosystem version** (`redb` core / `redb.Route` /
+> `redb.Tsak`) instead of its own `1.x` line — see the `[3.4.0]` entry. The `1.0.1`–`1.2.2` tags stay
+> as valid history; the jump to `3.4.0` is a realignment onto the shared number, not a breaking change.
+> NuGet publication follows the source cut.
+
+## [3.4.0] — 2026-07-27
+
+> **Why the jump from 1.2.2 to 3.4.0 — aligning with the ecosystem, not a breaking rewrite.**
+> Until now redb.Identity carried its own **1.x** line while the rest of the stack (`redb` core,
+> `redb.Route`, `redb.Tsak`) moved together on **3.x**. Running two numbering schemes made "which
+> Identity works with which core/Route/Tsak" a lookup instead of a glance. From now on redb.Identity
+> **shares the ecosystem version**: it jumps straight to **3.4.0** to sit on the same number as the
+> `redb.Route` 3.4.0 it is built against, and every future ecosystem release bumps Identity with it.
+>
+> This is a **version realignment, not a semver-breaking release** — there are no breaking API changes
+> here (the only feature, JAR, is off by default and additive; see below). The major digit changes
+> because the number is now the ecosystem's, not because Identity's contract broke. The old 1.x tags
+> remain valid history; 3.4.0 simply continues the same package on the shared number.
+
+### Added
+
+- **JWT-Secured Authorization Request — JAR (Z7 / RFC 9101), off by default.** `/connect/authorize`
+  now accepts a signed authorization request, gated behind `Features.EnableJar` (default `false`,
+  so every prior release behaves identically — a `request` parameter is still answered with
+  `request_not_supported`). When enabled:
+  - a signed **`request`** object (inline) or **`request_uri`** (by reference, fetched over HTTP) is
+    verified against the client's registered keys, and the parameters inside the JWT take precedence
+    over the query string (RFC 9101 §6.1);
+  - **`alg: none` is never accepted** — an unsigned request object drops the integrity guarantee JAR
+    exists for; nor is a wrong-key signature, a mismatched inner `client_id`, an expired object, or
+    (when the client declares `RequestObjectSigningAlg` under `JarEnforcementMode=Enforce`) a
+    mismatched algorithm. Every failure is `invalid_request_object`;
+  - **`request_uri` fetches are SSRF-guarded** (`OutboundUrlGuard`) and size/timeout-bounded; PAR's
+    `urn:ietf:params:oauth:request_uri:*` is left untouched;
+  - discovery advertises `request_parameter_supported`, `request_uri_parameter_supported` and
+    `request_object_signing_alg_values_supported` — **only when JAR is on**, so discovery never
+    promises what the endpoint won't do.
+  - The formerly write-only client fields `RequestObjectSigningAlg` etc. now do something (see below).
+  - New config: `JarOptions` (`Jar` section) — enforcement mode `Off`/`LogOnly`/`Enforce`, allowed
+    algorithms (asymmetric only), clock skew, size limits, and the `request_uri` SSRF knobs.
+  - Implemented as OpenIddict server handlers (`ValidateRequestObjectHandler`), replacing the built-in
+    handlers that unconditionally rejected `request` / `request_uri`. 15 handler tests + a live
+    conformance demo (`demo_jar_request_object.ps1`, wired into `run_all`).
+- **Client public-key resolver — `IClientKeyResolver`** (Z7 / RFC 9101, phase 1). Resolves the keys
+  that verify what a **client** signed: a JAR request object and a `private_key_jwt` assertion.
+  Two sources — the inline `ApplicationProps.JsonWebKeySet`, or `JwksUri`, fetched and cached via
+  `ConfigurationManager<JsonWebKeySet>` (background refresh on a TTL plus a rate-limited forced
+  refresh on a `kid` miss, so a client rotating its keys does not break sign-in until the TTL expires).
+  - **Fails closed.** An unreachable or malformed JWKS yields no keys, so there is nothing to verify
+    against and the caller rejects. "Could not check" is never treated as "valid".
+  - **A configured-but-broken inline JWKS does not fall back to `jwks_uri`.** A typo in the pasted
+    key set must stay visible instead of being masked by a silent switch to another key source.
+  - **Asymmetric algorithms only.** HMAC (`HS*`) is impossible: `ClientSecret` is stored as a BCrypt
+    hash and verifying an HMAC needs the original secret. FAPI 2.0 forbids `HS*` for request objects
+    anyway.
+  - The service is **inert** for now — registered but called from no path, so server behaviour is
+    unchanged. Wiring it into JAR is phase 2; into `private_key_jwt`, a separate step.
+- **`OutboundUrlGuard` — SSRF filter for URLs that arrive from outside** (`jwks_uri`, later the JAR
+  `request_uri`). Rejects anything that is not an absolute HTTPS URL, and anything resolving to a
+  non-public address: loopback, RFC 1918, link-local — including `169.254.169.254`, the cloud
+  metadata endpoint that hands instance credentials to whatever can reach it — CGNAT, IPv6
+  unique-local, and the IPv4-mapped forms (`::ffff:10.0.0.1`) that a naive check walks straight past.
+  The check runs **before** a socket is opened. Known limitation: this does not close DNS rebinding,
+  which would require pinning the validated address onto the connection itself.
+- **`ClientKeysOptions`** (`ClientKeys` section of `RedbIdentityOptions`) — cache lifetime, minimum
+  refresh interval, fetch timeout, maximum document size, `RequireHttps`,
+  `AllowPrivateNetworkTargets`. The last two are development-only relaxations.
+- **40 tests** (`tests/Security/`): 29 for the SSRF guard — including one asserting that 172.32 and
+  172.15 are public and must NOT be blocked — and 11 for the resolver. All stay offline: attempting
+  a network call fails the test by itself.
+
+### Docs
+
+- **`doc/JAR_RFC9101_PLAN.md`** — JAR implementation plan: six phases, risks (SSRF, `alg:none`,
+  algorithm substitution), a staged `Off → LogOnly → Enforce` rollout, and sizing. Records a verified
+  finding: **OpenIddict 6.3.0 does not support request objects** — its assembly carries
+  `ValidateRequestParameter` and the `request_not_supported` string, but nothing that parses a request
+  object or checks its signature — and `request_uri` exists only as a PAR URN. `Z7` now links here.
+- `ApplicationProps.RequestObjectSigningAlg` is **now enforced** under `JarEnforcementMode=Enforce`
+  (was previously stored and ignored). `...EncryptionAlg` / `...EncryptionEnc` remain stored-only —
+  request-object encryption (JWE) is the deferred phase 4. `JwksUri` is now resolved (phase 1).
+
+### Conformance impact (OpenID Foundation Basic OP)
+
+Advertising JAR changed the local Basic-OP run from **1 SKIPPED / 4 REVIEW** to **2 SKIPPED / 3 REVIEW**
+— still **0 FAILED**. This is a net improvement, not a regression, and `OPENID_CERTIFICATION.md` §4.3
+explains it in full for anyone reading the badge:
+
+- Both SKIPPED modules test the **unsigned (`alg:none`) request object**. The suite skips them when the
+  server does not advertise `none` in `request_object_signing_alg_values_supported` — which is exactly
+  our stance: we support **signed** request objects only, because `alg:none` is an unsigned JWT that
+  defeats JAR's integrity guarantee and is forbidden by FAPI 2.0. SKIPPED here = "the server declined
+  an unsafe mode", the secure answer.
+- One module (`ensure-request-object-with-redirect-uri`) moved REVIEW→SKIPPED precisely *because* the
+  server now genuinely processes signed request objects and advertises that honestly, instead of the
+  earlier no-support state that sent it down a screenshot path. Turning either skip into a pass would
+  require accepting `alg:none` — a security regression we will not make.
 
 ## [1.2.2] — 2026-07-15
 

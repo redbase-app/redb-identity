@@ -8,10 +8,14 @@ conformance suite.
 > **Status — preparing for OpenID Certification.** In local runs of the official
 > OIDF conformance suite against a live server over native HTTPS:
 > **Config OP — zero failures**, and **Basic OP — 35 modules, zero failures**
-> (29 PASSED, 4 REVIEW awaiting a screenshot, 1 WARNING that is a deliberate
-> extension, 1 SKIPPED optional feature). Every defect the suite found is fixed;
+> (29 PASSED, 3 REVIEW awaiting a screenshot, 1 WARNING that is a deliberate
+> extension, 2 SKIPPED optional features). Every defect the suite found is fixed;
 > §4.1 lists them, including the ones we had previously — and wrongly — written
 > off as harness limitations.
+>
+> **Both SKIPPED modules are `alg:none` (unsigned) request objects — skipped *because* the
+> server refuses to advertise the unsafe mode, which is the correct, secure answer, not a gap.**
+> See §4.3. `FAILED` is `0`.
 
 It is a **status / spec** document, not a marketing claim: it tracks our own
 local conformance runs and the protocol work that makes redb.Identity
@@ -171,15 +175,15 @@ suite](https://gitlab.com/openid/conformance-suite) locally (Docker,
   | Result | Modules | Notes |
   |--------|---------|-------|
   | PASSED | 29 | |
-  | REVIEW | 4 | the suite requires a human-uploaded screenshot — pass-equivalent |
+  | REVIEW | 3 | the suite requires a human-uploaded screenshot — pass-equivalent |
   | WARNING | 1 | `oidcc-server` — two deliberate id_token claims (below) |
-  | SKIPPED | 1 | unsigned request object (RFC 9101) — we do not advertise it, so the suite correctly skips |
+  | SKIPPED | 2 | **both** are `alg:none` (unsigned) request objects — skipped because we correctly refuse the unsafe mode; see §4.3 |
   | **FAILED** | **0** | |
 
-  The four REVIEW modules (`prompt-login`, `max-age-1`,
-  `ensure-registered-redirect-uri`, `ensure-request-object-with-redirect-uri`)
-  behave correctly end to end; the suite additionally wants a screenshot as
-  certification evidence and therefore never auto-finishes them.
+  The three REVIEW modules (`prompt-login`, `max-age-1`,
+  `ensure-registered-redirect-uri`) behave correctly end to end; the suite
+  additionally wants a screenshot as certification evidence and therefore never
+  auto-finishes them.
 
 ### 4.1 What the suite actually found
 
@@ -232,6 +236,53 @@ That one means nothing to a client and there was no defending it
 (`StripInternalClaimsFromIdentityToken`; kept on the access_token, where
 introspection needs it). We kept the two we can answer for and cut the one we
 could not.
+
+### 4.3 The two SKIPPED modules are a security choice, not a gap
+
+Both skipped modules test the **unsigned** (`alg:none`) request object:
+
+- `oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported`
+- `oidcc-ensure-request-object-with-redirect-uri`
+
+Read the suite's own words on them: each is *"skipped if the server discovery
+document does not indicate support for unsigned request objects — i.e. if
+`alg:none`"*, i.e. if `request_object_signing_alg_values_supported` does not
+contain `none`. Ours does not:
+
+```json
+"request_parameter_supported": true,
+"request_uri_parameter_supported": true,
+"request_object_signing_alg_values_supported": ["RS256", "RS384", "RS512",
+  "PS256", "PS384", "PS512", "ES256", "ES384", "ES512"]
+```
+
+An `alg:none` request object is a JWT **with no signature** — it throws away the
+exact integrity guarantee that JWT-Secured Authorization Requests (RFC 9101)
+exist to provide, and lets the authorization parameters be tampered with in
+transit. We refuse it on purpose:
+
+- **FAPI 2.0 forbids `alg:none`** for request objects and mandates asymmetric signing;
+- accepting it would open a request-parameter-tampering hole.
+
+So the suite sees "this server supports request objects, but only **signed** ones"
+and correctly marks the two `alg:none` tests **not applicable**. `SKIPPED` here
+means *"the server declined to advertise an unsafe mode"* — it is the secure
+answer, and Basic OP treats it as such (`FAILED = 0`).
+
+**What actually changed since the earlier run.** Before we implemented RFC 9101,
+the server advertised no request-object support at all, and
+`ensure-request-object-with-redirect-uri` ran down a screenshot (REVIEW) path.
+Now that the server genuinely processes **signed** request objects (both `request`
+and `request_uri`) and honestly advertises exactly that, the suite moves the
+`alg:none` variants to SKIPPED. The count went 1→2 SKIPPED and 4→3 REVIEW; the
+real gain is that signed request objects now work end-to-end rather than being
+attested by a screenshot. Turning either skip into a pass would require
+advertising and accepting `alg:none` — a deliberate security regression we will
+not make.
+
+> For readers scanning the badge: **two skips, zero failures.** Both skips are the
+> server refusing an unsigned-JWT mode that the OAuth security profiles (FAPI 2.0)
+> tell it to refuse. That is the correct outcome, not a missing feature.
 
 ---
 

@@ -5,7 +5,6 @@ using Microsoft.Extensions.Options;
 using OpenIddict.Server;
 using redb.Core;
 using redb.Tsak.Contracts;
-using redb.Tsak.Core.Contracts;
 
 namespace redb.Identity.Core.Health;
 

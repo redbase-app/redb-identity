@@ -21,6 +21,9 @@ internal sealed class TestMessage : IMessage
             clone.Headers[h.Key] = h.Value;
         return clone;
     }
+
+    // Test double: the deep-copy distinction (see IMessage.Snapshot) is irrelevant here.
+    public IMessage Snapshot() => Clone();
 }
 
 /// <summary>
@@ -41,5 +44,6 @@ internal sealed class TestExchange : IExchange
     public bool IsStopped { get; private set; }
     public void Stop() => IsStopped = true;
     public IExchange Clone() => throw new NotSupportedException("Clone not needed in tests");
+    public IExchange Snapshot() => throw new NotSupportedException("Snapshot not needed in tests");
     public ValueTask DisposeAsync() => default;
 }

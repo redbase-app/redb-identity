@@ -69,4 +69,18 @@ public sealed class IdentityFeatureFlags
     /// Default: <c>false</c>.
     /// </summary>
     public bool EnableDeviceCodeFlow { get; set; }
+
+    /// <summary>
+    /// JWT-Secured Authorization Request — JAR (RFC 9101). When <c>true</c>, <c>/connect/authorize</c>
+    /// accepts a signed <c>request</c> object carrying the authorization parameters, verifies it
+    /// against the client's published keys, and uses the parameters from inside the JWT.
+    /// Default: <c>false</c> — the request parameter is rejected with <c>request_not_supported</c>,
+    /// which is the behaviour of every release before this flag existed.
+    /// <para>
+    /// Unsigned request objects (<c>alg: none</c>) are never accepted, flag or not: a request object
+    /// without a signature drops exactly the integrity guarantee JAR exists to provide. FAPI 2.0
+    /// forbids them as well.
+    /// </para>
+    /// </summary>
+    public bool EnableJar { get; set; }
 }

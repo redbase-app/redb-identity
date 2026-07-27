@@ -213,7 +213,7 @@ public static class TestRedbSetup
     /// (get_object_json / pvt_build_*_sql live inside it). Pro doesn't,
     /// but setting the path is harmless. Best-effort: honour
     /// REDB_SQLITE_EXTENSION if set, else walk parents looking for
-    /// redb.SQLite/native/build/redb.{dll,so,dylib}. Runs once per
+    /// redb.SQLite/native/build/redbsqlite.{dll,so,dylib}. Runs once per
     /// process via interlocked flag.
     /// </summary>
     private static void EnsureSqliteNativeExtensionResolved()
@@ -233,7 +233,7 @@ public static class TestRedbSetup
                    : ".so";
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
         {
-            var candidate = Path.Combine(dir.FullName, "redb.SQLite", "native", "build", "redb" + suffix);
+            var candidate = Path.Combine(dir.FullName, "redb.SQLite", "native", "build", "redbsqlite" + suffix);
             if (File.Exists(candidate))
             {
                 SqliteDataSource.NativeExtensionPath = candidate;

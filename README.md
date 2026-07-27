@@ -15,6 +15,7 @@
 [![OAuth](https://img.shields.io/badge/OAuth-2.1_%2B_RFC_6749-4A148C)](#oauth-2x-core)
 [![DPoP](https://img.shields.io/badge/DPoP-RFC_9449-1565C0)](#oauth-2x-core)
 [![PAR](https://img.shields.io/badge/PAR-RFC_9126-1565C0)](#oauth-2x-core)
+[![JAR](https://img.shields.io/badge/JAR-RFC_9101-1565C0)](#oauth-2x-core)
 [![DCR](https://img.shields.io/badge/DCR-RFC_7591%2F7592-1565C0)](#oauth-2x-core)
 [![SCIM](https://img.shields.io/badge/SCIM-2.0_(RFC_7643%2F7644)-2E7D32)](#scim-20-rfc-7643--7644)
 [![FIDO2](https://img.shields.io/badge/FIDO2-WebAuthn_L2-006064)](#mfa)
@@ -27,7 +28,7 @@
 
 | If you want… | redb.Identity gives you… |
 |---|---|
-| A full OIDC / OAuth 2.1 server without ASP.NET coupling | A `direct-vm://`-only core: `token`, `authorize`, `userinfo`, `introspect`, `revoke`, `jwks`, `.well-known/openid-configuration`, PAR, Device Code, Dynamic Registration. |
+| A full OIDC / OAuth 2.1 server without ASP.NET coupling | A `direct-vm://`-only core: `token`, `authorize`, `userinfo`, `introspect`, `revoke`, `jwks`, `.well-known/openid-configuration`, PAR, JAR (signed request objects), Device Code, Dynamic Registration. |
 | To call Identity from another in-process module **with no HTTP** | `To("direct-vm://identity-token")` from your own `RouteBuilder`. Zero serialization, zero loopback, zero TLS handshake, same exchange. |
 | HTTP / gRPC / RabbitMQ / SignalR endpoints | Drop in the matching facade `.tpkg`. Each facade is a thin transport bridge — no business logic. |
 | A drop-in user / group / scope / client / consent / audit / session store | Built-in storage via [redb.Core](https://github.com/redbase-app/redb) typed `*Props` objects. Code-first schemes, no migrations. |
@@ -37,8 +38,8 @@
 | Federation | OIDC / GitHub external providers, stored as redb props objects, admin CRUD. |
 | Backchannel logout that works across replicas | RFC 8417-style revoked-SID list (`/revoked-sids/add` + `/since`) + push-and-poll fallback. |
 | SCIM 2.0 provisioning | Users + Groups + Bulk endpoints (RFC 7644). |
-| RFC compliance | OIDC Core, OAuth 2.1, RFC 7662 (Introspection), RFC 7591/7592 (DCR), RFC 8628 (Device Code), RFC 9126 (PAR), RFC 9449 (DPoP), RFC 8417 / OIDC Backchannel Logout. |
-| Conformance you can check | Passes the **official OpenID Foundation conformance suite** — Config OP **0 failures**, Basic OP code-flow modules pass. [Details.](OPENID_CERTIFICATION.md) |
+| RFC compliance | OIDC Core, OAuth 2.1, RFC 7662 (Introspection), RFC 7591/7592 (DCR), RFC 8628 (Device Code), RFC 9126 (PAR), **RFC 9101 (JAR — JWT-Secured Authorization Request)**, RFC 9449 (DPoP), RFC 8417 / OIDC Backchannel Logout. |
+| Conformance you can check | Passes the **official OpenID Foundation conformance suite** — Config OP **0 failures**, Basic OP **0 failures** (29 pass / 3 review / 1 deliberate warning / 2 skipped). The two skips are the server **refusing unsigned `alg:none` request objects** — the secure answer FAPI 2.0 mandates, not a missing feature. [Details.](OPENID_CERTIFICATION.md) |
 
 ## Install (NuGet)
 

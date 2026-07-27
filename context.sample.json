@@ -167,7 +167,13 @@
           "EnableFederation": true,
           "EnableDynamicRegistration": true,
           "EnablePushedAuthorization": true,
-          "EnableDeviceCodeFlow": true
+          "EnableDeviceCodeFlow": true,
+          "EnableJar": true
+        },
+        "Jar": {
+          "//": "Dev/conformance only: the request_uri is fetched from the suite or a demo HTTP listener on loopback, so private targets and plain http are allowed. PROD: remove this section (defaults refuse both).",
+          "RequestUriAllowPrivateNetworkTargets": true,
+          "RequestUriRequireHttps": false
         },
 
         "DynamicRegistrationAllowedGrantTypes": [ "authorization_code", "refresh_token", "password", "client_credentials", "urn:ietf:params:oauth:grant-type:device_code", "urn:ietf:params:oauth:grant-type:token-exchange" ],
@@ -602,7 +608,13 @@
           "EnableFederation": true,
           "EnableDynamicRegistration": true,
           "EnablePushedAuthorization": true,
-          "EnableDeviceCodeFlow": true
+          "EnableDeviceCodeFlow": true,
+          "EnableJar": true
+        },
+        "Jar": {
+          "//": "Dev/conformance only: the request_uri is fetched from the suite or a demo HTTP listener on loopback, so private targets and plain http are allowed. PROD: remove this section (defaults refuse both).",
+          "RequestUriAllowPrivateNetworkTargets": true,
+          "RequestUriRequireHttps": false
         },
         "//Features": "Mirror of Identity:Features (identity.core context). Tsak isolates context property buckets, so the HTTP facade can't read identity.core's Identity:Features directly — keep this list in sync.",
 

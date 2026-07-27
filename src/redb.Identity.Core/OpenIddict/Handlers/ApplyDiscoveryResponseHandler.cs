@@ -137,6 +137,27 @@ internal sealed class ApplyDiscoveryResponseHandler
                     JsonSerializer.Serialize(_identityOptions.Dpop.AllowedSigningAlgorithms));
         }
 
+        // Z7 (RFC 9101): advertise JAR only when it is actually on. Announcing support the server
+        // does not provide is the exact mistake that left oidcc-claims-essential a WARNING
+        // (discovery said one thing, the endpoint did another), so this is gated on the same flag
+        // the handler checks. request_uri support tracks JarOptions.EnableRequestUri.
+        if (_identityOptions.Features.EnableJar)
+        {
+            context.Response.RemoveParameter("request_parameter_supported");
+            context.Response["request_parameter_supported"] = true;
+
+            context.Response.RemoveParameter("request_uri_parameter_supported");
+            context.Response["request_uri_parameter_supported"] = _identityOptions.Jar.EnableRequestUri;
+
+            var jarAlgs = _identityOptions.Jar.AllowedSigningAlgorithms;
+            if (jarAlgs.Length > 0)
+            {
+                context.Response.RemoveParameter("request_object_signing_alg_values_supported");
+                context.Response["request_object_signing_alg_values_supported"] =
+                    JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(jarAlgs));
+            }
+        }
+
         // Federation providers (non-standard extension). Skip placeholder entries
         // (ClientId / Authority = REPLACE_ME) so discovery stays consistent with
         // the public-providers list endpoint: an operator should never see a

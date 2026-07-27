@@ -315,6 +315,20 @@ public class RedbIdentityOptions
     public DpopOptions Dpop { get; set; } = new();
 
     /// <summary>
+    /// How the server fetches a <b>client's</b> JWKS from its <c>jwks_uri</c> — SSRF limits,
+    /// cache lifetime and timeouts. Used to verify what a client signed: JAR request objects
+    /// (Z7 / RFC 9101) and <c>private_key_jwt</c> assertions. See <see cref="ClientKeysOptions"/>.
+    /// </summary>
+    public ClientKeysOptions ClientKeys { get; set; } = new();
+
+    /// <summary>
+    /// Z7 (RFC 9101): JWT-Secured Authorization Request. Effective only when
+    /// <see cref="IdentityFeatureFlags.EnableJar"/> is <see langword="true"/>.
+    /// See <see cref="JarOptions"/>.
+    /// </summary>
+    public JarOptions Jar { get; set; } = new();
+
+    /// <summary>
     /// Lifetime of the device_code / user_code pair.
     /// Default: 10 minutes (RFC 8628 §3.2 recommends ≤ 15 min).
     /// </summary>

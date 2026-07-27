@@ -12,6 +12,15 @@ internal sealed class RedbRouteOpenIddictServerConfiguration
 {
     public void PostConfigure(string? name, OpenIddictServerOptions options)
     {
+        // Z7 (RFC 9101): OpenIddict 6.3.0 has no request-object support — its built-in handlers
+        // reject 'request' / 'request_uri' outright. ValidateRequestObjectHandler takes over both
+        // parameters: it unpacks and verifies a signed request object when Features.EnableJar is
+        // on, and returns the very same request_not_supported / request_uri_not_supported answer
+        // when it is off. Removing them is therefore behaviour-preserving by default.
+        // (PAR's urn:ietf:params:oauth:request_uri:* keeps working — our handler ignores it.)
+        options.Handlers.Remove(OpenIddictServerHandlers.Authentication.ValidateRequestParameter.Descriptor);
+        options.Handlers.Remove(OpenIddictServerHandlers.Authentication.ValidateRequestUriParameter.Descriptor);
+
         foreach (var descriptor in RedbRouteOpenIddictServerBuilderExtensions.HandlerDescriptors)
             options.Handlers.Add(descriptor);
 

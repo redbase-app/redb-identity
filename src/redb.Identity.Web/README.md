@@ -10,9 +10,9 @@ the public SDK (`redb.Identity.Client`) over HTTP/JSON.
 > reference `redb.Identity.Core`, `.Persistence`, `.Http`, `.Federation`, etc.
 > The boundary is enforced in three places:
 >
-> 1. CI workflow: [`.github/workflows/identity-web-isolation.yml`](../../../.github/workflows/identity-web-isolation.yml).
+> 1. CI workflow: `.github/workflows/identity-web-isolation.yml`.
 > 2. Runtime assertion: [`IsolationTests`](../../tests/redb.Identity.Web.Tests/IsolationTests.cs).
-> 3. Build-time: [`deploy/identity-web/Dockerfile`](../../../deploy/identity-web/Dockerfile)
+> 3. Build-time: `deploy/identity-web/Dockerfile`
 >    copies only the three allowed projects, so any forbidden `ProjectReference`
 >    fails the image build.
 
@@ -101,14 +101,14 @@ cp deploy/.env.example deploy/.env
 docker compose -f deploy/docker-compose.identity.yml up -d --build
 ```
 
-The Dockerfile at [`deploy/identity-web/Dockerfile`](../../../deploy/identity-web/Dockerfile)
+The Dockerfile at `deploy/identity-web/Dockerfile`
 performs a multi-stage build that copies **only** the three allowed projects
 (`Contracts`, `Client`, `Web`), restores, publishes, and runs as a non-root
 user. The runtime image exposes port `8080` and ships a `wget`-based
 healthcheck targeting `/health`.
 
 Nginx terminates TLS and dispatches between BFF and server — see
-[`deploy/nginx/sites/identity.conf`](../../../deploy/nginx/sites/identity.conf).
+`deploy/nginx/sites/identity.conf`.
 Note the explicit `/_blazor` location: the Blazor Server circuit needs the
 WebSocket `Upgrade` / `Connection` headers, which a generic `location /` would
 drop.

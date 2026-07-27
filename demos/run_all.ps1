@@ -43,6 +43,7 @@ $ordered = @(
     'demo_dpop.ps1',                    # RFC 9449 — DPoP proofs, jkt binding, replay
     'demo_par.ps1',                     # RFC 9126 — PAR, one-time request_uri
     'demo_par_per_client.ps1',          # RFC 9126 §5 — per-client require_pushed_authorization_requests
+    'demo_jar_request_object.ps1',      # RFC 9101 — JAR signed request object: accept, §6.1 override, alg:none + wrong-key rejected
     'demo_logout_endsession.ps1',       # OIDC Session + RFC 7009 revocation
     'demo_backchannel_logout.ps1',      # OIDC Back-Channel Logout 1.0 — fan-out + logout_token JWT
     'demo_federation.ps1',              # OIDC federation: discovery + safe public list + 302 probe

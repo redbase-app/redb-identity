@@ -23,7 +23,7 @@ using redb.Identity.Core.Serialization;
 using redb.Identity.Core.Services;
 using redb.Identity.Core.Stores;
 using redb.Route.Extensions;
-using redb.Tsak.Core.Contracts;
+using redb.Tsak.Contracts;
 using redb.Identity.Core.Routes;
 
 namespace redb.Identity.Core;
@@ -437,6 +437,14 @@ public static class RedbIdentityServiceExtensions
                     "Use 'memory', 'redis' or 'redb'.");
         }
         services.TryAddSingleton<DpopProofValidator>();
+
+        // Z7 (RFC 9101) phase 1: resolves a CLIENT's public signing keys — inline JWKS, or a
+        // cached, SSRF-guarded fetch of its jwks_uri. Registered unconditionally: it is inert
+        // until something asks it for keys, and it is shared by JAR and private_key_jwt.
+        services.AddHttpClient(ClientKeyResolver.HttpClientName);
+        services.TryAddSingleton<IClientKeyResolver, ClientKeyResolver>();
+        // Z7 (RFC 9101) phase 3: fetching a request_uri (SSRF-guarded in the handler).
+        services.AddHttpClient(OpenIddict.Handlers.ValidateRequestObjectHandler.HttpClientName);
 
         // C8: Backchannel logout — signed logout_token JWT + best-effort POST fan-out to RPs.
         // Uses the OpenIddict signing keys (so RPs validate via the same JWKS as id_tokens).
