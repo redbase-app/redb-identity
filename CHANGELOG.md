@@ -30,6 +30,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > as valid history; the jump to `3.4.0` is a realignment onto the shared number, not a breaking change.
 > NuGet publication follows the source cut.
 
+## [3.5.0] — 2026-08-05
+
+**No changes in redb.Identity itself — a rebuild onto redb 3.5.0 / redb.Route 3.5.0 / redb.Tsak
+3.5.0**, released with the ecosystem.
+
+The dependency refresh is the point. Identity runs as `.tpkg` modules inside a Tsak worker, and that
+worker loads the redb framework from its shared layer, which is gated on the **minor** version — so
+an Identity built against 3.4.0 cannot be hosted on a 3.5.0 runtime, and vice versa. Rebuilding also
+carries two redb.Core correctness fixes into every Identity deployment: a props-cache entry that
+could be served stale after in-place mutation, and `RedbHash` being order-dependent for `Dictionary`
+properties (both detailed in the root `CHANGELOG.md`). Identity stores clients, users and signing
+keys through that same layer, so neither is academic here.
+
 ## [3.4.0] — 2026-07-27
 
 > **Why the jump from 1.2.2 to 3.4.0 — aligning with the ecosystem, not a breaking rewrite.**
