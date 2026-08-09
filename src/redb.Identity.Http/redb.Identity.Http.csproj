@@ -21,8 +21,8 @@
     -->
     <ProjectReference Include="..\redb.Identity.DataProtection\redb.Identity.DataProtection.csproj" />
     <PackageReference Include="redb.Core" Version="3.5.0" />
-    <PackageReference Include="redb.Route.Http" Version="3.5.0" />
-    <PackageReference Include="redb.Route.Controllers" Version="3.5.0" />
+    <PackageReference Include="redb.Route.Http" Version="3.5.1" />
+    <PackageReference Include="redb.Route.Controllers" Version="3.5.1" />
   </ItemGroup>
 
   <ItemGroup>

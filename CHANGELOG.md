@@ -30,6 +30,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > as valid history; the jump to `3.4.0` is a realignment onto the shared number, not a breaking change.
 > NuGet publication follows the source cut.
 
+## [3.5.1] — 2026-08-07
+
+**No changes in redb.Identity itself — a rebuild that re-pins the dependency on `redb.Route`.**
+
+`redb.Identity.Core` 3.5.0 pins `redb.Route.Http` **3.5.0**, the build that still contains
+`SharedHttpServerManager` privately; `redb.Route` 3.5.1 moved it into `redb.Route.Http.Hosting` so
+HTTP-based connectors can share one Kestrel per `host:port`. Identity is an HTTP-facing product
+hosted next to other connectors inside a Tsak worker, so a stale pin here is not academic: with the
+old `Http`, an AS2 endpoint and the OIDC facade could not sit on the same port, and NuGet would not
+have corrected it on its own (`redb.Route.As2` depends on `Http.Hosting`, not on `Http`).
+
+Nothing else changed — same code, same behaviour, rebuilt on `redb.Route` 3.5.1 and `redb.Tsak`
+3.5.1. `redb` core stays 3.5.0: it does not reference `redb.Route` at all.
+
 ## [3.5.0] — 2026-08-05
 
 **No changes in redb.Identity itself — a rebuild onto redb 3.5.0 / redb.Route 3.5.0 / redb.Tsak
