@@ -126,13 +126,11 @@ internal sealed class PasswordForgotProcessor : IProcessor
             EmailExact = request.Email,
             Enabled = true,
         }).ConfigureAwait(false);
-        // Console.WriteLine($"[Diag-PF] email='{request.Email}' anyMatch={(usersAny?.Count ?? 0)} enabledMatch={(users?.Count ?? 0)}");
         if (usersAny is not null && usersAny.Count > 0)
         {
             for (int i = 0; i < usersAny.Count; i++)
             {
                 var u = usersAny[i];
-                // Console.WriteLine($"[Diag-PF]   user[{i}] id={u.Id} login='{u.Login}' email='{u.Email}' enabled={u.Enabled}");
             }
         }
         if (users is null || users.Count == 0)

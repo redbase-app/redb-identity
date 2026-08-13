@@ -122,6 +122,69 @@ public class FullStackAccountRegistrationTests
         body.GetProperty("error").GetString().Should().Be("duplicate");
     }
 
+    [Fact]
+    public async Task Register_DuplicateEmail_Returns409()
+    {
+        var email = UniqueEmail("emaildup");
+        var password = $"E2E@Reg-{Guid.NewGuid():N}!";
+
+        using (var first = await PostRegisterAsync(new { login = UniqueLogin("ed1"), email, password }))
+            first.StatusCode.Should().Be(HttpStatusCode.OK,
+                "seed-create must succeed: {0}", await first.Content.ReadAsStringAsync());
+
+        // Different login, SAME email → must be rejected when RequireUniqueEmail is on.
+        using var second = await PostRegisterAsync(new { login = UniqueLogin("ed2"), email, password });
+        second.StatusCode.Should().Be(HttpStatusCode.Conflict,
+            "duplicate email must surface 409: {0}", await second.Content.ReadAsStringAsync());
+        var body = await second.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("error").GetString().Should().Be("duplicate");
+    }
+
+    [Fact]
+    public async Task Register_DuplicateEmail_CaseInsensitive_Returns409()
+    {
+        // Email is case-insensitive in practice; the server normalises to lower-invariant, so an
+        // upper-case retry of an existing address must collide, not create a second identity.
+        var local = $"reg-caseemail-{Guid.NewGuid():N}";
+        var password = $"E2E@Reg-{Guid.NewGuid():N}!";
+
+        using (var first = await PostRegisterAsync(new { login = UniqueLogin("ci1"), email = $"{local}@example.invalid", password }))
+            first.StatusCode.Should().Be(HttpStatusCode.OK,
+                "seed-create must succeed: {0}", await first.Content.ReadAsStringAsync());
+
+        using var second = await PostRegisterAsync(new { login = UniqueLogin("ci2"), email = $"{local.ToUpperInvariant()}@EXAMPLE.INVALID", password });
+        second.StatusCode.Should().Be(HttpStatusCode.Conflict,
+            "an upper-case variant of an existing email must collide: {0}", await second.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Register_ConcurrentSameEmail_OnlyOneWins()
+    {
+        // The TOCTOU test: fire N registrations of the SAME email at once. The advisory
+        // GetUsersAsync check cannot serialise them — only the UX_users_email unique index can.
+        // Exactly one must win (200); the rest must lose atomically (409), never a 500 and never
+        // two users under one email.
+        var email = UniqueEmail("race");
+        var password = $"E2E@Reg-{Guid.NewGuid():N}!";
+        const int n = 6;
+
+        var tasks = Enumerable.Range(0, n).Select(i =>
+            PostRegisterAsync(new { login = UniqueLogin($"race{i}"), email, password })).ToArray();
+        var responses = await Task.WhenAll(tasks);
+
+        try
+        {
+            var ok = responses.Count(r => r.StatusCode == HttpStatusCode.OK);
+            var conflict = responses.Count(r => r.StatusCode == HttpStatusCode.Conflict);
+            ok.Should().Be(1, "exactly one concurrent registration of the same email may succeed");
+            conflict.Should().Be(n - 1, "every other concurrent attempt must lose with 409, not 500");
+        }
+        finally
+        {
+            foreach (var r in responses) r.Dispose();
+        }
+    }
+
     // \u2550\u2550 Weak password \u2550\u2550
 
     [Fact]

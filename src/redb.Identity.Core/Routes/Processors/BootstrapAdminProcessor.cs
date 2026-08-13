@@ -346,7 +346,9 @@ internal sealed class BootstrapAdminProcessor : IProcessor
 
     private static BootstrapAdminRequest DictToRequest(Dictionary<string, object?> dict) => new()
     {
-        Email = dict.GetValueOrDefault("email")?.ToString(),
+        // Canonical lower-invariant e-mail so the admin created here and a later self-register
+        // resolve to one identity under the UX_users_email unique index (bootstrap uses email as login).
+        Email = dict.GetValueOrDefault("email")?.ToString()?.Trim().ToLowerInvariant(),
         Password = dict.GetValueOrDefault("password")?.ToString(),
         GroupName = dict.GetValueOrDefault("groupName")?.ToString(),
         RedirectUri = dict.GetValueOrDefault("redirectUri")?.ToString(),

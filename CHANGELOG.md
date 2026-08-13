@@ -30,6 +30,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > as valid history; the jump to `3.4.0` is a realignment onto the shared number, not a breaking change.
 > NuGet publication follows the source cut.
 
+## [3.6.0] — 2026-08-13
+
+> Ships with the ecosystem. The minor comes from `redb.Route`; the change below is Identity's own,
+> and the rebuild additionally carries the redb.Core tree-scope fix into every deployment.
+
+### Security — atomic e-mail uniqueness (register / bootstrap)
+
+`RequireUniqueEmail` was enforced by a check-then-insert: `GetUsers(email)` → `Reject(409)` →
+`CreateUser`. Between the check and the insert two concurrent registrations could both see "no
+match" and both write the same address, so `RequireUniqueEmail` did not actually hold under
+concurrency (login was already atomic via its relational UNIQUE; e-mail was not).
+
+- **`UX_users_email` — a partial unique index on `_users(_email)`** (`WHERE _email IS NOT NULL`),
+  created per-dialect by `IdentityUniqueIndexesInitListener` alongside the existing `_objects`
+  indexes. This is the atomic DB guarantee — the check-then-insert is now only a fast, deterministic
+  early error, not the enforcement. Partial (skips null e-mails, of which there are many) so it also
+  works on SQL Server, whose plain UNIQUE allows only one NULL; `_email` is `NVARCHAR(450)` there, so
+  it indexes on all three dialects (unlike the `_value_string` indexes that stay Postgres-only).
+- **E-mail normalised to lower-invariant + trimmed** before the check and the insert
+  (`AccountRegisterProcessor`, `BootstrapAdminProcessor`). Without it a plain index on `_email` would
+  treat `A@x.com` and `a@x.com` as distinct; normalising makes the stored value canonical so the
+  index (and `EmailExact` lookups) enforce one identity.
+- **Index violation is surfaced as `409 duplicate`**, not a `500`: `AccountRegisterProcessor` catches
+  a `UX_users_email` unique-violation (message or inner-exception) — the same shape login already
+  used for its "already taken" 409. The loser of a register race now gets a clean duplicate error.
+
+### Removed — debug scaffolding in the register hot path
+
+`AccountRegisterProcessor` carried a per-exchange stopwatch with ~25 `__arMark(...)` calls (the
+`Console.WriteLine` was commented out, so they were no-ops) **and a VERIFY block that issued two
+extra `GetUsers` queries after every `CreateUser`** just to feed those no-op logs. Removed both —
+two fewer DB round-trips per registration and no dead diagnostics in the hot path.
+`PasswordForgotProcessor`'s commented `[Diag-PF]` lines cleaned up too.
+
 ## [3.5.1] — 2026-08-07
 
 **No changes in redb.Identity itself — a rebuild that re-pins the dependency on `redb.Route`.**

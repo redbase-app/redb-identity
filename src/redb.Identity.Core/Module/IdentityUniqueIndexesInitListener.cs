@@ -136,6 +136,31 @@ internal sealed class IdentityUniqueIndexesInitListener : IRouteLifecycleListene
             }
         }
 
+        // Relational email uniqueness on _users(_email). Unlike the catalogue above (which sits on
+        // _objects, scoped by _id_scheme), this is a partial unique index straight on the core
+        // _users table — the only place email lives. Closes the register/create email TOCTOU the
+        // same way _login's UNIQUE constraint closes login: an atomic DB guarantee instead of a
+        // check-then-insert race. Partial (WHERE _email IS NOT NULL) so the many null-email users
+        // don't collide — this is also what lets it work on SQL Server, whose plain UNIQUE allows
+        // only a single NULL. Case-folding is handled by the processors normalising email to
+        // lower-invariant before insert, so a plain index on _email is enough.
+        try
+        {
+            var emailSql = isPostgres || isSqlite
+                ? "CREATE UNIQUE INDEX IF NOT EXISTS \"UX_users_email\" ON _users (_email) WHERE _email IS NOT NULL"
+                : "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_users_email') "
+                  + "CREATE UNIQUE INDEX [UX_users_email] ON [_users]([_email]) WHERE [_email] IS NOT NULL";
+
+            await redb.Context.ExecuteAsync(emailSql).ConfigureAwait(false);
+            applied++;
+            logger.LogDebug("redb.Identity: unique index 'UX_users_email' ensured on _users(_email).");
+        }
+        catch (Exception ex)
+        {
+            // Degrade to the processors' optimistic email check rather than abort bootstrap.
+            logger.LogError(ex, "redb.Identity: failed to create unique index 'UX_users_email' on _users(_email).");
+        }
+
         logger.LogInformation(
             "redb.Identity: unique indexes bootstrap complete ({Provider}) — applied={Applied} skipped={Skipped}",
             provider, applied, skipped);

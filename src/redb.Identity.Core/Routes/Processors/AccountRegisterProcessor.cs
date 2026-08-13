@@ -53,29 +53,15 @@ internal sealed class AccountRegisterProcessor : IProcessor
 
     public async Task Process(IExchange exchange, CancellationToken ct = default)
     {
-        var __arSw = System.Diagnostics.Stopwatch.StartNew();
-        long __arLast = 0;
-        long __arMark(string label)
-        {
-            var now = __arSw.ElapsedMilliseconds;
-            var delta = now - __arLast;
-            __arLast = now;
-            // Console.WriteLine($"[Diag-AR] {label,-40} +{delta,6}ms  (total {now}ms)  thread={System.Environment.CurrentManagedThreadId}");
-            return now;
-        }
-        __arMark("Process: ENTER");
-
         var request = exchange.In.Body as RegisterAccountRequest;
         if (request is null)
         {
             Reject(exchange, 400, "validation_error", "Request body is required.");
-            __arMark("Process: EXIT(reject:no-body)");
             return;
         }
 
         var options = _sp.GetRequiredService<IOptions<RedbIdentityOptions>>().Value;
         var regOptions = options.Registration;
-        __arMark("options-resolved");
 
         // Master switch \u2014 even if the route is wired at startup but disabled later
         // via config reload, refuse with 403 so the BFF/SDK can show a deterministic
@@ -103,17 +89,19 @@ internal sealed class AccountRegisterProcessor : IProcessor
         err = IdentityProcessorHelpers.ValidateEmail(request.Email);
         if (err is not null) { Reject(exchange, 400, "validation_error", err); return; }
 
-        __arMark("validation: input-shape OK");
+        // Normalise before the uniqueness check and the INSERT: e-mail is case-insensitive in
+        // practice, but the UX_users_email unique index is a plain index on _email, so "A@x.com"
+        // and "a@x.com" would otherwise slip past it as distinct rows. Lower-invariant + trim makes
+        // the stored value canonical, so the index (and EmailExact lookups) enforce one identity.
+        request.Email = request.Email.Trim().ToLowerInvariant();
 
         // Full password policy gate (length + composition + breach). userId is null
         // because we have not minted the row yet.
         err = await IdentityProcessorHelpers.ValidatePasswordPolicyAsync(
             exchange, _context, request.Password, userId: null, "Password", ct).ConfigureAwait(false);
-        __arMark("ValidatePasswordPolicyAsync");
-        if (err is not null) { Reject(exchange, 400, "weak_password", err); __arMark("Process: EXIT(reject:weak-pwd)"); return; }
+        if (err is not null) { Reject(exchange, 400, "weak_password", err); return; }
 
         var redb = _context.GetRedbService(_redbName, exchange);
-        __arMark("GetRedbService(per-exchange)");
         var logger = _sp.GetService<ILoggerFactory>()?.CreateLogger("AccountRegisterProcessor");
 
         // S2.3 — enforce global claim schema BEFORE creating the relational
@@ -123,11 +111,9 @@ internal sealed class AccountRegisterProcessor : IProcessor
         // default fail with 400.
         var (defaultClaims, schemaErr) = await Services.ClaimSchemaValidator.EnforceGlobalAsync(redb, null, ct)
             .ConfigureAwait(false);
-        __arMark("ClaimSchemaValidator.EnforceGlobalAsync");
         if (schemaErr is not null)
         {
             Reject(exchange, 400, "validation_error", schemaErr);
-            __arMark("Process: EXIT(reject:claim-schema)");
             return;
         }
 
@@ -140,12 +126,10 @@ internal sealed class AccountRegisterProcessor : IProcessor
             {
                 EmailExact = request.Email,
             }).ConfigureAwait(false);
-            __arMark("UserProvider.GetUsersAsync(email-uniq)");
             if (existing is { Count: > 0 })
             {
                 Reject(exchange, 409, "duplicate",
                     $"An account with email '{request.Email}' already exists.");
-                __arMark("Process: EXIT(reject:email-dup)");
                 return;
             }
         }
@@ -163,30 +147,24 @@ internal sealed class AccountRegisterProcessor : IProcessor
                 Phone = null,
                 Enabled = true,
             }).ConfigureAwait(false);
-            __arMark($"UserProvider.CreateUserAsync returned id={coreUser.Id} login='{coreUser.Login}' email='{coreUser.Email}' enabled={coreUser.Enabled}");
-
-            // VERIFY: query the SAME redb (same per-exchange conn) IMMEDIATELY to confirm
-            // the INSERT is observable. If the row isn't visible the moment the call returns,
-            // CreateUserAsync's tx never committed (or wrote to a different connection).
-            var verifyByEmail = await redb.UserProvider.GetUsersAsync(new UserSearchCriteria
-            {
-                EmailExact = request.Email,
-            }).ConfigureAwait(false);
-            var verifyByLogin = await redb.UserProvider.GetUsersAsync(new UserSearchCriteria
-            {
-                LoginExact = request.Login,
-            }).ConfigureAwait(false);
-            __arMark($"VERIFY post-CreateUserAsync: byEmail={(verifyByEmail?.Count ?? 0)} byLogin={(verifyByLogin?.Count ?? 0)}");
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("already taken"))
         {
             Reject(exchange, 409, "duplicate", $"Login '{request.Login}' is already taken.");
-            __arMark("Process: EXIT(reject:login-taken)");
+            return;
+        }
+        catch (Exception ex) when (
+            (ex.Message?.Contains("UX_users_email", StringComparison.OrdinalIgnoreCase) ?? false) ||
+            (ex.InnerException?.Message?.Contains("UX_users_email", StringComparison.OrdinalIgnoreCase) ?? false))
+        {
+            // The UX_users_email unique index fired: another registration committed the same e-mail
+            // between our advisory check and this INSERT. This is the atomic backstop the advisory
+            // GetUsersAsync check cannot provide — surface it as the same 409 the check would have.
+            Reject(exchange, 409, "duplicate", $"An account with email '{request.Email}' already exists.");
             return;
         }
         catch (Exception ex)
         {
-            __arMark($"Process: THROW from CreateUserAsync: {ex.GetType().Name}: {ex.Message}");
             throw;
         }
 
@@ -211,25 +189,21 @@ internal sealed class AccountRegisterProcessor : IProcessor
             value_guid = Guid.NewGuid(),
         };
         await redb.SaveAsync(propsObj).ConfigureAwait(false);
-        __arMark("redb.SaveAsync(propsObj)  [INSERT user props on per-exchange conn]");
 
         // Record initial password in history so subsequent change attempts cannot
         // immediately reuse the sign-up password. We call the store directly (rather
         // than through RecordPasswordHistoryAsync) to skip its stamp path \u2014 see above.
         var historyStore = _sp.GetService<redb.Identity.Core.Security.IPasswordHistoryStore>();
         var keep = options.PasswordPolicy?.HistoryCount ?? 0;
-        __arMark($"resolved IPasswordHistoryStore (null? {historyStore is null}; keep={keep})");
         if (historyStore is not null && keep > 0)
         {
             try
             {
                 await historyStore.RecordAsync(coreUser.Id, request.Password, keep, ct)
                     .ConfigureAwait(false);
-                __arMark("historyStore.RecordAsync  [Argon2id + INSERT on ITS OWN DI-scoped conn]");
             }
             catch (Exception ex)
             {
-                __arMark($"historyStore.RecordAsync THREW (swallowed): {ex.GetType().Name}: {ex.Message}");
                 // Non-fatal: history is best-effort, mirrors the helper's swallow contract.
             }
         }
@@ -253,7 +227,6 @@ internal sealed class AccountRegisterProcessor : IProcessor
             Login = coreUser.Login,
             SelfService = true,
         };
-        __arMark("Process: EXIT(success) — response + audit-event set on exchange");
     }
 
     private static void Reject(IExchange exchange, int status, string error, string description)

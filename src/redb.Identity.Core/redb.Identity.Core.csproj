@@ -48,7 +48,7 @@
   <ItemGroup>
     <ProjectReference Include="..\redb.Identity.Contracts\redb.Identity.Contracts.csproj" />
     <ProjectReference Include="..\redb.Identity.DataProtection\redb.Identity.DataProtection.csproj" />
-    <PackageReference Include="redb.Core" Version="3.5.0" />
+    <PackageReference Include="redb.Core" Version="3.6.0" />
     <!--
       Tsak ships these connectors and their transitive dependencies (StackExchange.Redis,
       Pipelines.Sockets.Unofficial, …) in Libs/shared/ and loads them into the host
@@ -56,14 +56,14 @@
       copies into its .tpkg, otherwise type identity collides with the host-provided
       assemblies and DI registrations get duplicated.
     -->
-    <PackageReference Include="redb.Route.Core" Version="3.5.1" />
-    <PackageReference Include="redb.Route.Redis" Version="3.5.1" />
-    <PackageReference Include="redb.Route.Mail" Version="3.5.1" />
+    <PackageReference Include="redb.Route.Core" Version="3.6.0" />
+    <PackageReference Include="redb.Route.Redis" Version="3.6.0" />
+    <PackageReference Include="redb.Route.Mail" Version="3.6.0" />
     <!-- W1: outbound HTTP transport for webhook delivery. Tsak ships
          redb.Route.Http in Libs/shared/ (mounted into the Default ALC by the
          HTTP facade module), so we reference it compile-only with
          Private=false to avoid bundling a private copy that would clash. -->
-    <PackageReference Include="redb.Route.Http" Version="3.5.1" />
+    <PackageReference Include="redb.Route.Http" Version="3.6.0" />
     <!--
       Tsak host SPI. Identity implements IModuleHealthContributor, which — together with
       HealthStatus — lives in the lightweight redb.Tsak.Contracts assembly. Referencing only
@@ -71,7 +71,7 @@
       Quartz, the redb providers — out of Identity's compile graph. Compile-time only; the Tsak
       host supplies the assembly at runtime.
     -->
-    <PackageReference Include="redb.Tsak.Contracts" Version="3.5.1" />
+    <PackageReference Include="redb.Tsak.Contracts" Version="3.6.0" />
   </ItemGroup>
 
   <ItemGroup>
