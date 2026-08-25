@@ -1,0 +1,64 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>redb.Identity.Grpc</AssemblyName>
+    <RootNamespace>redb.Identity.Grpc</RootNamespace>
+    <Description>gRPC facade for redb.Identity — service-to-service surface: token, introspection, revocation, userinfo, discovery, JWKS.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Phase 8 invariant: a facade is project-reference-isolated from Core. Core/Grpc exchange runs purely
+      over `direct-vm://identity-*` brokered messages whose DTOs live in `redb.Identity.Contracts`.
+      See doc/PHASE-8-FACADE-ISOLATION-PLAN-RU.md and doc/gRPC/ARCHITECTURE.md.
+    -->
+    <ProjectReference Include="..\redb.Identity.Contracts\redb.Identity.Contracts.csproj" />
+    <PackageReference Include="redb.Route.Grpc" Version="3.7.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="redb.Identity.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      The published contract lives in redb.Identity.Contracts as a plain file so consumers can generate
+      stubs from it without referencing a server-side package. It is compiled HERE, not there: Contracts
+      is a dependency-free DTO package and must not start dragging Google.Protobuf into Core, Http and
+      Client. GrpcServices="None" — we need the message types only, the server side is the route table.
+    -->
+    <!--
+      The management surface dispatches the same controllers the HTTP facade does. They live in their own
+      package precisely so this reference is to shared code and not to the other facade: restating which
+      argument is a key and which key name a surface uses, once per transport, is a second declaration of
+      the contract, and the copy that drifts is the one that accepts what the other rejects.
+    -->
+    <ProjectReference Include="..\redb.Identity.Management\redb.Identity.Management.csproj" />
+    <PackageReference Include="redb.Route.Controllers" Version="3.7.0" />
+    <Protobuf Include="..\redb.Identity.Contracts\Protos\identity.v1.proto"
+              ProtoRoot="..\redb.Identity.Contracts\Protos"
+              GrpcServices="None" />
+    <Protobuf Include="..\redb.Identity.Contracts\Protos\identity.management.v1.proto"
+              ProtoRoot="..\redb.Identity.Contracts\Protos"
+              GrpcServices="None" />
+    <PackageReference Include="Google.Protobuf" Version="3.31.1" />
+    <PackageReference Include="Grpc.Tools" Version="2.76.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Module config template (Tsak Layer 4). Tsak loads this file by name "{Namespace}.config.json"
+      alongside the assembly (or from inside the .tpkg package). Copying to output ensures it ships next
+      to the DLL for both bare-DLL hot-reload and .tpkg packaging.
+    -->
+    <None Update="redb.Identity.Grpc.config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Module\manifest.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
+
+

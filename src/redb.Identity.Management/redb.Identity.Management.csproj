@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>redb.Identity.Management</AssemblyName>
+    <RootNamespace>redb.Identity.Management</RootNamespace>
+    <Description>Transport-neutral management and self-service controllers for redb.Identity. Thin adapters over the direct-vm://identity-manage-* routes, shared by every facade.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Deliberately thin. These controllers hold no business logic: each action validates
+      its DTO and forwards to a `direct-vm://identity-manage-*` route. They live in their
+      own package so a second transport can serve the same management surface without
+      referencing the HTTP facade — and so there is one parameter-binding layer rather
+      than one per transport. Nothing here references Core: the Phase 8 isolation that
+      applies to the facades applies to this package too.
+    -->
+    <ProjectReference Include="..\redb.Identity.Contracts\redb.Identity.Contracts.csproj" />
+    <PackageReference Include="redb.Route.Controllers" Version="3.7.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="redb.Identity.Tests" />
+  </ItemGroup>
+
+</Project>
+

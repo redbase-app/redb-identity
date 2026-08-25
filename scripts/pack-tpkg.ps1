@@ -1,15 +1,16 @@
 <#
 .SYNOPSIS
-    Builds redb.Identity.Core and redb.Identity.Http, packs them as Tsak .tpkg modules,
-    and copies into redb.Tsak.Worker/Libs/ for hot-reload.
+    Builds redb.Identity.Core, redb.Identity.Http and redb.Identity.Grpc, packs them as Tsak .tpkg
+    modules, and copies into redb.Tsak.Worker/modules/ for hot-reload.
 
 .DESCRIPTION
-    Two .tpkg packages produced (Release):
+    Three .tpkg packages produced (Release):
       - redb.Identity.Core.tpkg   (Core engine: schemes, OpenIddict stores, OIDC server,
                                    MFA, WebAuthn, federation, audit, key rotation,
                                    DPAPI, claim mappers — all transitive third-party
                                    deps that Tsak host doesn't already provide)
       - redb.Identity.Http.tpkg   (HTTP transport facade: 26 controllers; depends on Core)
+      - redb.Identity.Grpc.tpkg   (gRPC service-to-service facade; depends on Core)
 
     Each .tpkg = ZIP { manifest.json, *.config.json, *.dll [, *.pdb] }.
 
@@ -29,17 +30,17 @@
     or when build was just done.
 
 .PARAMETER Module
-    Which modules to pack: Core | Http | All (default: All).
+    Which modules to pack: Core | Http | Grpc | All (default: All).
 
-.PARAMETER TsakLibs
-    Override target Libs directory. Default: ../redb.Tsak/src/redb.Tsak.Worker/Libs.
+.PARAMETER TsakModules
+    Override target modules directory. Default: ../redb.Tsak/src/redb.Tsak.Worker/modules.
 
 .PARAMETER NoCopy
-    Don't copy resulting .tpkg into Tsak Libs (only produce in scripts/output).
+    Don't copy resulting .tpkg into Tsak modules (only produce in scripts/output).
 
 .EXAMPLE
     ./scripts/pack-tpkg.ps1
-    # Build Release, pack both, copy into Tsak Worker Libs.
+    # Build Release, pack both, copy into Tsak Worker modules.
 
 .EXAMPLE
     ./scripts/pack-tpkg.ps1 -NoBuild -Module Http
@@ -51,10 +52,10 @@ param(
 
     [switch]$NoBuild,
 
-    [ValidateSet("Core", "Http", "All")]
+    [ValidateSet("Core", "Http", "Grpc", "All")]
     [string]$Module = "All",
 
-    [string]$TsakLibs,
+    [string]$TsakModules,
 
     [switch]$NoCopy
 )
@@ -68,8 +69,10 @@ $RepoRoot     = Resolve-Path (Join-Path $IdentityRoot "..")
 $Solution     = Join-Path $IdentityRoot "redb.Identity.slnx"
 $OutputDir    = Join-Path $ScriptRoot "output"
 
-if (-not $TsakLibs) {
-    $TsakLibs = Join-Path $RepoRoot "redb.Tsak\src\redb.Tsak.Worker\Libs"
+if (-not $TsakModules) {
+    # modules\, not Libs\ — Libs is the deprecated drop directory. Libs\shared still holds the
+    # host-provided framework DLLs and stays below as an exclude source, but nothing is dropped there.
+    $TsakModules = Join-Path $RepoRoot "redb.Tsak\src\redb.Tsak.Worker\modules"
 }
 $TsakWorkerBinRelease = Join-Path $RepoRoot "redb.Tsak\src\redb.Tsak.Worker\bin\Release\net9.0"
 $TsakWorkerBinDebug   = Join-Path $RepoRoot "redb.Tsak\src\redb.Tsak.Worker\bin\Debug\net9.0"
@@ -191,8 +194,8 @@ function Pack-Module {
         Write-Host ("  Created  : {0}  ({1:N1} KB)" -f $tpkg, ($size / 1KB)) -ForegroundColor Green
 
         if (-not $NoCopy) {
-            if (-not (Test-Path $TsakLibs)) { New-Item -ItemType Directory -Path $TsakLibs | Out-Null }
-            $dest = Join-Path $TsakLibs "$ModuleName.tpkg"
+            if (-not (Test-Path $TsakModules)) { New-Item -ItemType Directory -Path $TsakModules | Out-Null }
+            $dest = Join-Path $TsakModules "$ModuleName.tpkg"
             Copy-Item $tpkg -Destination $dest -Force
             (Get-Item $dest).LastWriteTime = Get-Date   # touch → triggers Tsak hot-reload watcher
             Write-Host ("  Copied   : {0}" -f $dest) -ForegroundColor Green
@@ -257,10 +260,31 @@ if ($Module -in @("Http", "All")) {
         -ExtraExcludes $httpExtraExcludes
 }
 
+if ($Module -in @("Grpc", "All")) {
+    # Same rule as Http: a facade .tpkg must NOT duplicate anything Core.Module already ships.
+    # Tsak loads dependencies first, so Core's companions live in the Default ALC and are shared by
+    # assembly identity; duplicating them here would create type-identity collisions across ALCs.
+    # The result is a tiny package carrying only redb.Identity.Grpc.dll.
+    $grpcExtraExcludes = @(
+        "redb.Identity.Core.dll",
+        "redb.Identity.Contracts.dll"
+    )
+    $coreResultForGrpc = $results | Where-Object { $_.Module -eq "redb.Identity.Core.Module" } | Select-Object -First 1
+    if ($coreResultForGrpc) {
+        $grpcExtraExcludes += $coreResultForGrpc.DllNames
+    }
+
+    $results += Pack-Module `
+        -ModuleName "redb.Identity.Grpc" `
+        -ProjectDir (Join-Path $IdentityRoot "src\redb.Identity.Grpc") `
+        -ConfigFileName "redb.Identity.Grpc.config.json" `
+        -ExtraExcludes $grpcExtraExcludes
+}
+
 # ── Copy external context.json (Tsak Layer 3, devops-editable) ────────
 # This single file replaces business defaults that previously lived inside each
 # .tpkg's {Module}.config.json. Tsak's TsakCoordinator.LoadModuleConfigFiles reads
-# {sourceDir}/context.json (sourceDir = folder where .tpkg lives = $TsakLibs) and
+# {sourceDir}/context.json (sourceDir = folder where .tpkg lives = $TsakModules) and
 # merges it into EVERY module's effective config in that folder. Each context binds
 # only the sections it knows (Core → Identity:*, Http → IdentityTransport:*); shared
 # Redb:identity-pg is wired into both. The slim in-package {Module}.config.json now
@@ -270,7 +294,7 @@ if ($Module -in @("Http", "All")) {
 # drops these files into a Tsak host's module folder (e.g. dist worker\modules\) gets the
 # shared Layer-3 config too — without it the modules boot on in-tpkg stub defaults only
 # (AllowEphemeralKeys=false, UsePropsSigningKeyStore=false → "no signing credentials").
-# When -not $NoCopy we ALSO copy into the dev Worker Libs for hot-reload.
+# When -not $NoCopy we ALSO copy into the dev Worker modules dir for hot-reload.
 $externalContext = Join-Path $IdentityRoot "context.json"
 if (Test-Path $externalContext) {
     Write-Host ("`n=== External context.json ===") -ForegroundColor Cyan
@@ -284,7 +308,7 @@ if (Test-Path $externalContext) {
 
     # (2) dev Worker Libs — hot-reload (gated by -NoCopy)
     if (-not $NoCopy) {
-        $contextDest = Join-Path $TsakLibs "context.json"
+        $contextDest = Join-Path $TsakModules "context.json"
         Copy-Item $externalContext -Destination $contextDest -Force
         (Get-Item $contextDest).LastWriteTime = Get-Date   # touch → triggers hot-reload
         Write-Host ("  Copied : {0}" -f $contextDest) -ForegroundColor Green
@@ -299,6 +323,6 @@ $results | Select-Object Module, Included, Excluded, SizeKB, Tpkg | Format-Table
 
 Write-Host "`nDone." -ForegroundColor Green
 if (-not $NoCopy) {
-    Write-Host "Tsak Worker should hot-reload modules from: $TsakLibs" -ForegroundColor Yellow
-    Write-Host "Devops single source of truth: $TsakLibs\context.json" -ForegroundColor Yellow
+    Write-Host "Tsak Worker should hot-reload modules from: $TsakModules" -ForegroundColor Yellow
+    Write-Host "Devops single source of truth: $TsakModules\context.json" -ForegroundColor Yellow
 }

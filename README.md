@@ -61,6 +61,8 @@ dotnet add package redb.Identity.Client
 |---|---|
 | [`redb.Identity.Core`](https://www.nuget.org/packages/redb.Identity.Core) | OAuth 2.1 / OIDC engine — OpenIddict pipeline, redb stores, MFA, WebAuthn, federation, signing keys |
 | [`redb.Identity.Http`](https://www.nuget.org/packages/redb.Identity.Http) | HTTP / HTTPS facade — discovery, token, authorize, userinfo, introspect, JWKS, PAR, DCR, SCIM, `/me`, management |
+| [`redb.Identity.Grpc`](https://www.nuget.org/packages/redb.Identity.Grpc) | gRPC facade — service-to-service surface (token, introspect, revoke, userinfo, discovery, JWKS) + the management services; `.proto` contracts ship in `redb.Identity.Contracts` under `Protos/` |
+| [`redb.Identity.Management`](https://www.nuget.org/packages/redb.Identity.Management) | Transport-neutral management + self-service controllers — thin adapters over `direct-vm://identity-manage-*`, shared by every facade |
 | [`redb.Identity.Contracts`](https://www.nuget.org/packages/redb.Identity.Contracts) | Wire DTOs + route-name constants (shared by Core, Http, Client) |
 | [`redb.Identity.Client`](https://www.nuget.org/packages/redb.Identity.Client) | Typed HTTP SDK (`IIdentityClient`) + backchannel OIDC client |
 | [`redb.Identity.DataProtection`](https://www.nuget.org/packages/redb.Identity.DataProtection) | redb-backed ASP.NET Core DataProtection key-ring |
@@ -137,10 +139,14 @@ From(Http.From("0.0.0.0:5000"))
     // ↓ The controller's only job is:
     //   exchange.To(IdentityEndpoints.Token)           // direct-vm://identity-token
 
-// gRPC facade (planned) — same pattern
-From(Grpc.Server("0.0.0.0:5001/IdentityService"))
-    .Filter(e => e.In.GetHeader("grpc.method") == "Token")
-    .To(IdentityEndpoints.Token);
+// gRPC facade — shipped. One method address is one route, so each operation
+// gets its own route id, policies, metrics and lifecycle.
+From(GrpcDsl.Listen("0.0.0.0:5001").Method("/identity.v1.Identity/Token"))
+    .RouteId("grpc-identity-token")
+    .Process(GrpcIdentityProcessors.MapRequest(TokenRequest.Parser))
+    .Enrich(IdentityEndpoints.Token, GrpcIdentityProcessors.AdoptCoreAnswer)
+    .Process(GrpcIdentityProcessors.MapErrorToGrpcStatus)
+    .Process(GrpcIdentityProcessors.MapResponse<TokenResponse>("extra"));
 
 // RabbitMQ RPC facade (planned)
 From("rabbitmq:identity.rpc.token")
@@ -181,7 +187,7 @@ The only OAuth interaction that fundamentally requires a browser is the **author
 │  │  • OpenIddict server pipeline (token, authorize, userinfo, ...)         │ │
 │  │  • redb stores: Users, Apps, Scopes, Tokens, Sessions, Audit, ...      │ │
 │  │  • DataProtection key-ring  (RedbXmlRepository)                         │ │
-│  │  • Signing keys             (EavSigningKeyStore — RSA 2048, encrypted)  │ │
+│  │  • Signing keys           (PropsSigningKeyStore — RSA 2048, encrypted) │ │
 │  │  • MFA: TOTP / SMS-Email OTP / WebAuthn / Recovery codes                │ │
 │  │  • Cleanup timers (.Cluster(true) → leader-only in a cluster):          │ │
 │  │     identity-token-cleanup  /  -session-cleanup                          │ │
@@ -300,8 +306,15 @@ redb.Identity/
 │   │                                   lifecycle listeners, child SP build
 │   ├── redb.Identity.Contracts/        Wire DTOs (System.Text.Json only),
 │   │                                   endpoint URIs, route IDs, feature flags
+│   ├── redb.Identity.Management/       Transport-neutral management + self-service
+│   │                                   controllers over direct-vm://identity-manage-*,
+│   │                                   shared by the Http and Grpc facades
 │   ├── redb.Identity.Http/             HTTP facade — Kestrel + RedbControllers,
 │   │                                   project-ref-isolated from Core (Phase 8)
+│   ├── redb.Identity.Grpc/             gRPC facade — the service-to-service subset
+│   │                                   (token, introspect, revoke, userinfo,
+│   │                                   discovery, jwks) over the same direct-vm
+│   │                                   routes; contract in Contracts/Protos
 │   ├── redb.Identity.DataProtection/   RedbXmlRepository — ASP.NET DP keys in redb
 │   ├── redb.Identity.Resource.Dpop/    RFC 9449 DPoP resource-server validation
 │   ├── redb.Identity.Ldap/             LDAP external provider + sync (optional)
@@ -352,19 +365,19 @@ Wired in [HttpFacadeRouteBuilder.cs](src/redb.Identity.Http/HttpFacadeRouteBuild
 
 | Path | Method | Purpose | Source |
 |---|---|---|---|
-| `/applications` (+ `/{id}/rotate-secret`) | GET/POST/PUT/DELETE | OAuth client CRUD + secret rotation | [ApplicationsController.cs](src/redb.Identity.Http/Controllers/ApplicationsController.cs) |
-| `/users` (+ `/search`, `/{id}/change-password`) | GET/POST/PUT/DELETE | User management | [UsersController.cs](src/redb.Identity.Http/Controllers/UsersController.cs) |
-| `/groups` (+ `/{id}/children`, `/members`, `/move`) | GET/POST/PUT/DELETE | Hierarchical groups & membership | [GroupsController.cs](src/redb.Identity.Http/Controllers/GroupsController.cs) |
-| `/scopes` | GET/POST/PUT/DELETE | OAuth scope catalogue | [ScopesController.cs](src/redb.Identity.Http/Controllers/ScopesController.cs) |
-| `/claim-mappers` | GET/POST/PUT/DELETE | Declarative claim mapping rules (H5) | [ClaimMappersController.cs](src/redb.Identity.Http/Controllers/ClaimMappersController.cs) |
-| `/claim-scopes` (+ `/assignments`) | GET/POST/PUT/DELETE | Reusable Client Scope bundles + per-app assignment | [ClaimScopesController.cs](src/redb.Identity.Http/Controllers/ClaimScopesController.cs) |
-| `/audit` | GET | Audit log query (H9) | [AuditController.cs](src/redb.Identity.Http/Controllers/AuditController.cs) |
-| `/tokens` | GET/POST/DELETE | Token lifecycle management | [TokensController.cs](src/redb.Identity.Http/Controllers/TokensController.cs) |
-| `/consents` | GET/DELETE | User-consent admin | [ConsentsController.cs](src/redb.Identity.Http/Controllers/ConsentsController.cs) |
-| `/sessions` | GET/POST/DELETE | Admin session control | [SessionsController.cs](src/redb.Identity.Http/Controllers/SessionsController.cs) |
-| `/mfa` | GET/POST/DELETE | Admin MFA lifecycle | [MfaController.cs](src/redb.Identity.Http/Controllers/MfaController.cs) |
-| `/federation-providers` | GET/POST/PUT/DELETE | External IdP CRUD (H8, redb-stored) | [FederationProvidersController.cs](src/redb.Identity.Http/Controllers/FederationProvidersController.cs) |
-| `/revoked-sids` | GET/POST | W6-0 backchannel revoked-SIDs delta feed | [RevokedSidsController.cs](src/redb.Identity.Http/Controllers/RevokedSidsController.cs) |
+| `/applications` (+ `/{id}/rotate-secret`) | GET/POST/PUT/DELETE | OAuth client CRUD + secret rotation | ApplicationsController.cs |
+| `/users` (+ `/search`, `/{id}/change-password`) | GET/POST/PUT/DELETE | User management | UsersController.cs |
+| `/groups` (+ `/{id}/children`, `/members`, `/move`) | GET/POST/PUT/DELETE | Hierarchical groups & membership | GroupsController.cs |
+| `/scopes` | GET/POST/PUT/DELETE | OAuth scope catalogue | ScopesController.cs |
+| `/claim-mappers` | GET/POST/PUT/DELETE | Declarative claim mapping rules (H5) | ClaimMappersController.cs |
+| `/claim-scopes` (+ `/assignments`) | GET/POST/PUT/DELETE | Reusable Client Scope bundles + per-app assignment | ClaimScopesController.cs |
+| `/audit` | GET | Audit log query (H9) | AuditController.cs |
+| `/tokens` | GET/POST/DELETE | Token lifecycle management | TokensController.cs |
+| `/consents` | GET/DELETE | User-consent admin | ConsentsController.cs |
+| `/sessions` | GET/POST/DELETE | Admin session control | SessionsController.cs |
+| `/mfa` | GET/POST/DELETE | Admin MFA lifecycle | MfaController.cs |
+| `/federation-providers` | GET/POST/PUT/DELETE | External IdP CRUD (H8, redb-stored) | FederationProvidersController.cs |
+| `/revoked-sids` | GET/POST | W6-0 backchannel revoked-SIDs delta feed | RevokedSidsController.cs |
 
 ### Self-service (`/me/*`) — requires Bearer + `identity:account` scope
 
@@ -372,13 +385,33 @@ Wired in [HttpFacadeRouteBuilder.cs](src/redb.Identity.Http/HttpFacadeRouteBuild
 
 | Path | Method | Purpose | Source |
 |---|---|---|---|
-| `/me` | GET, PUT | Profile read/update | [MeController.cs](src/redb.Identity.Http/Controllers/MeController.cs) |
-| `/me/password` | PUT | Self-service password change | [MePasswordController.cs](src/redb.Identity.Http/Controllers/MePasswordController.cs) |
-| `/me/sessions` | GET, DELETE | List/revoke own sessions (SSO) | [MeSessionsController.cs](src/redb.Identity.Http/Controllers/MeSessionsController.cs) |
-| `/me/mfa` | GET/POST/DELETE | Self-service MFA enroll/disable | [MeMfaController.cs](src/redb.Identity.Http/Controllers/MeMfaController.cs) |
-| `/me/webauthn` | GET/POST/PATCH/DELETE | WebAuthn credentials (FIDO2 / MFA-3) | [MeWebAuthnController.cs](src/redb.Identity.Http/Controllers/MeWebAuthnController.cs) |
-| `/me/consents` | GET, DELETE | Consent dashboard | [MeConsentsController.cs](src/redb.Identity.Http/Controllers/MeConsentsController.cs) |
-| `/me/federated-identities` | GET/POST/DELETE | Link/unlink external IdP accounts (H8) | [MeFederatedIdentitiesController.cs](src/redb.Identity.Http/Controllers/MeFederatedIdentitiesController.cs) |
+| `/me` | GET, PUT | Profile read/update | MeController.cs |
+| `/me/password` | PUT | Self-service password change | MePasswordController.cs |
+| `/me/sessions` | GET, DELETE | List/revoke own sessions (SSO) | MeSessionsController.cs |
+| `/me/mfa` | GET/POST/DELETE | Self-service MFA enroll/disable | MeMfaController.cs |
+| `/me/webauthn` | GET/POST/PATCH/DELETE | WebAuthn credentials (FIDO2 / MFA-3) | MeWebAuthnController.cs |
+| `/me/consents` | GET, DELETE | Consent dashboard | MeConsentsController.cs |
+| `/me/federated-identities` | GET/POST/DELETE | Link/unlink external IdP accounts (H8) | MeFederatedIdentitiesController.cs |
+
+### gRPC (`identity.v1.Identity`)
+
+A second transport over the same `direct-vm://identity-*` routes, for services rather than browsers.
+Contract: [identity.v1.proto](src/redb.Identity.Contracts/Protos/identity.v1.proto); usage:
+[redb.Identity.Grpc/README.md](src/redb.Identity.Grpc/README.md).
+
+| Method | Auth | Purpose |
+|---|---|---|
+| `/identity.v1.Identity/Token` | client credentials, fields or `authorization: Basic` | RFC 6749 §3.2 |
+| `/identity.v1.Identity/Introspect` | client credentials | RFC 7662 |
+| `/identity.v1.Identity/Revoke` | client credentials | RFC 7009 |
+| `/identity.v1.Identity/UserInfo` | `authorization: Bearer` | OIDC Core §5.3 |
+| `/identity.v1.Identity/Discovery`, `/Jwks` | anonymous | documents, passed through verbatim |
+| `/redb.route.grpc.RedbService/Process` | as above | envelope fallback: JSON body + `operation` metadata |
+| `/grpc.health.v1.Health/Check` | anonymous | k8s / Consul / Envoy probe |
+
+Browser flows (`authorize`, login, consent, MFA pages, device verification) and DPoP stay on HTTP by
+construction: the former need a browser, redirects and a cookie session; RFC 9449 binds a DPoP proof to
+an HTTP method and URL. Management operations are not on this transport yet.
 
 ### SCIM 2.0 (`/scim/v2/*`)
 
@@ -633,7 +666,7 @@ Identity is designed for N-replica deployments where leadership rotates without 
 | Concern | Mechanism |
 |---|---|
 | DataProtection key-ring across replicas | `RedbXmlRepository` — redb-persisted XML keys; every replica refreshes its in-memory snapshot every `XmlRepositoryRefreshInterval` (default 60s). **Not** cluster-gated by design — every node must catch keys rotated by others. |
-| OAuth signing keys across replicas | `EavSigningKeyStore` — RSA 2048 PEMs, DataProtection-encrypted at rest, bootstrapped under a distributed lock so only one replica generates the first key. |
+| OAuth signing keys across replicas | `PropsSigningKeyStore` — RSA 2048 PEMs, DataProtection-encrypted at rest, bootstrapped under a distributed lock so only one replica generates the first key. Off by default (`UsePropsSigningKeyStore=false`); switch it on for multi-replica. |
 | Cleanup timers (tokens / sessions / MFA OTP / WebAuthn challenges / revoked SIDs) | Registered with `.Cluster(true)` — leader-only in a clustered Tsak deployment, silently ignored in standalone. Even without the marker, every cleanup uses `IBackgroundDeletionService` (claim pattern), so concurrent execution is safe — `.Cluster(true)` is belt-and-suspenders + log-noise reduction. |
 | MFA atomicity under concurrency | `SELECT FOR UPDATE` on the MFA row + `FailedAttempts++` inside the same transaction (G2). TOTP replay window enforced per RFC 6238 §5.2 (G3). |
 | Backchannel logout across replicas | `/revoked-sids/add` writes the revocation; `/revoked-sids/since?cursor=` lets every RP replica pull deltas. Push-and-poll, not push-only — survives lost RP nodes and broken network partitions. |

@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A look at the gRPC facade, with nothing to install.
+
+    Deliberately NOT part of the solution and NOT referencing any redb project: it compiles the published
+    .proto files the way any consumer would, and talks to the facade over the wire. That keeps it honest
+    about what a caller actually needs — the two .proto files and a channel — and keeps `dotnet run` from
+    dragging the whole tree into a build.
+
+    It is a viewer, not a test. The interop proof lives in redb.Route.Tests.Grpc and demo_grpc_facade.ps1,
+    where the client is a foreign stack in a container; here the point is only to see the thing work.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Redb.Identity.GrpcViewer</RootNamespace>
+    <AssemblyName>grpc-viewer</AssemblyName>
+    <!-- Never packed, never published; it exists to be `dotnet run`. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.33.1" />
+    <PackageReference Include="Grpc.Net.Client" Version="2.72.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.76.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The published contracts, compiled with client stubs — exactly what a consumer generates. -->
+    <Protobuf Include="..\..\src\redb.Identity.Contracts\Protos\identity.v1.proto"
+              GrpcServices="Client" ProtoRoot="..\..\src\redb.Identity.Contracts\Protos" />
+    <Protobuf Include="..\..\src\redb.Identity.Contracts\Protos\identity.management.v1.proto"
+              GrpcServices="Client" ProtoRoot="..\..\src\redb.Identity.Contracts\Protos" />
+  </ItemGroup>
+
+</Project>

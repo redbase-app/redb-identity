@@ -287,6 +287,30 @@ public static class IdentityEndpoints
     /// </summary>
     public const string AuthScim = "direct-vm://identity-auth-scim";
 
+    /// <summary>
+    /// Granular authorization check for the management surface: given a resource, an action and the
+    /// scopes an already-authenticated caller holds, decides whether the call may proceed.
+    /// <para>
+    /// Transport-neutral on purpose. Every facade authenticates in its own vocabulary but must not carry
+    /// its own copy of the scope table - two copies drift, and the one that drifts quietly is the one
+    /// that grants too much. So the table lives here, once, and each transport supplies three inputs:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><c>identity:authz-resource</c> - the canonical resource identifier, e.g.
+    ///   <c>/api/v1/identity/users</c>. HTTP passes its own path unchanged; other transports map their
+    ///   addresses onto the same identifiers.</item>
+    ///   <item><c>identity:authz-action</c> - <c>read</c> or <c>write</c>. Write implies read, never the
+    ///   inverse.</item>
+    ///   <item><c>identity:management-scopes</c> - set by the authentication step that ran before this
+    ///   one (<see cref="AuthManagement"/>).</item>
+    /// </list>
+    /// <para>
+    /// A refusal is a 403 with <c>insufficient_scope</c>, in the same shape the rest of Core uses for its
+    /// verdicts, so each facade renders it in its own protocol without a second table.
+    /// </para>
+    /// </summary>
+    public const string AuthzCheck = "direct-vm://identity-authz-check";
+
     // ── Route IDs ──
 
     public static class RouteIds
@@ -368,6 +392,7 @@ public static class IdentityEndpoints
 
         // Cross-context auth processor entry points.
         public const string AuthManagement = "identity-auth-management";
+        public const string AuthzCheck = "identity-authz-check";
         public const string AuthScim = "identity-auth-scim";
     }
 }

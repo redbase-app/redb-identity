@@ -4,8 +4,7 @@ using redb.Identity.Contracts.Scim;
 using redb.Identity.Contracts.Scopes;
 using redb.Identity.Contracts.Users;
 using redb.Identity.Contracts.Validation;
-using redb.Identity.Http.Controllers;
-using Xunit;
+using redb.Identity.Management.Controllers;using Xunit;
 
 namespace redb.Identity.Tests.Validation;
 

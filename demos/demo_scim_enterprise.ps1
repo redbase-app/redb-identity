@@ -79,12 +79,16 @@ $boss = Invoke-RestMethod -Method Post "$SCIM/Users" -Headers $H -ContentType $C
 } | ConvertTo-Json)
 Write-Host "  manager id = $($boss.id) ($($boss.displayName))"
 
+# The e-mail has to be as unique as the userName: _users._email carries a UNIQUE constraint, so a fixed
+# address made this demo single-use — it passed once and collided on every later run.
+$emp = "emp_$([Guid]::NewGuid().ToString('N').Substring(0,8))"
+
 $body = @{
     schemas = @('urn:ietf:params:scim:schemas:core:2.0:User', $ENT)
-    userName = "emp_$([Guid]::NewGuid().ToString('N').Substring(0,8))"
+    userName = $emp
     displayName = "Grace Hopper"
     active = $true
-    emails = @(@{ value = "grace@example.com"; type = "work"; primary = $true })
+    emails = @(@{ value = "$emp@example.com"; type = "work"; primary = $true })
 }
 $body[$ENT] = @{
     employeeNumber = "E-1906"

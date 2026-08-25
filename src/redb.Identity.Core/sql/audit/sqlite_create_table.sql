@@ -30,6 +30,22 @@ CREATE TABLE IF NOT EXISTS identity_audit_log (
     CONSTRAINT uq_audit_event_id UNIQUE (event_id)
 );
 
+-- Reconciling an existing table: NOT possible here, and deliberately not faked.
+--
+-- The Postgres and MSSQL scripts add missing columns idempotently, because a database created before a
+-- column existed never gains it from CREATE TABLE IF NOT EXISTS — the audit query then fails on
+-- `category` / `login` and the operator sees "Database temporarily unavailable", which points at the
+-- wrong thing. SQLite has no conditional DDL: `ALTER TABLE ... ADD COLUMN` cannot be guarded by
+-- IF NOT EXISTS, and re-running it on a current database is an error rather than a no-op.
+--
+-- So an existing SQLite file predating these columns must be migrated by hand:
+--
+--     ALTER TABLE identity_audit_log ADD COLUMN category TEXT;
+--     ALTER TABLE identity_audit_log ADD COLUMN login    TEXT;
+--
+-- Check first with `PRAGMA table_info(identity_audit_log);`. Fresh files are unaffected: the CREATE above
+-- already carries every column.
+
 CREATE INDEX IF NOT EXISTS ix_audit_timestamp  ON identity_audit_log(timestamp);
 CREATE INDEX IF NOT EXISTS ix_audit_event_type ON identity_audit_log(event_type);
 CREATE INDEX IF NOT EXISTS ix_audit_category   ON identity_audit_log(category);

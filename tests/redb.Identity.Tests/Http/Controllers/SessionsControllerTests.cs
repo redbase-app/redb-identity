@@ -1,8 +1,7 @@
 using FluentAssertions;
 using NSubstitute;
 using redb.Identity.Contracts.Routes;
-using redb.Identity.Http.Controllers;
-using redb.Route.Abstractions;
+using redb.Identity.Management.Controllers;using redb.Route.Abstractions;
 using Xunit;
 
 namespace redb.Identity.Tests.Http.Controllers;

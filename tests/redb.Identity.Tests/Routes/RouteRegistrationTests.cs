@@ -89,8 +89,10 @@ public class RouteRegistrationTests
         // + 1 B.3 role management (identity-manage-roles).
         // + 1 S2 claim-definitions management (identity-manage-claim-definitions).
         // + 1 W1 webhook subscription management (identity-manage-webhooks).
-        //   Total → 46 + 3 = 49.
-        _builder.Definitions.Should().HaveCount(49);
+        // + 1 Ф5 transport-neutral authorization check (identity-authz-check), unconditional:
+        //   a facade calling an address that is not registered would fail open.
+        //   Total: 49 + 1 = 50.
+        _builder.Definitions.Should().HaveCount(50);
     }
 
     [Fact]
@@ -218,7 +220,7 @@ public class RouteRegistrationTests
         var builder = new IdentityCoreRouteBuilder(sp, sp.GetRequiredService<IOptions<RedbIdentityOptions>>());
         ((IRouteBuilder)builder).Configure(null!);
 
-        builder.Definitions.Should().HaveCount(52);
+        builder.Definitions.Should().HaveCount(53);
         var ids = builder.Definitions.Select(d => d.GetRouteId()).ToList();
         ids.Should().Contain("identity-me-webauthn");
         ids.Should().Contain("identity-mfa-webauthn");
@@ -264,7 +266,7 @@ public class RouteRegistrationTests
         ((IRouteBuilder)builder).Configure(null!);
 
         // Default 49 + 1 PAR route = 50.
-        builder.Definitions.Should().HaveCount(50);
+        builder.Definitions.Should().HaveCount(51);
         var ids = builder.Definitions.Select(d => d.GetRouteId()).ToList();
         ids.Should().Contain("identity-par");
     }
@@ -309,8 +311,8 @@ public class RouteRegistrationTests
         var builder = new IdentityCoreRouteBuilder(sp, sp.GetRequiredService<IOptions<RedbIdentityOptions>>());
         ((IRouteBuilder)builder).Configure(null!);
 
-        // Default 49 + 2 SCIM (Users + Groups) + 1 SCIM Bulk = 52.
-        builder.Definitions.Should().HaveCount(52);
+        // Default 50 + 2 SCIM (Users + Groups) + 1 SCIM Bulk = 53.
+        builder.Definitions.Should().HaveCount(53);
         var ids = builder.Definitions.Select(d => d.GetRouteId()).ToList();
         ids.Should().Contain(IdentityEndpoints.RouteIds.ScimUsers);
         ids.Should().Contain(IdentityEndpoints.RouteIds.ScimGroups);
@@ -354,7 +356,7 @@ public class RouteRegistrationTests
         ((IRouteBuilder)builder).Configure(null!);
 
         // Default 49 + 2 SCIM (Users + Groups), bulk omitted = 51.
-        builder.Definitions.Should().HaveCount(51);
+        builder.Definitions.Should().HaveCount(52);
         var ids = builder.Definitions.Select(d => d.GetRouteId()).ToList();
         ids.Should().NotContain(IdentityEndpoints.RouteIds.ScimBulk);
     }

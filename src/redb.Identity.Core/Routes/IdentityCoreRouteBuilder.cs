@@ -57,17 +57,43 @@ public class IdentityCoreRouteBuilder : RouteBuilder
 
         // ── Builder-level error handling ──
 
-        // DB transient errors → retry 3x with exponential backoff
+        // DB errors: transient ones are retried, deterministic ones are not.
+        //
+        // One handler and not two: the context registers a global handler per exception type and refuses a
+        // second for DbException, so the distinction has to be made inside.
+        //
+        // A unique-constraint violation collides on the third attempt exactly as it did on the first, so
+        // RetryWhile keeps the retries for real outages. And it is a conflict, not an outage: answering
+        // 503 tells the caller "the database is down, come back later" about something only they can fix
+        // and that will never fix itself. Processors that already catch this — applications, claim scopes,
+        // bootstrap, idempotency — never reach here; users, groups, roles and SCIM do, and used to be told
+        // the database was unavailable. A SCIM demo reusing one e-mail address was reported that way, and
+        // the hunt started there instead of ending there.
         OnException<DbException>()
             .MaximumRedeliveries(3)
             .RedeliveryDelay(TimeSpan.FromMilliseconds(200))
             .UseExponentialBackOff()
             .BackOffMultiplier(2.0)
+            // The redelivery count is repeated here on purpose. RetryWhile does not narrow
+            // MaximumRedeliveries — it REPLACES it: OnExceptionProcessor takes the predicate instead of
+            // the count check, inside a `while (true)` with no outer bound. A predicate that only asked
+            // "is this not a unique violation?" would therefore retry an ordinary outage forever.
+            .RetryWhile(e => !IdentityProcessorHelpers.IsUniqueViolation(e.Exception))
             .Handled()
             .LogStackTrace()
             .Process(e =>
             {
                 var outMsg = EnsureOut(e);
+
+                if (IdentityProcessorHelpers.IsUniqueViolation(e.Exception))
+                {
+                    // Same vocabulary the management processors already use for a duplicate, so a caller
+                    // sees one answer for one situation regardless of which surface produced it.
+                    outMsg.Body = ErrorResponse("duplicate", "A record with these values already exists.");
+                    outMsg.Headers["redbHttp.ResponseCode"] = 409;
+                    return;
+                }
+
                 outMsg.Body = ErrorResponse("server_error", "Database temporarily unavailable.");
                 outMsg.Headers["redbHttp.ResponseCode"] = 503;
             });
@@ -833,6 +859,13 @@ public class IdentityCoreRouteBuilder : RouteBuilder
             From(IdentityEndpoints.AuthScim)
                 .RouteId(IdentityEndpoints.RouteIds.AuthScim)
                 .Process(_scimAuth);
+
+        // Ф5 — granular scope check, transport-neutral. Always registered: unlike the auth processors
+        // above it needs nothing injected, and a facade calling an address that is not there would fail
+        // open at the route layer, which is the one direction an authorization gate must never fail.
+        From(IdentityEndpoints.AuthzCheck)
+            .RouteId(IdentityEndpoints.RouteIds.AuthzCheck)
+            .Process(new AuthorizationCheckProcessor());
 
         // ── B1: emergency-admin bootstrap ──
         // Always registered (even when disabled) so the HTTP facade does not 404 at the

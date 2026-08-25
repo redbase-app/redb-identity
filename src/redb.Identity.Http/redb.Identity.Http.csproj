@@ -14,15 +14,21 @@
     -->
     <ProjectReference Include="..\redb.Identity.Contracts\redb.Identity.Contracts.csproj" />
     <!--
+      Management and self-service controllers live in their own package so a second transport
+      can serve the same surface without referencing this facade. SCIM stays here: RFC 7644 is
+      an HTTP protocol, and its base reads redbHttp.Url to build Location headers.
+    -->
+    <ProjectReference Include="..\redb.Identity.Management\redb.Identity.Management.csproj" />
+    <!--
       Phase 9a/9b: Http facade gets its own redb-backed DataProtection key-ring via the
       shared `redb.Identity.DataProtection` project. The XML repository is bridged to
       the host's IServiceScopeFactory by `IdentityHttpModuleHost`, so the Http context
       shares the cluster-wide key-ring with Core without referencing it.
     -->
     <ProjectReference Include="..\redb.Identity.DataProtection\redb.Identity.DataProtection.csproj" />
-    <PackageReference Include="redb.Core" Version="3.6.0" />
-    <PackageReference Include="redb.Route.Http" Version="3.6.0" />
-    <PackageReference Include="redb.Route.Controllers" Version="3.6.0" />
+    <PackageReference Include="redb.Core" Version="3.7.0" />
+    <PackageReference Include="redb.Route.Http" Version="3.7.0" />
+    <PackageReference Include="redb.Route.Controllers" Version="3.7.0" />
   </ItemGroup>
 
   <ItemGroup>

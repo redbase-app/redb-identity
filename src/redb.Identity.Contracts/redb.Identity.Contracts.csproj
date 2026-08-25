@@ -6,6 +6,13 @@
     <Description>Transport-agnostic request/response DTOs and route-name constants for redb.Identity, shared by Core, Http and Client.</Description>
   </PropertyGroup>
 
+  <!-- The gRPC facade compiles these; the package ships them as files so non-.NET consumers
+       (and anyone generating their own stubs) can take the contract from NuGet instead of the repo.
+       Contracts itself stays dependency-free — no Grpc.Tools, no Google.Protobuf here. -->
+  <ItemGroup>
+    <None Include="Protos/*.proto" Pack="true" PackagePath="content/Protos/;contentFiles/any/any/Protos/" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="System.Text.Json" Version="10.0.3" />
   </ItemGroup>

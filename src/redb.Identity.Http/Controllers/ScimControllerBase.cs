@@ -1,4 +1,5 @@
 using redb.Identity.Contracts.Validation;
+using redb.Identity.Management.Controllers;
 using redb.Route.Abstractions;
 using redb.Route.Core;
 

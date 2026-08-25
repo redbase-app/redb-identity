@@ -1,0 +1,10 @@
+{
+  "//": [
+    "Tsak Layer 4 stub — module identity only.",
+    "All business config lives in the EXTERNAL Libs/context.json (Layer 3), alongside the .tpkg files.",
+    "The gRPC facade reads IdentityTransport:Grpc:* there; shared issuer and feature flags come from",
+    "Identity:* — the same section Core and the HTTP facade read."
+  ],
+  "ContextName": "identity.grpc",
+  "AutoStart": true
+}

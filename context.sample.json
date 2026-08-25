@@ -685,6 +685,61 @@
           }
         ]
       }
+    },
+
+    "//identity.grpc": [
+      "Read by the gRPC facade (IdentityGrpcModuleHost + IdentityGrpcTransportOptions binder).",
+      "Same IdentityTransport:* root as the HTTP facade, different sub-section — one section per",
+      "transport, so operators configure both facades the same way. Core (identity.core) ignores it.",
+      "Scope: the service-to-service subset (token, introspect, revoke, userinfo, discovery, jwks).",
+      "Browser flows and DPoP stay on HTTP by design — see doc/gRPC/README.md."
+    ],
+    "identity.grpc": {
+      "IdentityTransport": {
+        "Grpc": {
+          "//": [
+            "Host             — bind address. 0.0.0.0 to accept from outside the machine.",
+            "PublicPort       — protocol surface. NEVER share a port with the HTTP facade: gRPC needs",
+            "                   HTTP/2 while HTTP serves HTTP/1.1+2, and one Kestrel listener has a",
+            "                   single protocol set. The shared host throws on that conflict.",
+            "ManagementPort   — admin surface. Null = share PublicPort (DEV). PROD: separate firewalled",
+            "                   port — different consumers, different blast radius.",
+            "Compression      — None | Gzip. Inbound gzip is always accepted regardless.",
+            "Health           — serve grpc.health.v1.Health/Check for k8s / Consul / Envoy probes.",
+            "EmitHttpCompatHeaders — mirror the client IP into redbHttp.RemoteAddress so Core's per-IP",
+            "                   throttle and brute-force lockout work behind this facade. Leave ON:",
+            "                   those protections silently no-op when the header is missing."
+          ],
+          "Host": "0.0.0.0",
+          "PublicPort": 5011,
+          "//ManagementPort": "PROD: separate firewalled port, e.g. 5012. Null = share PublicPort (DEV only).",
+          "ManagementPort": null,
+
+          "//Ssl": [
+            "TLS for the gRPC listener. SslCertPassword is a SECRET in production — supply via an L5",
+            "Override env-var:",
+            "  Tsak__Contexts__identity.grpc__Override__IdentityTransport__Grpc__SslCertPassword=<PASSWORD>"
+          ],
+          "Ssl": false,
+          "SslCertPath": null,
+          "SslCertPassword": null,
+
+          "//ClientCertificateMode": [
+            "mTLS: NoCertificate | AllowCertificate | RequireCertificate. Requires Ssl=true.",
+            "OFF by default so deployments without a client-certificate PKI are not blocked.",
+            "RECOMMENDED for the management port in production.",
+            "AllowedClientThumbprints — CSV of SHA-1 thumbprints; when set, a certificate outside the",
+            "list is rejected even if its chain validates."
+          ],
+          "ClientCertificateMode": "NoCertificate",
+          "AllowedClientThumbprints": null,
+
+          "Compression": "None",
+          "MaxMessageSize": 4194304,
+          "Health": true,
+          "EmitHttpCompatHeaders": true
+        }
+      }
     }
 
   }

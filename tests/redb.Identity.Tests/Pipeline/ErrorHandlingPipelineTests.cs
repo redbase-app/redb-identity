@@ -10,6 +10,8 @@ using redb.Identity.Core.Models;
 using redb.Identity.Contracts.Routes;
 using redb.Identity.Tests.Infrastructure;
 using Xunit;
+using redb.Identity.Contracts.Users;
+using CoreCreateUserRequest = redb.Core.Models.Users.CreateUserRequest;
 
 namespace redb.Identity.Tests.Pipeline;
 
@@ -154,6 +156,77 @@ public class ErrorHandlingPipelineTests
     /// Creates a minimal DbException subclass for testing.
     /// DbException is abstract, so we need a concrete implementation.
     /// </summary>
+
+    [Fact]
+    public async Task UniqueViolation_IsAConflict_NotADatabaseOutage()
+    {
+        // A unique-constraint violation is deterministic: retrying it cannot help, and 503 tells the
+        // caller "the database is down, come back later" about a conflict only they can resolve.
+        //
+        // Deliberately on the users surface. ApplicationManagementProcessor catches unique violations
+        // itself, so that path was always right; users, groups, roles and SCIM do not, and fell through
+        // to the builder-level handler that answered 503. A SCIM demo reusing one e-mail address was
+        // reported as a database outage, and the hunt started there instead of ending there.
+        _fixture.Redb.UserProvider.CreateUserAsync(Arg.Any<CoreCreateUserRequest>(), Arg.Any<IRedbUser?>())
+            .ThrowsAsync(CreateDbException("SQLite Error 19: 'UNIQUE constraint failed: _users._email'."));
+
+        var exchange = await _fixture.RequestWithHeaders(
+            IdentityEndpoints.ManageUsers,
+            new CreateUserRequest
+            {
+                Login = "dup-user",
+                Password = "P@ssw0rd!",
+                DisplayName = "Duplicate User"
+            },
+            new Dictionary<string, object?> { ["operation"] = "create" });
+
+        exchange.ExceptionHandled.Should().BeTrue();
+
+        var target = exchange.HasOut ? exchange.Out! : exchange.In;
+        target.Headers["redbHttp.ResponseCode"].Should().Be(409,
+            "a conflict is the caller's to fix; 503 invites a retry that can never succeed");
+
+        var body = (target.Body as Dictionary<string, object>) ?? (exchange.In.Body as Dictionary<string, object>);
+        body.Should().NotBeNull();
+        body!["error"].Should().Be("duplicate");
+
+        var description = body["error_description"]!.ToString()!;
+        description.Should().NotContain("temporarily unavailable");
+        description.Should().NotContain("_users._email", "the failing statement is not the caller's business");
+    }
+
+    [Fact]
+    public async Task TransientDbErrors_AreRetried_ButABoundedNumberOfTimes()
+    {
+        // The guard on the fix above. RetryWhile does not narrow MaximumRedeliveries, it REPLACES it:
+        // the processor takes the predicate instead of the count check, inside a `while (true)` with no
+        // outer bound. A predicate that only asked "is this not a unique violation?" would retry an
+        // ordinary outage forever, which is a far worse failure than the 503 it set out to fix.
+        var attempts = 0;
+        _fixture.Redb.UserProvider.CreateUserAsync(Arg.Any<CoreCreateUserRequest>(), Arg.Any<IRedbUser?>())
+            .Returns<IRedbUser>(_ => { attempts++; throw CreateDbException("connection refused"); });
+
+        var exchange = await _fixture.RequestWithHeaders(
+            IdentityEndpoints.ManageUsers,
+            new CreateUserRequest
+            {
+                Login = "outage-user",
+                Password = "P@ssw0rd!",
+                DisplayName = "Outage User"
+            },
+            new Dictionary<string, object?> { ["operation"] = "create" });
+
+        exchange.ExceptionHandled.Should().BeTrue();
+
+        var target = exchange.HasOut ? exchange.Out! : exchange.In;
+        target.Headers["redbHttp.ResponseCode"].Should().Be(503, "a real outage is still transient");
+
+        // One first call plus at most three redeliveries. The number matters less than the fact that it
+        // terminates at all: without a bound this test would never return.
+        attempts.Should().BeGreaterThan(1, "a transient error is worth retrying");
+        attempts.Should().BeLessThanOrEqualTo(4, "and the retries must stop");
+    }
+
     private static DbException CreateDbException(string message)
     {
         return new TestDbException(message);

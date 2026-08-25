@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using redb.Identity.Management;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -612,19 +613,10 @@ internal static class HttpIdentityProcessors
 
             if (error is null) return Task.CompletedTask;
 
-            var statusCode = error switch
-            {
-                "not_found" => 404,
-                "duplicate" => 409,
-                "validation_error" => 400,
-                "invalid_request" => 400,
-                "invalid_operation" => 400,
-                "invalid_password" => 400,
-                "weak_password" => 400,
-                "registration_disabled" => 403,
-                "server_error" => 500,
-                _ => 400,
-            };
+            // The table moved to redb.Identity.Management when a second transport needed the same
+            // verdicts: the package that owns the controllers owns what their error codes mean, and one
+            // table cannot drift from itself.
+            var statusCode = ManagementErrorCodes.ToStatusCode(error);
 
             // Create Out to override the pipeline's restored lastOut (which has status 200).
             // Body is already serialized byte[] JSON from the controller dispatcher.

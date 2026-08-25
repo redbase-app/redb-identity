@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using redb.Identity.Contracts.Routes;
 using redb.Identity.Contracts.Cors;
 using redb.Identity.Http.Controllers;
+using redb.Identity.Management.Controllers;
 using redb.Identity.Http.Endpoints;
 using redb.Identity.Http.Security;
 using redb.Identity.Http.Cors;
@@ -695,7 +696,13 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         // any reference to Core's internal processor type.
         route.To(IdentityEndpoints.AuthManagement);
 
-        route.Process(GranularScopeGuardProcessor.Enforce)
+        // Ф5: the scope table lives in Core now, behind direct-vm://identity-authz-check, because a
+        // second transport needed it and two copies of an authorization table drift in the direction
+        // that grants too much. Same call style as the auth step above: synchronous, same exchange.
+        route.Process(GranularScopeGuardProcessor.Describe);
+        route.To(IdentityEndpoints.AuthzCheck);
+
+        route
             .Process(HttpIdentityProcessors.StripManagementPrefix)
             .RedbHttpController(registry)
             .Process(HttpIdentityProcessors.MapManagementErrorToHttpStatus);
