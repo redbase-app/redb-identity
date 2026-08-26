@@ -1,7 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <!-- Tests pin ONE TFM. Directory.Build.props sets TargetFrameworks (plural) for the libraries,
+         and when both are set MSBuild takes the plural one, so a bare single declaration here is
+         silently ignored: the tests would multi-target onto net10-only app projects (NU1201) or
+         compile down to a TFM lacking net9+ APIs such as Convert.ToHexStringLower. Clearing the
+         plural form is what actually pins one TFM. -->
+    <TargetFrameworks></TargetFrameworks>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>

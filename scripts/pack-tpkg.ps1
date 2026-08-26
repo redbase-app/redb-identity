@@ -74,8 +74,8 @@ if (-not $TsakModules) {
     # host-provided framework DLLs and stays below as an exclude source, but nothing is dropped there.
     $TsakModules = Join-Path $RepoRoot "redb.Tsak\src\redb.Tsak.Worker\modules"
 }
-$TsakWorkerBinRelease = Join-Path $RepoRoot "redb.Tsak\src\redb.Tsak.Worker\bin\Release\net9.0"
-$TsakWorkerBinDebug   = Join-Path $RepoRoot "redb.Tsak\src\redb.Tsak.Worker\bin\Debug\net9.0"
+$TsakWorkerBinRelease = Join-Path $RepoRoot "redb.Tsak\src\redb.Tsak.Worker\bin\Release\net10.0"
+$TsakWorkerBinDebug   = Join-Path $RepoRoot "redb.Tsak\src\redb.Tsak.Worker\bin\Debug\net10.0"
 $TsakLibsRoot         = Join-Path $RepoRoot "redb.Tsak\src\redb.Tsak.Worker\Libs"
 $TsakSharedLibs       = Join-Path $TsakLibsRoot "shared"
 
@@ -145,7 +145,7 @@ function Pack-Module {
 
     Write-Host "`n=== Packing $ModuleName ===" -ForegroundColor Cyan
 
-    $bin       = Join-Path $ProjectDir "bin\$Configuration\net9.0"
+    $bin       = Join-Path $ProjectDir "bin\$Configuration\net10.0"
     $manifest  = Join-Path $ProjectDir "Module\manifest.json"
     $config    = Join-Path $ProjectDir $ConfigFileName
 

@@ -16,10 +16,17 @@
       Core where the option type lives.
     -->
     <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="9.0.4" />
+    <!-- Direct override of a transitive dependency. Microsoft.AspNetCore.DataProtection 9.0.4 drags in
+         System.Security.Cryptography.Xml 9.0.4, which carries SEVEN high-severity advisories
+         (GHSA-23rf-6693-g89p, -37gx-xxp4-5rgx, -6588-8gv4-xfgh, -8q5v-6pqq-x66h, -cvvh-rhrc-wg4q,
+         -g8r8-53c2-pm3f, -mmjf-rqrv-855v) and reached the PUBLISHED redb.Identity.DataProtection
+         package. 9.0.18 is the patched 9.x release — the same version redb.Route.Soap already pins.
+         Kept on 9.x rather than 10.x because these libraries multi-target down to net8.0. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="9.0.18" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="redb.Core" Version="3.7.0" />
+    <PackageReference Include="redb.Core" Version="3.7.1" />
   </ItemGroup>
 
 </Project>

@@ -16,7 +16,7 @@
       applies to the facades applies to this package too.
     -->
     <ProjectReference Include="..\redb.Identity.Contracts\redb.Identity.Contracts.csproj" />
-    <PackageReference Include="redb.Route.Controllers" Version="3.7.0" />
+    <PackageReference Include="redb.Route.Controllers" Version="3.7.1" />
   </ItemGroup>
 
   <ItemGroup>

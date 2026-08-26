@@ -32,6 +32,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > as valid history; the jump to `3.4.0` is a realignment onto the shared number, not a breaking change.
 > NuGet publication follows the source cut.
 
+## [3.7.1] — 2026-08-26
+
+> **Почему 3.7.1 и что стало с 3.7.0.** 3.7.0 отозван: он собран на .NET 9 и несёт известные
+> уязвимости в зависимостях (см. **Security** ниже). Пакеты 3.7.0 на nuget.org разлистены, релизы
+> `v3.7.0` на публичных зеркалах удалены. Разлистованная версия остаётся устанавливаемой по
+> точному номеру — но ставить её не нужно, 3.7.1 её полностью заменяет.
+>
+> Патч, а не минор: публичная поверхность API не меняется. Добавление `net10.0` к списку целевых
+> платформ ничего не ломает у существующих потребителей, а `net8.0` и `net9.0` сохранены.
+
+### Changed — сборка переехала на .NET 10
+
+Приложения и артефакты собирались на net9, при том что ядро и `redb.Route` давно мультитаргетились
+`net8.0;net9.0;net10.0`. Расхождение вылезло на 3.7.0: образы и архивы уехали как net9.
+
+Библиотеки `redb.Tsak.*` и `redb.Identity.*` теперь объявляют `net8.0;net9.0;net10.0` — ровно как
+ядро и Route, вся экосистема стала однородной. Хост-приложения и тесты прибиты к одному `net10.0`.
+Образы, архивы и теги `-net10`.
+
+`.NET 8` и `.NET 9` уходят из поддержки Microsoft **10 ноября 2026**, обе версии в один день:
+срок STS-девятки выровняли с LTS-восьмёркой. `.NET 10` поддерживается до **14 ноября 2028**.
+`net8.0` и `net9.0` пока остаются в списке целевых платформ библиотек.
+
+### Security — шесть уязвимостей высокого уровня
+
+Найдены при переводе на .NET 10: смена TFM заставила пересобрать дерево с нуля, и NuGet-аудит
+заговорил. При инкрементальной сборке он молчал, поэтому всё это уехало в 3.7.0.
+- **`redb.Identity.DataProtection` — `System.Security.Cryptography.Xml` 9.0.4, СЕМЬ advisory разом**
+  ([GHSA-23rf-6693-g89p], [GHSA-37gx-xxp4-5rgx], [GHSA-6588-8gv4-xfgh], [GHSA-8q5v-6pqq-x66h],
+  [GHSA-cvvh-rhrc-wg4q], [GHSA-g8r8-53c2-pm3f], [GHSA-mmjf-rqrv-855v] — все высокого уровня).
+  Приезжал транзитивно из `Microsoft.AspNetCore.DataProtection` 9.0.4. Библиотека криптографии XML
+  в продукте, который занимается аутентификацией. Пин на 9.0.18 — патченый релиз 9.x.
+- **`redb.Identity.Http` — `Microsoft.Bcl.Memory` 9.0.0** ([GHSA-73j8-2gch-69rq], высокий),
+  транзитивно из `OpenIddict.Abstractions`. Пин на 9.0.19.
+
+Версии 9.x, а не 10.x: библиотеки мультитаргетятся вниз до `net8.0`, куда 10.x не встанет.
+
+[GHSA-23rf-6693-g89p]: https://github.com/advisories/GHSA-23rf-6693-g89p
+[GHSA-37gx-xxp4-5rgx]: https://github.com/advisories/GHSA-37gx-xxp4-5rgx
+[GHSA-6588-8gv4-xfgh]: https://github.com/advisories/GHSA-6588-8gv4-xfgh
+[GHSA-8q5v-6pqq-x66h]: https://github.com/advisories/GHSA-8q5v-6pqq-x66h
+[GHSA-cvvh-rhrc-wg4q]: https://github.com/advisories/GHSA-cvvh-rhrc-wg4q
+[GHSA-g8r8-53c2-pm3f]: https://github.com/advisories/GHSA-g8r8-53c2-pm3f
+[GHSA-mmjf-rqrv-855v]: https://github.com/advisories/GHSA-mmjf-rqrv-855v
+[GHSA-73j8-2gch-69rq]: https://github.com/advisories/GHSA-73j8-2gch-69rq
+
 ## [3.7.0] — 2026-08-25
 
 > **Why a minor.** Two new packages ship: `redb.Identity.Grpc` (a second facade beside HTTP) and
