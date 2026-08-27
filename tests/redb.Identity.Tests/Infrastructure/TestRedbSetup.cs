@@ -55,6 +55,17 @@ public static class TestRedbSetup
             StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// PVT prefilter, on by default so the suite exercises it. Set <c>REDB_PVT_PREFILTER=false</c> to
+    /// take it out of the picture — worth doing when a failure needs to be attributed, since the
+    /// prefilter is a superset that must never change a result.
+    /// </summary>
+    public static bool UsePvtPrefilter =>
+        !string.Equals(
+            Environment.GetEnvironmentVariable("REDB_PVT_PREFILTER")?.Trim(),
+            "false",
+            StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Add redb to <paramref name="services"/>. The <paramref name="postgresConnString"/>
     /// is the historical local-dev default — used verbatim when REDB_PROVIDER=postgres
     /// and as a sentinel otherwise. SQLite / MSSQL pull their connection strings from
@@ -79,6 +90,13 @@ public static class TestRedbSetup
                     c.PropsSaveStrategy = PropsSaveStrategy.ChangeTracking;
                     c.EnableLazyLoadingForProps = false;
                     c.EnablePropsCache = false;
+
+                    // PVT prefilter: narrows the object set before the pivot aggregate, so a selective
+                    // filter stops costing a full scheme scan. It is a superset and must never change a
+                    // result — which is exactly what running this suite with it on is worth proving.
+                    // Implemented by all three Pro providers, so it is not gated on the provider here.
+                    c.EnablePvtPrefilter = UsePvtPrefilter;
+
                     configure?.Invoke(c);
                 });
             });

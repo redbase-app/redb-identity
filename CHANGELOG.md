@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > as valid history; the jump to `3.4.0` is a realignment onto the shared number, not a breaking change.
 > NuGet publication follows the source cut.
 
+## [3.7.2] — 2026-08-27
+
+No changes of its own. The version moves with the ecosystem so the exact-version pins between packages keep resolving, and the images pick up the fixed `redb.Tsak.Core` and core packages from their base layer.
+
 ## [3.7.1] — 2026-08-26
 
 > **Why 3.7.1, and what happened to 3.7.0.** 3.7.0 is withdrawn: it was built on .NET 9 and carries
