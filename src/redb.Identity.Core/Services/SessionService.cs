@@ -203,10 +203,8 @@ public sealed class SessionService
                 .ToListAsync()
                 .ConfigureAwait(false);
 
-            // Hydrate copies _objects.value_string -> Props.ClientId, since ClientId is
-            // [RedbIgnore] and stored on the base object, not the PROPS facets.
             foreach (var app in apps)
-                appsById[app.id] = app.Hydrate();
+                appsById[app.id] = app;
         }
 
         var result = new List<SessionInfo>(sessions.Count);
@@ -281,7 +279,7 @@ public sealed class SessionService
                 .WhereInRedb(o => o.Id, appIds)
                 .ToListAsync()
                 .ConfigureAwait(false);
-            foreach (var app in apps) appsById[app.id] = app.Hydrate();
+            foreach (var app in apps) appsById[app.id] = app;
         }
 
         var items = new List<SessionInfo>(sessions.Count);
@@ -292,7 +290,7 @@ public sealed class SessionService
             if (s.Props.ApplicationObjectId > 0
                 && appsById.TryGetValue(s.Props.ApplicationObjectId, out var app))
             {
-                clientId = app.value_string;
+                clientId = app.Props.ClientId ?? app.value_string;
                 appName = app.name;
             }
 

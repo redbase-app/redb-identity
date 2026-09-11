@@ -7,6 +7,7 @@ using Google.Protobuf;
 using IMessage = Google.Protobuf.IMessage;
 using RouteMessage = redb.Route.Abstractions.IMessage;
 using Grpc.Core;
+using redb.Identity.Contracts;
 using redb.Identity.Contracts.Routes;
 using redb.Route.Abstractions;
 using redb.Route.Core;
@@ -109,6 +110,11 @@ internal static class GrpcIdentityProcessors
     /// </summary>
     public static Task PropagateCorrelationId(IExchange exchange, CancellationToken ct)
     {
+        // First step on every gRPC route: caller metadata and envelope headers land in In.Headers
+        // verbatim, and Core trusts the reserved names (audit attribution, credentials, idempotency
+        // operation). Same list as the HTTP and SOAP facades.
+        redb.Identity.Contracts.Routes.IdentityReservedInboundHeaders.Strip(exchange.In.Headers);
+
         var correlationId = exchange.In.GetHeader<string>(CorrelationHeader);
 
         if (string.IsNullOrWhiteSpace(correlationId))
@@ -214,17 +220,10 @@ internal static class GrpcIdentityProcessors
         // InvalidArgument, and hide the one signal that tells the caller to back off.
         if (!target.Headers.ContainsKey(GrpcHeaders.StatusCode))
         {
-            // RFC 6749 5.2 semantics, expressed in the gRPC status space. Same table the HTTP facade uses
-            // for status codes, one translation further.
-            var status = error switch
-            {
-                "invalid_client" or "invalid_token" => StatusCode.Unauthenticated,
-                "access_denied" or "unauthorized_client" => StatusCode.PermissionDenied,
-                "server_error" => StatusCode.Internal,
-                "temporarily_unavailable" => StatusCode.Unavailable,
-                _ => StatusCode.InvalidArgument,
-            };
-            target.Headers[GrpcHeaders.StatusCode] = (int)status;
+            // The reading of the error lives in IdentityVerdict, shared with the HTTP and SOAP facades;
+            // only the rendering into the gRPC status space belongs here. Three transports had to answer
+            // the same question, and the copy that drifts is the one that accepts what the others refuse.
+            target.Headers[GrpcHeaders.StatusCode] = (int)ToGrpcStatus(IdentityVerdict.FromOAuthError(error));
         }
 
         // The error document says more than "upstream answered 429" ever could.
@@ -232,6 +231,35 @@ internal static class GrpcIdentityProcessors
 
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// Renders the core's verdict in the gRPC status space. This switch is the whole of what is specific
+    /// to this transport; deciding <em>what</em> the verdict is happens once, in
+    /// <see cref="IdentityVerdict"/>, and every facade reads it from there.
+    /// </summary>
+    private static StatusCode ToGrpcStatus(IdentityVerdictKind kind) => kind switch
+    {
+        IdentityVerdictKind.Ok => StatusCode.OK,
+        IdentityVerdictKind.Unauthenticated => StatusCode.Unauthenticated,
+        IdentityVerdictKind.Forbidden => StatusCode.PermissionDenied,
+        IdentityVerdictKind.NotFound => StatusCode.NotFound,
+        IdentityVerdictKind.Unsupported => StatusCode.Unimplemented,
+        IdentityVerdictKind.Conflict => StatusCode.AlreadyExists,
+        IdentityVerdictKind.PreconditionFailed => StatusCode.FailedPrecondition,
+        IdentityVerdictKind.RateLimited => StatusCode.ResourceExhausted,
+        IdentityVerdictKind.Unavailable => StatusCode.Unavailable,
+        IdentityVerdictKind.Timeout => StatusCode.DeadlineExceeded,
+        IdentityVerdictKind.ServerError => StatusCode.Internal,
+
+        // gRPC has no status for «the scope is wrong», so it lands where every other malformed request
+        // lands — which is exactly what this facade did before the verdict was named.
+        IdentityVerdictKind.InvalidScope or IdentityVerdictKind.BadRequest => StatusCode.InvalidArgument,
+
+        // A refusal we cannot read stays unreadable rather than being dressed up as our own failure.
+        IdentityVerdictKind.Unknown => StatusCode.Unknown,
+
+        _ => StatusCode.InvalidArgument,
+    };
 
     /// <summary>
     /// Translates a <c>redbHttp.ResponseCode</c> set by Core into a gRPC status. The mapping is the one
@@ -245,25 +273,9 @@ internal static class GrpcIdentityProcessors
         if (!source.Headers.TryGetValue("redbHttp.ResponseCode", out var raw) || raw is null)
             return Task.CompletedTask;
 
-        if (!int.TryParse(raw.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var code))
-            return Task.CompletedTask;
+        if (IdentityVerdict.ParseResponseCode(raw) is not { } code) return Task.CompletedTask;
 
-        var status = code switch
-        {
-            >= 200 and <= 299 => StatusCode.OK,
-            400 or 422 => StatusCode.InvalidArgument,
-            401 => StatusCode.Unauthenticated,
-            403 => StatusCode.PermissionDenied,
-            404 => StatusCode.NotFound,
-            405 or 501 => StatusCode.Unimplemented,
-            409 => StatusCode.AlreadyExists,
-            412 or 428 => StatusCode.FailedPrecondition,
-            429 => StatusCode.ResourceExhausted,
-            503 => StatusCode.Unavailable,
-            504 => StatusCode.DeadlineExceeded,
-            >= 500 => StatusCode.Internal,
-            _ => StatusCode.Unknown,
-        };
+        var status = ToGrpcStatus(IdentityVerdict.FromStatusCode(code));
 
         if (status == StatusCode.OK) return Task.CompletedTask;
 

@@ -92,8 +92,7 @@ public sealed class BackchannelLogoutDispatcher
         var delivered = 0;
         foreach (var loaded in apps)
         {
-            // Hydrate copies _objects.value_string -> Props.ClientId (ClientId is [RedbIgnore]).
-            var app = loaded.Hydrate();
+            var app = loaded;
             var props = app.Props;
             if (string.IsNullOrEmpty(props.BackchannelLogoutUri) || string.IsNullOrEmpty(props.ClientId))
                 continue;

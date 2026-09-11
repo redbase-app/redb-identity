@@ -1,0 +1,166 @@
+@page "/admin/claim-definitions/new"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    New claim definition — full-page form (Phase 3, П2: pages-not-dialogs).
+    Replaces the create half of the 640px ClaimDefinitionsList modal: the most
+    crowded modal of the console (~14 fields) finally gets a page where the
+    enforcement semantics can be explained next to each control.
+*@
+
+<div style="margin-bottom: var(--space-3);">
+    <NavLink href="/admin/claim-definitions" class="btn btn-ghost" style="padding: 0; color: var(--accent-primary);">← Go back to Claim definitions</NavLink>
+</div>
+
+<h1 style="margin: 0;">New claim definition</h1>
+<p class="text-secondary">Declarative schema for a custom claim: required / type / regex validated on user create and update, destination-controlled at token issuance.</p>
+
+<div class="card" style="max-width: 760px;">
+    <section class="app-detail__section">
+        <h3 class="app-detail__section-title">Identity</h3>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Claim name *</span>
+                <input class="app-detail__input app-detail__input--mono" placeholder="e.g. external_user_id" @bind="_form.ClaimName" />
+                <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Immutable after creation — delete + re-create to rename.</span>
+            </label>
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Type</span>
+                <select class="app-detail__input" @bind="_form.Type">
+                    <option value="string">string</option>
+                    <option value="int">int</option>
+                    <option value="long">long</option>
+                    <option value="bool">bool</option>
+                    <option value="datetime">datetime</option>
+                    <option value="url">url</option>
+                    <option value="email">email</option>
+                </select>
+            </label>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Scope</span>
+                <select class="app-detail__input" @bind="_form.Scope">
+                    <option value="global">global — every user</option>
+                    <option value="application">per-application</option>
+                </select>
+                <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Immutable after creation.</span>
+            </label>
+            @if (_form.Scope == "application")
+            {
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Application id *</span>
+                    <input type="number" class="app-detail__input" value="@_form.ApplicationId"
+                           @oninput="@(e => _form.ApplicationId = long.TryParse(e.Value?.ToString(), out var v) ? v : null)" />
+                    <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Internal id from /admin/applications.</span>
+                </label>
+            }
+        </div>
+    </section>
+
+    <section class="app-detail__section">
+        <h3 class="app-detail__section-title">Presentation</h3>
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Display name</span>
+            <input class="app-detail__input" @bind="_form.DisplayName" />
+        </label>
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Description</span>
+            <input class="app-detail__input" @bind="_form.Description" />
+        </label>
+    </section>
+
+    <section class="app-detail__section">
+        <h3 class="app-detail__section-title">Validation &amp; enforcement</h3>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Default value</span>
+                <input class="app-detail__input app-detail__input--mono" @bind="_form.DefaultValue" />
+                <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Applied when the user carries no value.</span>
+            </label>
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Validation pattern (regex)</span>
+                <input class="app-detail__input app-detail__input--mono" placeholder="^[A-Z]{3}-[0-9]+$" @bind="_form.ValidationPattern" />
+                <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Checked on user create / update.</span>
+            </label>
+        </div>
+
+        <label style="display:flex; gap: var(--space-2); align-items:center; cursor:pointer; margin-top: var(--space-2);">
+            <input type="checkbox" @bind="_form.Required" />
+            <span>Required — user create / update fails when the claim is absent</span>
+        </label>
+    </section>
+
+    <section class="app-detail__section">
+        <h3 class="app-detail__section-title">Token destinations</h3>
+        <label style="display:flex; gap: var(--space-2); align-items:center; cursor:pointer;">
+            <input type="checkbox" @bind="_form.EmitOnAccessToken" />
+            <span>Emit on <code>access_token</code></span>
+        </label>
+        <label style="display:flex; gap: var(--space-2); align-items:center; cursor:pointer; margin-top: var(--space-2);">
+            <input type="checkbox" @bind="_form.EmitOnIdToken" />
+            <span>Emit on <code>id_token</code></span>
+        </label>
+    </section>
+
+    @if (_error is not null) { <p class="text-error">@_error</p> }
+
+    <div style="display:flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-3);">
+        <NavLink href="/admin/claim-definitions" class="btn btn-secondary">Cancel</NavLink>
+        <button class="btn btn-primary" @onclick="CreateAsync" disabled="@(_saving || !IsValid)">@(_saving ? "Creating…" : "Create definition")</button>
+    </div>
+</div>
+
+@code {
+    private sealed class FormState
+    {
+        public string ClaimName = "";
+        public string? DisplayName, Description, DefaultValue, ValidationPattern;
+        public string Type = "string";
+        public bool Required;
+        public string Scope = "global";
+        public long? ApplicationId;
+        public bool EmitOnAccessToken = true;
+        public bool EmitOnIdToken = true;
+    }
+
+    private readonly FormState _form = new();
+    private bool _saving;
+    private string? _error;
+
+    private bool IsValid =>
+        _form.ClaimName.Trim().Length > 0
+        && (_form.Scope != "application" || _form.ApplicationId is > 0);
+
+    private async Task CreateAsync()
+    {
+        _saving = true; _error = null;
+        try
+        {
+            var created = await Client.CreateClaimDefinitionAsync(new CreateClaimDefinitionRequest
+            {
+                ClaimName = _form.ClaimName.Trim(),
+                DisplayName = string.IsNullOrWhiteSpace(_form.DisplayName) ? null : _form.DisplayName,
+                Description = string.IsNullOrWhiteSpace(_form.Description) ? null : _form.Description,
+                Type = _form.Type,
+                Required = _form.Required,
+                DefaultValue = string.IsNullOrWhiteSpace(_form.DefaultValue) ? null : _form.DefaultValue,
+                ValidationPattern = string.IsNullOrWhiteSpace(_form.ValidationPattern) ? null : _form.ValidationPattern,
+                Scope = _form.Scope,
+                ApplicationId = _form.Scope == "application" ? _form.ApplicationId : null,
+                EmitOnAccessToken = _form.EmitOnAccessToken,
+                EmitOnIdToken = _form.EmitOnIdToken,
+            });
+            Toast.Show($"Definition '{created.ClaimName}' created.", "online");
+            Nav.NavigateTo($"/admin/claim-definitions/{created.Id}");
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+}

@@ -303,6 +303,7 @@ internal sealed class ScimUserProcessor : IProcessor
         // as the OIDC `sub` claim.
         var oidcObj = new RedbObject<UserProps>(new UserProps
         {
+            UserId = coreUser.Id, // V4-UNIQUE
             GivenName = scimUser.Name?.GivenName,
             FamilyName = scimUser.Name?.FamilyName,
             Picture = scimUser.Photos?.FirstOrDefault()?.Value,
@@ -389,6 +390,7 @@ internal sealed class ScimUserProcessor : IProcessor
         oidcObj.key = coreUser.Id;
         oidcObj.Props = new UserProps
         {
+            UserId = coreUser.Id, // V4-UNIQUE
             GivenName = scimUser.Name?.GivenName,
             FamilyName = scimUser.Name?.FamilyName,
             Picture = scimUser.Photos?.FirstOrDefault()?.Value,
@@ -446,7 +448,7 @@ internal sealed class ScimUserProcessor : IProcessor
         var oidcCreated = false;
         if (oidcObj is null)
         {
-            oidcObj = new RedbObject<UserProps>(new UserProps());
+            oidcObj = new RedbObject<UserProps>(new UserProps { UserId = coreUser.Id });
             oidcObj.name = coreUser.Login;
             oidcObj.key = coreUser.Id;
             oidcObj.value_guid = Guid.NewGuid();

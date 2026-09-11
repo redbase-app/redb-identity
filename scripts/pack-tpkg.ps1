@@ -1,16 +1,21 @@
 <#
 .SYNOPSIS
-    Builds redb.Identity.Core, redb.Identity.Http and redb.Identity.Grpc, packs them as Tsak .tpkg
+    Builds the Contracts carrier, redb.Identity.Core, redb.Identity.Http, redb.Identity.Grpc and redb.Identity.Soap, packs them as Tsak .tpkg
     modules, and copies into redb.Tsak.Worker/modules/ for hot-reload.
 
 .DESCRIPTION
-    Three .tpkg packages produced (Release):
+    Five .tpkg packages produced (Release):
+      - redb.Identity.Contracts.tpkg (contracts CARRIER: an empty module whose companion is
+                                   redb.Identity.Contracts.dll - the single process-wide
+                                   instance every Identity module resolves against; reload it
+                                   only on a contract change, then reload everyone)
       - redb.Identity.Core.tpkg   (Core engine: schemes, OpenIddict stores, OIDC server,
                                    MFA, WebAuthn, federation, audit, key rotation,
                                    DPAPI, claim mappers — all transitive third-party
                                    deps that Tsak host doesn't already provide)
       - redb.Identity.Http.tpkg   (HTTP transport facade: 26 controllers; depends on Core)
       - redb.Identity.Grpc.tpkg   (gRPC service-to-service facade; depends on Core)
+      - redb.Identity.Soap.tpkg   (WS-Trust facade; depends on Core)
 
     Each .tpkg = ZIP { manifest.json, *.config.json, *.dll [, *.pdb] }.
 
@@ -30,7 +35,7 @@
     or when build was just done.
 
 .PARAMETER Module
-    Which modules to pack: Core | Http | Grpc | All (default: All).
+    Which modules to pack: Contracts | Core | Http | Grpc | Soap | All (default: All).
 
 .PARAMETER TsakModules
     Override target modules directory. Default: ../redb.Tsak/src/redb.Tsak.Worker/modules.
@@ -52,7 +57,7 @@ param(
 
     [switch]$NoBuild,
 
-    [ValidateSet("Core", "Http", "Grpc", "All")]
+    [ValidateSet("Contracts", "Core", "Http", "Grpc", "Soap", "All")]
     [string]$Module = "All",
 
     [string]$TsakModules,
@@ -140,7 +145,8 @@ function Pack-Module {
         [string]$ModuleName,            # "redb.Identity.Core"
         [string]$ProjectDir,             # full path to project dir
         [string]$ConfigFileName,         # "redb.Identity.Core.config.json"
-        [string[]]$ExtraExcludes = @()   # additional DLL names to skip
+        [string[]]$ExtraExcludes = @(),  # additional DLL names to skip
+        [string[]]$ContentDirs = @()     # subdirectories of bin\ to ship whole (e.g. "Wsdl")
     )
 
     Write-Host "`n=== Packing $ModuleName ===" -ForegroundColor Cyan
@@ -186,6 +192,19 @@ function Pack-Module {
         Write-Host ("  Included : {0} DLLs" -f $included.Count) -ForegroundColor Green
         Write-Host ("  Excluded : {0} DLLs (host-provided)" -f $skipped.Count) -ForegroundColor DarkGray
 
+        # Content that is not a DLL and lives in a subdirectory: the WS-Trust WSDL, and anything like it
+        # later. The DLL loop above reads only the root of bin\, so without this such a file is silently
+        # left out of the package — and the code that looks for it degrades quietly rather than failing,
+        # which is exactly the combination that ships a module missing half its purpose.
+        foreach ($dir in $ContentDirs) {
+            $source = Join-Path $bin $dir
+            if (-not (Test-Path $source)) { throw "Content directory missing: $source" }
+
+            Copy-Item $source -Destination $staging -Recurse -Force
+            $files = @(Get-ChildItem -Path $source -File -Recurse)
+            Write-Host ("  Content  : {0}\ ({1} files)" -f $dir, $files.Count) -ForegroundColor Green
+        }
+
         $tpkg = Join-Path $OutputDir "$ModuleName.tpkg"
         if (Test-Path $tpkg) { Remove-Item $tpkg -Force }
         Compress-Archive -Path (Join-Path $staging "*") -DestinationPath $tpkg -CompressionLevel Optimal -Force
@@ -218,18 +237,52 @@ function Pack-Module {
 # ── Run ────────────────────────────────────────────────────────────────
 $results = @()
 
+if ($Module -in @("Contracts", "All")) {
+    # The contracts CARRIER: an empty module whose payload is its companion,
+    # redb.Identity.Contracts.dll — the one process-wide instance of the DTO assembly that every
+    # Identity module resolves against. Packed FIRST and excluded from everyone else, so that
+    # hot-reloading any single module (whose reload force-Replaces its own companions in the
+    # tracker) never swaps the contracts out from under the others (Tsak F-12).
+    # Reloading THIS package replaces the instance and must be followed by reloading every
+    # Identity module — which a contract change requires semantically anyway.
+    $results += Pack-Module `
+        -ModuleName "redb.Identity.Contracts" `
+        -ProjectDir (Join-Path $IdentityRoot "src\redb.Identity.Contracts.Module") `
+        -ConfigFileName "redb.Identity.Contracts.Module.config.json"
+}
+
+# Every later package excludes what the carrier ships, exactly as the facades exclude what
+# Core.Module ships. When only a subset is being packed the carrier result is absent — then the
+# carrier's own bin answers instead, so a lone `-Module Core` repack still excludes the contracts.
+$contractsResult = $results | Where-Object { $_.Module -eq "redb.Identity.Contracts" } | Select-Object -First 1
+$contractsExcludes = @()
+if ($contractsResult) {
+    $contractsExcludes = $contractsResult.DllNames
+} else {
+    $contractsBin = Join-Path $IdentityRoot "src\redb.Identity.Contracts.Module\bin\$Configuration\net10.0"
+    if (Test-Path $contractsBin) {
+        $contractsExcludes = @(Get-ChildItem -Path $contractsBin -Filter *.dll -File | ForEach-Object { $_.Name })
+    }
+}
+if (-not ($contractsExcludes -contains "redb.Identity.Contracts.dll")) {
+    # Refuse to build a core package that would smuggle its own contracts copy back in.
+    throw "Contracts carrier not built — run with -Module Contracts (or All), or build src\redb.Identity.Contracts.Module first."
+}
+
 if ($Module -in @("Core", "All")) {
     # The Tsak entry-point project is the *thin* shim `redb.Identity.Core.Module`.
     # Its bin/ contains:
     #   - redb.Identity.Core.Module.dll  ← the EntryPoint (isolated per-package ALC)
     #   - redb.Identity.Core.dll         ← COMPANION (visible to facade .tpkg's via
-    #     redb.Identity.Contracts.dll        LoadedAssemblyTracker / Default ALC)
+    #                                        LoadedAssemblyTracker / Default ALC)
     #   - OpenIddict.*, Konscious.Argon2, Fido2, Otp.NET, MyCSharp.HttpUserAgentParser*
     #   - all transitive NuGet runtime DLLs not already provided by Tsak host.
+    # redb.Identity.Contracts.dll is deliberately NOT here — the carrier package above ships it.
     $results += Pack-Module `
         -ModuleName "redb.Identity.Core.Module" `
         -ProjectDir (Join-Path $IdentityRoot "src\redb.Identity.Core.Module") `
-        -ConfigFileName "redb.Identity.Core.Module.config.json"
+        -ConfigFileName "redb.Identity.Core.Module.config.json" `
+        -ExtraExcludes $contractsExcludes
 }
 
 if ($Module -in @("Http", "All")) {
@@ -252,6 +305,7 @@ if ($Module -in @("Http", "All")) {
     if ($coreResult) {
         $httpExtraExcludes += $coreResult.DllNames
     }
+    $httpExtraExcludes += $contractsExcludes
 
     $results += Pack-Module `
         -ModuleName "redb.Identity.Http" `
@@ -273,12 +327,34 @@ if ($Module -in @("Grpc", "All")) {
     if ($coreResultForGrpc) {
         $grpcExtraExcludes += $coreResultForGrpc.DllNames
     }
+    $grpcExtraExcludes += $contractsExcludes
 
     $results += Pack-Module `
         -ModuleName "redb.Identity.Grpc" `
         -ProjectDir (Join-Path $IdentityRoot "src\redb.Identity.Grpc") `
         -ConfigFileName "redb.Identity.Grpc.config.json" `
         -ExtraExcludes $grpcExtraExcludes
+}
+
+if ($Module -in @("Soap", "All")) {
+    # Same rule as Http and Grpc: a facade .tpkg must NOT duplicate anything Core.Module already ships.
+    # The result is a tiny package carrying redb.Identity.Soap.dll and the WSDL it publishes.
+    $soapExtraExcludes = @(
+        "redb.Identity.Core.dll",
+        "redb.Identity.Contracts.dll"
+    )
+    $coreResultForSoap = $results | Where-Object { $_.Module -eq "redb.Identity.Core.Module" } | Select-Object -First 1
+    if ($coreResultForSoap) {
+        $soapExtraExcludes += $coreResultForSoap.DllNames
+    }
+    $soapExtraExcludes += $contractsExcludes
+
+    $results += Pack-Module `
+        -ModuleName "redb.Identity.Soap" `
+        -ProjectDir (Join-Path $IdentityRoot "src\redb.Identity.Soap") `
+        -ConfigFileName "redb.Identity.Soap.config.json" `
+        -ExtraExcludes $soapExtraExcludes `
+        -ContentDirs @("Wsdl")   # the contract, served on GET; without it the facade answers POST only
 }
 
 # ── Copy external context.json (Tsak Layer 3, devops-editable) ────────

@@ -1,0 +1,206 @@
+@page "/admin/claim-definitions/{Id:long}"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    Claim definition detail — full page (Phase 3, П2: pages-not-dialogs).
+    Replaces the edit half of the ClaimDefinitionsList modal. Immutable identity
+    (claim name / scope / application) is rendered as a read-only key-value block;
+    everything editable gets labelled sections with enforcement hints. Delete moved
+    here behind the typed-confirm dialog.
+*@
+
+<div style="margin-bottom: var(--space-3);">
+    <NavLink href="/admin/claim-definitions" class="btn btn-ghost" style="padding: 0; color: var(--accent-primary);">← Go back to Claim definitions</NavLink>
+</div>
+
+@if (_loading) { <p class="text-secondary">Loading…</p> }
+else if (_loadError is not null) { <p class="text-error">@_loadError</p> }
+else if (_d is not null)
+{
+    <div style="display:flex; gap: var(--space-4); align-items: flex-start; margin-bottom: var(--space-4);">
+        <div class="apps-list__avatar" style="font-size: 1.5rem; width: 56px; height: 56px;">@char.ToUpperInvariant(_d.ClaimName is { Length: > 0 } cn ? cn[0] : 'C')</div>
+        <div style="flex: 1;">
+            <h1 style="margin: 0;"><code>@_d.ClaimName</code></h1>
+            <div style="display:flex; gap: var(--space-2); margin-top: var(--space-1); align-items:center;">
+                <RdbBadge Text="@_d.Type" Variant="info" />
+                @if (_d.Scope == "global") { <RdbBadge Text="global" Variant="online" /> }
+                else { <RdbBadge Text="@($"application #{_d.ApplicationId}")" Variant="info" /> }
+                @if (_form.Required) { <RdbBadge Text="required" Variant="error" /> }
+            </div>
+        </div>
+        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">@(_saving ? "Saving…" : "Save")</button>
+    </div>
+
+    <div class="card" style="max-width: 760px;">
+        <section class="app-detail__section">
+            <h3 class="app-detail__section-title">Identity (immutable)</h3>
+            <dl class="app-detail__kv">
+                <dt>Claim name</dt><dd><code>@_d.ClaimName</code> — delete + re-create to rename</dd>
+                <dt>Scope</dt><dd>@_d.Scope@(_d.Scope == "application" ? $" (application id {_d.ApplicationId})" : "")</dd>
+                <dt>Internal id</dt><dd><code>@_d.Id</code></dd>
+            </dl>
+        </section>
+
+        <section class="app-detail__section">
+            <h3 class="app-detail__section-title">Presentation</h3>
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Display name</span>
+                <input class="app-detail__input" @bind="_form.DisplayName" />
+            </label>
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Description</span>
+                <input class="app-detail__input" @bind="_form.Description" />
+            </label>
+        </section>
+
+        <section class="app-detail__section">
+            <h3 class="app-detail__section-title">Validation &amp; enforcement</h3>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Type</span>
+                    <select class="app-detail__input" @bind="_form.Type">
+                        <option value="string">string</option>
+                        <option value="int">int</option>
+                        <option value="long">long</option>
+                        <option value="bool">bool</option>
+                        <option value="datetime">datetime</option>
+                        <option value="url">url</option>
+                        <option value="email">email</option>
+                    </select>
+                </label>
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Default value</span>
+                    <input class="app-detail__input app-detail__input--mono" @bind="_form.DefaultValue" />
+                    <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Applied when the user carries no value.</span>
+                </label>
+            </div>
+
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Validation pattern (regex)</span>
+                <input class="app-detail__input app-detail__input--mono" placeholder="^[A-Z]{3}-[0-9]+$" @bind="_form.ValidationPattern" />
+                <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Checked on user create / update.</span>
+            </label>
+
+            <label style="display:flex; gap: var(--space-2); align-items:center; cursor:pointer; margin-top: var(--space-2);">
+                <input type="checkbox" @bind="_form.Required" />
+                <span>Required — user create / update fails when the claim is absent</span>
+            </label>
+        </section>
+
+        <section class="app-detail__section">
+            <h3 class="app-detail__section-title">Token destinations</h3>
+            <label style="display:flex; gap: var(--space-2); align-items:center; cursor:pointer;">
+                <input type="checkbox" @bind="_form.EmitOnAccessToken" />
+                <span>Emit on <code>access_token</code></span>
+            </label>
+            <label style="display:flex; gap: var(--space-2); align-items:center; cursor:pointer; margin-top: var(--space-2);">
+                <input type="checkbox" @bind="_form.EmitOnIdToken" />
+                <span>Emit on <code>id_token</code></span>
+            </label>
+        </section>
+
+        <section class="app-detail__section">
+            <h3 class="app-detail__section-title">Danger zone</h3>
+            <p class="text-secondary" style="margin-top: 0;">
+                Deleting a definition stops its validation and token emission. Values already
+                stored on users are untouched.
+            </p>
+            <button class="btn btn-danger" @onclick="DeleteAsync">Delete this definition</button>
+        </section>
+
+        @if (_saveError is not null) { <p class="text-error">@_saveError</p> }
+    </div>
+}
+
+<UiTypedConfirmDialog @ref="_confirm" />
+
+@code {
+    [Parameter] public long Id { get; set; }
+
+    private sealed class FormState
+    {
+        public string? DisplayName, Description, DefaultValue, ValidationPattern;
+        public string Type = "string";
+        public bool Required;
+        public bool EmitOnAccessToken = true;
+        public bool EmitOnIdToken = true;
+    }
+
+    private ClaimDefinitionResponse? _d;
+    private FormState _form = new();
+    private bool _loading = true;
+    private bool _saving;
+    private string? _loadError;
+    private string? _saveError;
+    private UiTypedConfirmDialog? _confirm;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _loadError = null;
+        try
+        {
+            _d = await Client.GetClaimDefinitionAsync(Id);
+            _form = new FormState
+            {
+                DisplayName = _d.DisplayName,
+                Description = _d.Description,
+                Type = _d.Type,
+                Required = _d.Required,
+                DefaultValue = _d.DefaultValue,
+                ValidationPattern = _d.ValidationPattern,
+                EmitOnAccessToken = _d.EmitOnAccessToken,
+                EmitOnIdToken = _d.EmitOnIdToken,
+            };
+        }
+        catch (Exception ex) { _loadError = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_d is null) return;
+        _saving = true; _saveError = null;
+        try
+        {
+            _d = await Client.UpdateClaimDefinitionAsync(_d.Id, new UpdateClaimDefinitionRequest
+            {
+                Id = _d.Id,
+                DisplayName = string.IsNullOrWhiteSpace(_form.DisplayName) ? null : _form.DisplayName,
+                Description = string.IsNullOrWhiteSpace(_form.Description) ? null : _form.Description,
+                Type = _form.Type,
+                Required = _form.Required,
+                DefaultValue = _form.DefaultValue,
+                ValidationPattern = _form.ValidationPattern,
+                EmitOnAccessToken = _form.EmitOnAccessToken,
+                EmitOnIdToken = _form.EmitOnIdToken,
+            });
+            Toast.Show("Saved.", "online");
+        }
+        catch (Exception ex) { _saveError = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_d is null || _confirm is null) return;
+        var ok = await _confirm.ShowAsync(
+            expectedText: _d.ClaimName,
+            title: "Delete claim definition",
+            message: $"This deletes the definition '{_d.ClaimName}'. Validation and token emission " +
+                     "for the claim stop; values already stored on users are untouched.",
+            confirmLabel: "Delete this definition");
+        if (!ok) return;
+
+        try
+        {
+            await Client.DeleteClaimDefinitionAsync(_d.Id);
+            Toast.Show($"Definition '{_d.ClaimName}' deleted.", "online");
+            Nav.NavigateTo("/admin/claim-definitions");
+        }
+        catch (Exception ex) { Toast.Show(ex.Message, "error"); }
+    }
+}

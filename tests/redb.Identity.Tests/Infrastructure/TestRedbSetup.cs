@@ -88,7 +88,6 @@ public static class TestRedbSetup
                 options.Configure(c =>
                 {
                     c.PropsSaveStrategy = PropsSaveStrategy.ChangeTracking;
-                    c.EnableLazyLoadingForProps = false;
                     c.EnablePropsCache = false;
 
                     // PVT prefilter: narrows the object set before the pivot aggregate, so a selective
@@ -109,7 +108,6 @@ public static class TestRedbSetup
             options.Configure(c =>
             {
                 c.PropsSaveStrategy = PropsSaveStrategy.DeleteInsert;
-                c.EnableLazyLoadingForProps = false;
                 c.EnablePropsCache = false;
                 configure?.Invoke(c);
             });

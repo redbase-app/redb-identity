@@ -16,8 +16,9 @@
     initial membership.
 *@
 
-<div class="modal-backdrop" @onclick="OnCloseClicked">
-    <div class="modal" @onclick:stopPropagation="true" style="max-width: 720px; max-height: 90vh; overflow:hidden; display:flex; flex-direction:column;">
+@* Phase 3 (pages-not-dialogs): this wizard used to live in a modal-backdrop overlay;
+   it is a plain card now, hosted by the /admin/groups/new page. *@
+<div class="card" style="max-width: 720px; overflow:hidden; display:flex; flex-direction:column; padding: 0;">
         <div style="padding: var(--space-4); border-bottom: 1px solid var(--border-color);">
             <h3 style="margin: 0;">Create Group</h3>
             <p class="text-secondary" style="margin: var(--space-1) 0 0;">Create a new group and add users to it.</p>
@@ -189,7 +190,6 @@
                 }
             </div>
         </div>
-    </div>
 </div>
 
 @code {

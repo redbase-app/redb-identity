@@ -160,7 +160,7 @@ internal sealed class TokenManagementProcessor : IProcessor
                     foreach (var app in apps)
                     {
                         if (app is null) continue;
-                        appsById[app.id] = app.Hydrate();
+                        appsById[app.id] = app;
                     }
                 }
             }
@@ -280,7 +280,7 @@ internal sealed class TokenManagementProcessor : IProcessor
         if (token.Props.ApplicationObjectId > 0
             && appsById.TryGetValue(token.Props.ApplicationObjectId, out var app))
         {
-            resp.ClientId = app.value_string;
+            resp.ClientId = app.Props.ClientId ?? app.value_string;
             resp.ApplicationName = app.name;
         }
         return resp;

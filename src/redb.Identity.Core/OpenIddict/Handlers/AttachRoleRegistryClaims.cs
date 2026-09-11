@@ -81,9 +81,7 @@ internal sealed class AttachRoleRegistryClaims
         {
             try
             {
-                var app = await redb.Query<ApplicationProps>()
-                    .WhereRedb(o => o.ValueString == clientId)
-                    .FirstOrDefaultAsync()
+                var app = await redb.GetByUniqueAsync<ApplicationProps>(p => p.ClientId, clientId)
                     .ConfigureAwait(false);
                 if (app is not null && app.Id > 0) applicationId = app.Id;
             }

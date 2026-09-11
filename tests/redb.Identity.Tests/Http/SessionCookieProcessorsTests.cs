@@ -195,12 +195,23 @@ public class SessionCookieProcessorsTests
     {
         var exchange = BuildConsentRequiredExchange(delegateHeader: null);
 
-        await SessionCookieProcessors.RedirectToConsent(exchange, CancellationToken.None, "/consent");
+        await SessionCookieProcessors.RedirectToConsent(exchange, CancellationToken.None, "/consent", _ticketService);
 
         exchange.In.GetHeader<int>("redbHttp.ResponseCode").Should().Be(302);
         var location = exchange.In.GetHeader<string>("Location");
         location.Should().NotBeNull();
-        location!.Should().StartWith("/consent?client_id=demo-client");
+        // Consent parameters travel in a signed ticket, never as query fields the browser can craft.
+        location!.Should().StartWith("/consent?ct=");
+        location.Should().NotContain("client_id=").And.NotContain("app_name=");
+
+        var ticketValue = Uri.UnescapeDataString(location!["/consent?ct=".Length..]);
+        var ticket = _ticketService.UnprotectConsent(ticketValue, TimeSpan.FromMinutes(10));
+        ticket.Should().NotBeNull();
+        ticket!.ClientId.Should().Be("demo-client");
+        ticket.AppName.Should().Be("Demo App");
+        ticket.Scopes.Should().Be("openid profile");
+        ticket.UserId.Should().Be(42);
+        ticket.ReturnUrl.Should().Be("/connect/authorize?client_id=demo-client");
     }
 
     [Fact]
@@ -208,7 +219,7 @@ public class SessionCookieProcessorsTests
     {
         var exchange = BuildConsentRequiredExchange(delegateHeader: "1");
 
-        await SessionCookieProcessors.RedirectToConsent(exchange, CancellationToken.None, "/consent");
+        await SessionCookieProcessors.RedirectToConsent(exchange, CancellationToken.None, "/consent", _ticketService);
 
         exchange.In.GetHeader<int>("redbHttp.ResponseCode").Should().Be(400);
         exchange.In.GetHeader<string>("Content-Type").Should().Contain("application/json");
@@ -229,7 +240,7 @@ public class SessionCookieProcessorsTests
     {
         var exchange = BuildConsentRequiredExchange(delegateHeader: "True");
 
-        await SessionCookieProcessors.RedirectToConsent(exchange, CancellationToken.None, "/consent");
+        await SessionCookieProcessors.RedirectToConsent(exchange, CancellationToken.None, "/consent", _ticketService);
 
         exchange.In.GetHeader<int>("redbHttp.ResponseCode").Should().Be(400);
     }

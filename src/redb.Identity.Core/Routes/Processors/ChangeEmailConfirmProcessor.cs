@@ -118,7 +118,7 @@ internal sealed class ChangeEmailConfirmProcessor : IProcessor
         var oidcObj = await MeProcessorHelpers.LoadOidcProps(redb, user.Id).ConfigureAwait(false);
         if (oidcObj is null)
         {
-            oidcObj = new RedbObject<UserProps>(new UserProps { EmailVerified = true });
+            oidcObj = new RedbObject<UserProps>(new UserProps { EmailVerified = true, UserId = updated.Id });
             oidcObj.name = updated.Login;
             oidcObj.key = updated.Id;
             oidcObj.value_guid = Guid.NewGuid();

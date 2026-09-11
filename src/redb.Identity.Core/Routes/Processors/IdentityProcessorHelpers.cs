@@ -306,7 +306,7 @@ internal static partial class IdentityProcessorHelpers
             else
             {
                 var fresh = new redb.Core.Models.Entities.RedbObject<Models.UserProps>(
-                    new Models.UserProps { PasswordChangedAt = now, HasUserPassword = true })
+                    new Models.UserProps { PasswordChangedAt = now, HasUserPassword = true, UserId = userId })
                 {
                     key = userId,
                 };
@@ -368,7 +368,7 @@ internal static partial class IdentityProcessorHelpers
                 else
                 {
                     var fresh = new redb.Core.Models.Entities.RedbObject<Models.UserProps>(
-                        new Models.UserProps { PasswordChangedAt = now, HasUserPassword = true })
+                        new Models.UserProps { PasswordChangedAt = now, HasUserPassword = true, UserId = userId })
                     {
                         key = userId,
                     };

@@ -158,6 +158,7 @@ internal sealed class BootstrapAdminProcessor : IProcessor
             });
             oidcObj.Name = request.Email!;
             oidcObj.Key = coreUser.Id;
+            oidcObj.Props.UserId = coreUser.Id; // V4-UNIQUE
             oidcObj.value_guid = Guid.NewGuid();
             await redb.SaveAsync(oidcObj).ConfigureAwait(false);
 
@@ -279,9 +280,10 @@ internal sealed class BootstrapAdminProcessor : IProcessor
             {
                 await SetBootstrapCompletedAsync(redb, clientId, ct).ConfigureAwait(false);
             }
-            catch (Exception ex) when (IdentityProcessorHelpers.IsUniqueViolation(ex))
+            catch (redb.Core.Exceptions.RedbUniqueViolationException)
             {
-                // Race lost — another caller's transaction committed first. Map to 410.
+                // Race lost — another caller's transaction committed the one-shot flag first
+                // (core ValueUnique index, V4-UNIQUE). Map to 410.
                 SetError(exchange, 410, "gone",
                     "Bootstrap already completed (concurrent invocation won the race).");
                 return;
@@ -375,7 +377,13 @@ internal sealed class BootstrapAdminProcessor : IProcessor
 
     private static async Task<bool> IsBootstrapCompletedAsync(IRedbService redb, CancellationToken ct)
     {
+        // V4-UNIQUE: the flag identity lives in ValueUnique (probe of the core unique index);
+        // the Name lookup covers a legacy row the transition backfill has not repaired yet.
         var existing = await redb.Query<IdentitySystemFlagProps>()
+            .WhereRedb(o => o.ValueUnique == FlagName)
+            .FirstOrDefaultAsync()
+            .ConfigureAwait(false);
+        existing ??= await redb.Query<IdentitySystemFlagProps>()
             .WhereRedb(o => o.Name == FlagName)
             .FirstOrDefaultAsync()
             .ConfigureAwait(false);
@@ -386,21 +394,24 @@ internal sealed class BootstrapAdminProcessor : IProcessor
     {
         var flag = new RedbObject<IdentitySystemFlagProps>(new IdentitySystemFlagProps());
         flag.Name = FlagName;
+        flag.ValueUnique = FlagName; // V4-UNIQUE: DB-enforced one-shot on every provider
         flag.value_bool = true;
         flag.value_datetime = _timeProvider.GetUtcNow().UtcDateTime;
         flag.value_string = clientId;
         flag.note = "B1 — bootstrap completed; remove this row + the OIDC client to re-bootstrap.";
+        // First-wins by design: on a race the core ValueUnique index rejects this insert with
+        // RedbUniqueViolationException, and the CALLER maps it to 410 Gone — the losing
+        // bootstrap must NOT report success. Deliberately NOT SaveByUniqueAsync
+        // (last-writer-wins would overwrite the winner's audit trail).
         await redb.SaveAsync(flag).ConfigureAwait(false);
     }
 
     private static async Task<RedbObject<ScopeProps>> FindOrCreateScopeAsync(
         IRedbService redb, string scopeName, CancellationToken ct)
     {
-        var existing = await redb.Query<ScopeProps>()
-            .WhereRedb(o => o.ValueString == scopeName)
-            .FirstOrDefaultAsync()
+        var existing = await redb.GetByUniqueAsync<ScopeProps>(p => p.ScopeName, scopeName)
             .ConfigureAwait(false);
-        if (existing is not null) return existing.Hydrate();
+        if (existing is not null) return existing;
 
         var obj = new RedbObject<ScopeProps>(new ScopeProps
         {
@@ -408,7 +419,6 @@ internal sealed class BootstrapAdminProcessor : IProcessor
             Description = "Identity admin operations",
         });
         obj.Name = scopeName;
-        obj.value_string = scopeName;
         await redb.SaveAsync(obj).ConfigureAwait(false);
         return obj;
     }

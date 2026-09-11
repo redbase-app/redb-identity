@@ -327,10 +327,9 @@ public sealed class RoleService
             .ToListAsync()
             .ConfigureAwait(false);
 
-        // ScopeProps.ScopeName has [RedbIgnore] — the canonical scope name is
-        // stored in _objects.value_string (indexed) instead of in PROPS.
+        // V4-UNIQUE: ScopeName is a stored [RedbUnique] prop; value_string covers legacy rows.
         return scopes
-            .Select(s => s.value_string)
+            .Select(s => s.Props.ScopeName ?? s.value_string)
             .Where(n => !string.IsNullOrEmpty(n))
             .Select(n => n!)
             .ToHashSet(StringComparer.Ordinal);

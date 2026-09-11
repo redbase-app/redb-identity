@@ -14,8 +14,8 @@ namespace redb.Identity.Core.Module;
 /// <c>identity.scope</c> store on every startup. Without this the role-
 /// permission picker on <c>/admin/roles/{id}</c> can only attach scopes
 /// that some demo or operator explicitly created via the admin API.
-/// Idempotent: skips any scope already present by exact name match on
-/// <c>_objects.value_string</c>.
+/// Idempotent: skips any scope already present — one probe of the
+/// <c>[RedbUnique]</c> ScopeName index (V4-UNIQUE).
 ///
 /// Descriptions read like operator-facing UI labels because the picker
 /// surfaces them verbatim. Order in the seed array dictates picker
@@ -98,9 +98,7 @@ internal sealed class SeedSystemScopesListener : IRouteLifecycleListener
         {
             try
             {
-                var existing = await redb.Query<ScopeProps>()
-                    .WhereRedb(o => o.ValueString == name)
-                    .FirstOrDefaultAsync()
+                var existing = await redb.GetByUniqueAsync<ScopeProps>(p => p.ScopeName, name)
                     .ConfigureAwait(false);
                 if (existing is not null)
                 {
@@ -114,7 +112,6 @@ internal sealed class SeedSystemScopesListener : IRouteLifecycleListener
                     Description = description,
                 });
                 obj.Name = name;
-                obj.value_string = name;
                 await redb.SaveAsync(obj).ConfigureAwait(false);
                 created++;
             }

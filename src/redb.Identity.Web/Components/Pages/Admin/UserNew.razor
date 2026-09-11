@@ -1,0 +1,160 @@
+@page "/admin/users/new"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    New user — two-step wizard page (Phase 3, П4: pages-not-dialogs), replacing the
+    Users.razor create-overlay. The overlay exposed 4 of the contract's 9 fields;
+    the wizard exposes the account + profile surface. Group / role assignment lives
+    on the user detail page after creation (the create API does not take them).
+*@
+
+<div style="margin-bottom: var(--space-3);">
+    <NavLink href="/admin/users" class="btn btn-ghost" style="padding: 0; color: var(--accent-primary);">← Go back to Users</NavLink>
+</div>
+
+<h1 style="margin: 0;">Create user</h1>
+<p class="text-secondary">Local account in the relational user store. Federated users are provisioned automatically on first login.</p>
+
+<div style="display:flex; gap: var(--space-2); margin: var(--space-3) 0;">
+    <RdbBadge Text="1. Account" Variant="@(_step == 1 ? "online" : "offline")" />
+    <RdbBadge Text="2. Profile" Variant="@(_step == 2 ? "online" : "offline")" />
+</div>
+
+<div class="card" style="max-width: 640px;">
+    @* Create errors land the operator back on step 1 (duplicate login/email, password
+       policy) — so the error banner must live OUTSIDE the step switch to stay visible. *@
+    @if (_error is not null) { <p class="text-error">@_error</p> }
+
+    @if (_step == 1)
+    {
+        <section class="app-detail__section">
+            <h3 class="app-detail__section-title">Account</h3>
+
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Login *</span>
+                <input class="app-detail__input app-detail__input--mono" placeholder="alice" autocomplete="off" @bind="_form.Login" />
+                <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Immutable after creation.</span>
+            </label>
+
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Password *</span>
+                <div style="position: relative;">
+                    <input class="app-detail__input"
+                           type="@(_passwordVisible ? "text" : "password")"
+                           autocomplete="new-password"
+                           @bind="_form.Password" />
+                    <button type="button" class="btn btn-ghost" style="position:absolute; right: 4px; top: 4px; padding: 2px 8px;"
+                            @onclick="() => _passwordVisible = !_passwordVisible">
+                        <RdbIcon Name="@(_passwordVisible ? "eye-off" : "eye")" Size="14" />
+                    </button>
+                </div>
+                <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Checked against the configured password policy on create.</span>
+            </label>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Email</span>
+                    <input type="email" class="app-detail__input" placeholder="alice@example.com" @bind="_form.Email" />
+                    <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Unique across all users when set.</span>
+                </label>
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Phone</span>
+                    <input class="app-detail__input" placeholder="+1 555 0100" @bind="_form.PhoneNumber" />
+                </label>
+            </div>
+        </section>
+
+        <div style="display:flex; gap: var(--space-2); justify-content: flex-end;">
+            <NavLink href="/admin/users" class="btn btn-secondary">Cancel</NavLink>
+            <button class="btn btn-primary" @onclick="() => _step = 2" disabled="@(!Step1Valid)">Next: profile →</button>
+        </div>
+    }
+    else
+    {
+        <section class="app-detail__section">
+            <h3 class="app-detail__section-title">Profile (optional)</h3>
+
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Display name</span>
+                <input class="app-detail__input" placeholder="Alice Doe" @bind="_form.DisplayName" />
+            </label>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Given name</span>
+                    <input class="app-detail__input" @bind="_form.GivenName" />
+                </label>
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Family name</span>
+                    <input class="app-detail__input" @bind="_form.FamilyName" />
+                </label>
+            </div>
+
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Picture URL</span>
+                <input class="app-detail__input app-detail__input--mono" placeholder="https://…/avatar.png" @bind="_form.Picture" />
+            </label>
+
+            <p class="text-secondary" style="margin-bottom: 0;">
+                <RdbIcon Name="info" Size="12" />
+                Groups, roles and MFA are assigned on the user page after creation.
+            </p>
+        </section>
+
+        <div style="display:flex; gap: var(--space-2); justify-content: space-between;">
+            <button class="btn btn-secondary" @onclick="() => _step = 1">← Back</button>
+            <button class="btn btn-primary" @onclick="CreateAsync" disabled="@_creating">@(_creating ? "Creating…" : "Create user")</button>
+        </div>
+    }
+</div>
+
+@code {
+    private sealed class FormState
+    {
+        public string Login = "";
+        public string Password = "";
+        public string? Email, PhoneNumber, DisplayName, GivenName, FamilyName, Picture;
+    }
+
+    private readonly FormState _form = new();
+    private int _step = 1;
+    private bool _creating;
+    private bool _passwordVisible;
+    private string? _error;
+
+    private bool Step1Valid =>
+        _form.Login.Trim().Length > 0 && _form.Password.Length > 0;
+
+    private async Task CreateAsync()
+    {
+        if (!Step1Valid || _creating) return;
+        _creating = true; _error = null;
+        try
+        {
+            var created = await Client.CreateUserAsync(new CreateUserRequest
+            {
+                Login = _form.Login.Trim(),
+                Password = _form.Password,
+                Email = string.IsNullOrWhiteSpace(_form.Email) ? null : _form.Email!.Trim(),
+                PhoneNumber = string.IsNullOrWhiteSpace(_form.PhoneNumber) ? null : _form.PhoneNumber!.Trim(),
+                DisplayName = string.IsNullOrWhiteSpace(_form.DisplayName) ? null : _form.DisplayName!.Trim(),
+                GivenName = string.IsNullOrWhiteSpace(_form.GivenName) ? null : _form.GivenName!.Trim(),
+                FamilyName = string.IsNullOrWhiteSpace(_form.FamilyName) ? null : _form.FamilyName!.Trim(),
+                Picture = string.IsNullOrWhiteSpace(_form.Picture) ? null : _form.Picture!.Trim(),
+            });
+            Toast.Success($"User '{created.Login}' created");
+            Nav.NavigateTo($"/admin/users/{created.Id}");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            // A create rejection is an account-step problem (duplicate login/email,
+            // password policy) more often than a profile one — bring the operator back.
+            _step = 1;
+        }
+        finally { _creating = false; }
+    }
+}

@@ -159,11 +159,11 @@ internal sealed class ApplicationManagementProcessor : IProcessor
             created = (await manager.CreateAsync(descriptor, ct)) as RedbObject<ApplicationProps>
                 ?? throw new InvalidOperationException("Application manager returned unexpected entity type");
         }
-        catch (Exception ex) when (IdentityProcessorHelpers.IsUniqueViolation(ex))
+        catch (redb.Core.Exceptions.RedbUniqueViolationException)
         {
-            // Concurrent writer won the race — partial unique index on _objects
-            // (_value_string) WHERE _id_scheme = ApplicationProps rejected this insert.
-            // Surface the same error as the app-level check above for clients.
+            // Concurrent writer won the race — the [RedbUnique] ClientId index rejected this
+            // insert (V4-UNIQUE; typed on every provider, MSSQL included, which the retired
+            // value_string index never covered). Same error as the app-level check above.
             SetError(exchange, "duplicate", $"ClientId '{request.ClientId}' already exists");
             return;
         }
@@ -186,12 +186,10 @@ internal sealed class ApplicationManagementProcessor : IProcessor
         {
             if (dict.TryGetValue("id", out var idVal) && idVal != null
                 && long.TryParse(idVal.ToString(), out var id) && id > 0)
-                app = (await _redb.LoadAsync<ApplicationProps>(id))?.Hydrate();
+                app = (await _redb.LoadAsync<ApplicationProps>(id));
             else if (dict.TryGetValue("clientId", out var cidVal) && cidVal is string clientId
                      && !string.IsNullOrEmpty(clientId))
-                app = (await _redb.Query<ApplicationProps>()
-                    .WhereRedb(o => o.ValueString == clientId)
-                    .FirstOrDefaultAsync())?.Hydrate();
+                app = await _redb.GetByUniqueAsync<ApplicationProps>(p => p.ClientId, clientId);
             else
                 throw new InvalidOperationException("Either 'id' or 'clientId' required");
         }
@@ -220,7 +218,7 @@ internal sealed class ApplicationManagementProcessor : IProcessor
             return;
         }
 
-        var app = (await _redb.LoadAsync<ApplicationProps>(objectId))?.Hydrate();
+        var app = (await _redb.LoadAsync<ApplicationProps>(objectId));
         if (app is null)
         {
             exchange.Out ??= new redb.Route.Core.Message();
@@ -316,6 +314,18 @@ internal sealed class ApplicationManagementProcessor : IProcessor
                 .ToArray();
             if (app.Props.IdTokenAudiences.Length == 0)
                 app.Props.IdTokenAudiences = null;
+        }
+
+        // RFC 9068: access_token resource indicators — same PATCH and sanitising semantics.
+        if (request.AccessTokenAudiences != null)
+        {
+            app.Props.AccessTokenAudiences = request.AccessTokenAudiences
+                .Where(a => !string.IsNullOrWhiteSpace(a))
+                .Select(a => a.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            if (app.Props.AccessTokenAudiences.Length == 0)
+                app.Props.AccessTokenAudiences = null;
         }
 
         // A.6 (Request Object) — PATCH semantics: empty string clears, null leaves alone.
@@ -420,7 +430,6 @@ internal sealed class ApplicationManagementProcessor : IProcessor
             .Skip(request.Offset)
             .Take(count)
             .ToListAsync();
-        items.ForEach(i => i.Hydrate());
 
         exchange.Out ??= new redb.Route.Core.Message();
         exchange.Out.Body = new PagedResult<ApplicationResponse>
@@ -457,7 +466,7 @@ internal sealed class ApplicationManagementProcessor : IProcessor
             return;
         }
 
-        var app = (await _redb.LoadAsync<ApplicationProps>(id))?.Hydrate();
+        var app = (await _redb.LoadAsync<ApplicationProps>(id));
         if (app is null)
         {
             exchange.Out ??= new redb.Route.Core.Message();
@@ -529,6 +538,7 @@ internal sealed class ApplicationManagementProcessor : IProcessor
         IdentityTokenLifetimeSeconds = ReadLifetimeSetting(app, OpenIddictConstants.Settings.TokenLifetimes.IdentityToken),
         // A.3
         IdTokenAudiences = app.Props.IdTokenAudiences,
+        AccessTokenAudiences = app.Props.AccessTokenAudiences,
         // A.6
         RequestObjectSigningAlg = app.Props.RequestObjectSigningAlg,
         RequestObjectEncryptionAlg = app.Props.RequestObjectEncryptionAlg,

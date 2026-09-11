@@ -1,0 +1,76 @@
+@page "/admin/scopes/new"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@* New OAuth scope — full-page form (Phase 3, П5: pages-not-dialogs). *@
+
+<div style="margin-bottom: var(--space-3);">
+    <NavLink href="/admin/scopes" class="btn btn-ghost" style="padding: 0; color: var(--accent-primary);">← Go back to Scopes</NavLink>
+</div>
+
+<h1 style="margin: 0;">New scope</h1>
+<p class="text-secondary">OAuth scope clients can request; resources listed here become token audiences.</p>
+
+<div class="card" style="max-width: 640px;">
+    <section class="app-detail__section">
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Name *</span>
+            <input class="app-detail__input app-detail__input--mono" placeholder="api, custom:hr, …" @bind="_form.Name" />
+            <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Immutable after creation; unique across the server.</span>
+        </label>
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Display name</span>
+            <input class="app-detail__input" @bind="_form.DisplayName" />
+        </label>
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Description</span>
+            <input class="app-detail__input" @bind="_form.Description" />
+        </label>
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Resources</span>
+            <textarea rows="4" class="app-detail__input app-detail__input--mono" placeholder="one audience per line" @bind="_form.Resources"></textarea>
+            <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Resource servers this scope grants access to (one per line) — each becomes an <code>aud</code> of issued tokens.</span>
+        </label>
+    </section>
+
+    @if (_error is not null) { <p class="text-error">@_error</p> }
+
+    <div style="display:flex; gap: var(--space-2); justify-content: flex-end;">
+        <NavLink href="/admin/scopes" class="btn btn-secondary">Cancel</NavLink>
+        <button class="btn btn-primary" @onclick="CreateAsync" disabled="@(_saving || _form.Name.Trim().Length == 0)">@(_saving ? "Creating…" : "Create scope")</button>
+    </div>
+</div>
+
+@code {
+    private sealed class FormState
+    {
+        public string Name = "";
+        public string? DisplayName, Description;
+        public string Resources = "";
+    }
+
+    private readonly FormState _form = new();
+    private bool _saving;
+    private string? _error;
+
+    private async Task CreateAsync()
+    {
+        _saving = true; _error = null;
+        try
+        {
+            var created = await Client.CreateScopeAsync(new CreateScopeRequest
+            {
+                Name = _form.Name.Trim(),
+                DisplayName = string.IsNullOrWhiteSpace(_form.DisplayName) ? null : _form.DisplayName,
+                Description = string.IsNullOrWhiteSpace(_form.Description) ? null : _form.Description,
+                Resources = _form.Resources.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            });
+            Toast.Success($"Scope '{created.Name}' created");
+            Nav.NavigateTo($"/admin/scopes/{Uri.EscapeDataString(created.Id)}");
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+}

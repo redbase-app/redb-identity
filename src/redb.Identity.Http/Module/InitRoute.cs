@@ -29,6 +29,21 @@ namespace redb.Identity.Http;
 /// </summary>
 public static class InitRoute
 {
+    /// <summary>
+    /// Host options for a server manager this module has to create itself (no other component
+    /// registered one). Under a Tsak worker the manager comes from the worker's DI and carries the
+    /// worker's own trusted-proxy list, so this path is not taken there. When Identity runs as its
+    /// own host, the proxies it was configured with (<c>Identity:ReverseProxies</c>) are the only
+    /// ones anybody knows about, so they are handed to the host as well: the client address and
+    /// scheme are then right on every listener, not only after Core's per-route processor runs.
+    /// </summary>
+    private static HttpHostingOptions HostingOptionsFrom(IRouteContext context)
+    {
+        var hosting = new HttpHostingOptions();
+        IdentityHttpConfigBinder.BindTrustedProxies(context, hosting);
+        return hosting;
+    }
+
     public static IRouteContext main(IRouteContext context)
     {
         // Ensure the HttpComponent (scheme "http") AND HttpsComponent (scheme "https") are
@@ -37,13 +52,13 @@ public static class InitRoute
         // https: URIs when IdentityTransport:Http:Ssl=true, so the "https" component must exist.
         if (!context.HasComponent("http"))
         {
-            var serverManager = new SharedHttpServerManager();
+            var serverManager = new SharedHttpServerManager(HostingOptionsFrom(context));
             context.AddComponent(new HttpComponent { ServerManager = serverManager });
             context.AddComponent(new HttpsComponent { ServerManager = serverManager });
         }
         else if (!context.HasComponent("https"))
         {
-            context.AddComponent(new HttpsComponent { ServerManager = new SharedHttpServerManager() });
+            context.AddComponent(new HttpsComponent { ServerManager = new SharedHttpServerManager(HostingOptionsFrom(context)) });
         }
 
         // Two boot paths (mirrors Core's InitRoute):

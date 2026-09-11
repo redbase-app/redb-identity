@@ -367,7 +367,12 @@ public sealed class ProductionHttpFixture : IAsyncLifetime
 
         // Create RouteContext with HTTP
         _ctx = new RouteContext(_sp, "production-http-e2e");
-        _ctx.AddComponent(new HttpComponent { ServerManager = new SharedHttpServerManager() });
+        // The host trusts its own loopback peer as a reverse proxy, so a test can play the TLS
+        // terminator: send X-Forwarded-Proto / X-Forwarded-For and the facade sees the client's
+        // origin the way it would behind nginx. Requests without those headers are untouched.
+        var hosting = new HttpHostingOptions();
+        hosting.TrustedProxies.Add("127.0.0.1").Add("::1");
+        _ctx.AddComponent(new HttpComponent { ServerManager = new SharedHttpServerManager(hosting) });
 
         // Bearer auth processors live in Core's RouteBuilder so they get exposed as
         // `direct-vm://identity-auth-{management,scim}` consumers; the HTTP facade

@@ -232,7 +232,7 @@ public class BootstrapAdminEndpointTests : IAsyncLifetime
         await _fx.UseRedbAsync(async redb =>
         {
             var scopeCount = (await redb.Query<ScopeProps>()
-                .WhereRedb(o => o.ValueString == ProductionHttpFixture.BootstrapAdminScope)
+                .Where(p => p.ScopeName == ProductionHttpFixture.BootstrapAdminScope)
                 .ToListAsync()).Count;
             scopeCount.Should().Be(1);
 

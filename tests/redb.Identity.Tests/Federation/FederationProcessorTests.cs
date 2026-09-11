@@ -184,11 +184,10 @@ public class FederationProcessorTests : IDisposable
         userPropsRow!.Props.GivenName.Should().Be("Alice");
         userPropsRow.Props.FamilyName.Should().Be("Federation");
 
-        // H8: per-link FederatedIdentityProps row with value_string "fake-oidc:{sub}" for reverse lookup
+        // V4-UNIQUE: per-link FederatedIdentityProps row keyed by the [RedbUnique] LinkKey
+        // "fake-oidc:{sub}" for reverse lookup (was the value_string mirror before Ф2).
         var expectedKey = $"fake-oidc:{expectedSub}";
-        var fedRow = await _fx.Redb.Query<FederatedIdentityProps>()
-            .WhereRedb(o => o.ValueString == expectedKey)
-            .FirstOrDefaultAsync();
+        var fedRow = await _fx.Redb.GetByUniqueAsync<FederatedIdentityProps>(p => p.LinkKey, expectedKey);
         fedRow.Should().NotBeNull("FederatedIdentityProps reverse-lookup row must exist");
         fedRow!.key.Should().Be(userId);
     }

@@ -16,9 +16,9 @@
 <RdbPageHeader Title="Users"
                Description="Users who can sign into applications managed by this server.">
     <Actions>
-        <button class="btn btn-primary" @onclick="OpenCreate">
+        <NavLink href="/admin/users/new" class="btn btn-primary">
             + New User
-        </button>
+        </NavLink>
     </Actions>
 </RdbPageHeader>
 
@@ -75,7 +75,7 @@ else if (_items.Count == 0)
         <Actions>
             @if (!_searchActive)
             {
-                <button class="btn btn-primary" @onclick="OpenCreate">+ New User</button>
+                <NavLink href="/admin/users/new" class="btn btn-primary">+ New User</NavLink>
             }
         </Actions>
     </UiEmptyState>
@@ -148,69 +148,6 @@ else
     }
 }
 
-@* New User modal — small create form. On submit, navigate to detail page. *@
-@if (_showCreate)
-{
-    <div class="confirm-overlay" @onclick="CloseCreate">
-        <div class="confirm-dialog" style="min-width: 420px;" @onclick:stopPropagation="true">
-            <div class="confirm-header">
-                <RdbIcon Name="user" Size="20" />
-                <span class="font-semibold">Create user</span>
-            </div>
-
-            <div style="display: flex; flex-direction: column; gap: var(--space-3);">
-                <div class="app-detail__field">
-                    <label class="app-detail__field-label" for="new-user-login">Login *</label>
-                    <input id="new-user-login" type="text"
-                           class="app-detail__input app-detail__input--mono"
-                           value="@_form.Login"
-                           @oninput="@(e => _form.Login = e.Value?.ToString() ?? string.Empty)"
-                           autocomplete="off"
-                           placeholder="alice" />
-                </div>
-                <div class="app-detail__field">
-                    <label class="app-detail__field-label" for="new-user-password">Password *</label>
-                    <input id="new-user-password" type="password"
-                           class="app-detail__input"
-                           value="@_form.Password"
-                           @oninput="@(e => _form.Password = e.Value?.ToString() ?? string.Empty)"
-                           autocomplete="new-password" />
-                </div>
-                <div class="app-detail__field">
-                    <label class="app-detail__field-label" for="new-user-display">Display name</label>
-                    <input id="new-user-display" type="text"
-                           class="app-detail__input"
-                           value="@_form.DisplayName"
-                           @oninput="@(e => _form.DisplayName = e.Value?.ToString() ?? string.Empty)"
-                           placeholder="Alice Doe" />
-                </div>
-                <div class="app-detail__field">
-                    <label class="app-detail__field-label" for="new-user-email">Email</label>
-                    <input id="new-user-email" type="email"
-                           class="app-detail__input"
-                           value="@_form.Email"
-                           @oninput="@(e => _form.Email = e.Value?.ToString() ?? string.Empty)"
-                           placeholder="alice@example.com" />
-                </div>
-            </div>
-
-            @if (_createError is not null)
-            {
-                <p class="text-error" style="margin-top: var(--space-3);">@_createError</p>
-            }
-
-            <div class="confirm-actions">
-                <button class="btn btn-secondary btn-sm" @onclick="CloseCreate" disabled="@_creating">Cancel</button>
-                <button class="btn btn-primary btn-sm"
-                        disabled="@(_creating || !IsFormValid)"
-                        @onclick="CreateAsync">
-                    @(_creating ? "Creating…" : "Create")
-                </button>
-            </div>
-        </div>
-    </div>
-}
-
 @code {
     private const int PageSize = 25;
 
@@ -221,23 +158,6 @@ else
 
     private string _search = "";
     private bool _searchActive;
-
-    private bool _showCreate;
-    private bool _creating;
-    private string? _createError;
-    private CreateForm _form = new();
-
-    private sealed class CreateForm
-    {
-        public string Login { get; set; } = "";
-        public string Password { get; set; } = "";
-        public string DisplayName { get; set; } = "";
-        public string Email { get; set; } = "";
-    }
-
-    private bool IsFormValid =>
-        !string.IsNullOrWhiteSpace(_form.Login) &&
-        !string.IsNullOrWhiteSpace(_form.Password);
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
@@ -304,47 +224,6 @@ else
         return LoadAsync();
     }
 
-    private void OpenCreate()
-    {
-        _showCreate = true;
-        _form = new CreateForm();
-        _createError = null;
-    }
-
-    private void CloseCreate()
-    {
-        if (_creating) return;
-        _showCreate = false;
-        _createError = null;
-    }
-
-    private async Task CreateAsync()
-    {
-        if (!IsFormValid || _creating) return;
-        _creating = true;
-        _createError = null;
-        try
-        {
-            var created = await Client.CreateUserAsync(new CreateUserRequest
-            {
-                Login = _form.Login.Trim(),
-                Password = _form.Password,
-                DisplayName = string.IsNullOrWhiteSpace(_form.DisplayName) ? null : _form.DisplayName.Trim(),
-                Email = string.IsNullOrWhiteSpace(_form.Email) ? null : _form.Email.Trim(),
-            });
-            Toast.Success($"User '{created.Login}' created");
-            _showCreate = false;
-            Nav.NavigateTo($"/admin/users/{created.Id}");
-        }
-        catch (Exception ex)
-        {
-            _createError = ex.Message;
-        }
-        finally
-        {
-            _creating = false;
-        }
-    }
 
     private static string AvatarLetter(UserResponse u)
     {

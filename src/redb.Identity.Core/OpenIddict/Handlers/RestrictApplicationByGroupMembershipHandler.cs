@@ -101,11 +101,9 @@ internal sealed class RestrictApplicationByGroupMembershipHandler
         ApplicationProps? props;
         try
         {
-            var app = await redb.Query<ApplicationProps>()
-                .WhereRedb(o => o.ValueString == clientId)
-                .FirstOrDefaultAsync()
+            var app = await redb.GetByUniqueAsync<ApplicationProps>(p => p.ClientId, clientId)
                 .ConfigureAwait(false);
-            props = app?.Hydrate().Props;
+            props = app?.Props;
         }
         catch (Exception ex)
         {

@@ -69,12 +69,11 @@ internal sealed class FederationProviderManagementProcessor : IProcessor
 
         var providerId = request.ProviderId.Trim().ToLowerInvariant();
 
-        // Reject duplicates: value_string is UNIQUE per scheme so a concurrent insert
+        // Reject duplicates: ProviderId is [RedbUnique] (V4-UNIQUE) so a concurrent insert
         // would fail at the DB level anyway, but a friendly error here avoids exposing
         // raw constraint names to the API consumer.
-        var dup = await redb.Query<FederationProviderProps>()
-            .WhereRedb(o => o.ValueString == providerId)
-            .FirstOrDefaultAsync().ConfigureAwait(false);
+        var dup = await redb.GetByUniqueAsync<FederationProviderProps>(p => p.ProviderId, providerId)
+            .ConfigureAwait(false);
         if (dup is not null)
         {
             SetError(exchange, "conflict", $"Federation provider '{providerId}' already exists.");
@@ -96,7 +95,6 @@ internal sealed class FederationProviderManagementProcessor : IProcessor
             ClaimMappings = request.ClaimMappings,
         });
         obj.name = providerId;
-        obj.value_string = providerId;
 
         await redb.SaveAsync(obj).ConfigureAwait(false);
 
@@ -121,8 +119,9 @@ internal sealed class FederationProviderManagementProcessor : IProcessor
         var obj = await redb.LoadAsync<FederationProviderProps>(id.Value).ConfigureAwait(false);
         if (obj is null) { SetError(exchange, "not_found", $"Federation provider {id} not found"); return; }
 
-        // Restore ProviderId from value_string (it is [RedbIgnore] so not part of props storage)
-        obj.Props.ProviderId = obj.value_string ?? string.Empty;
+        // Props is the source of truth (V4-UNIQUE); value_string covers legacy rows.
+        if (obj.Props.ProviderId.Length == 0)
+            obj.Props.ProviderId = obj.value_string ?? string.Empty;
 
         exchange.Out ??= new Message();
         exchange.Out.Body = MapToResponse(obj);
@@ -139,7 +138,8 @@ internal sealed class FederationProviderManagementProcessor : IProcessor
         var obj = await redb.LoadAsync<FederationProviderProps>(id).ConfigureAwait(false);
         if (obj is null) { SetError(exchange, "not_found", $"Federation provider {id} not found"); return; }
 
-        obj.Props.ProviderId = obj.value_string ?? string.Empty;
+        if (obj.Props.ProviderId.Length == 0)
+            obj.Props.ProviderId = obj.value_string ?? string.Empty; // legacy row
 
         if (request.Kind != null) obj.Props.Kind = request.Kind.Trim().ToLowerInvariant();
         if (request.DisplayName != null) obj.Props.DisplayName = request.DisplayName.Trim();
@@ -174,7 +174,10 @@ internal sealed class FederationProviderManagementProcessor : IProcessor
         var obj = await redb.LoadAsync<FederationProviderProps>(id.Value).ConfigureAwait(false);
         if (obj is null) { SetError(exchange, "not_found", $"Federation provider {id} not found"); return; }
 
-        var providerId = obj.value_string ?? string.Empty;
+        // Props is the source of truth; value_string covers not-yet-backfilled legacy rows.
+        var providerId = obj.Props.ProviderId is { Length: > 0 } pid
+            ? pid
+            : obj.value_string ?? string.Empty;
 
         // Note: deleting a provider does NOT cascade-delete user FederatedIdentityProps
         // links — those become "orphaned" but the user can still log in if the same
@@ -199,9 +202,10 @@ internal sealed class FederationProviderManagementProcessor : IProcessor
         var count = Math.Min(request.Count, 100);
         var items = await query.Skip(request.Offset).Take(count).ToListAsync().ConfigureAwait(false);
 
-        // Restore [RedbIgnore] ProviderId from value_string before mapping.
+        // Props is the source of truth (V4-UNIQUE); value_string covers legacy rows.
         foreach (var item in items)
-            item.Props.ProviderId = item.value_string ?? string.Empty;
+            if (item.Props.ProviderId.Length == 0)
+                item.Props.ProviderId = item.value_string ?? string.Empty;
 
         exchange.Out ??= new Message();
         exchange.Out.Body = new PagedResult<FederationProviderResponse>

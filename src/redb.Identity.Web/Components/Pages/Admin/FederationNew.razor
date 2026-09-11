@@ -1,0 +1,201 @@
+@page "/admin/federation/new"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    New federation provider — full-page form (Phase 3, П1: pages-not-dialogs).
+    Replaces the create half of the old FederationList modal; the modal could not
+    even show Priority or claim mappings — the page has room for both, but keeps
+    the create surface minimal (mappings are edited on the detail page after
+    creation, matching the WebhookNew → WebhookDetail flow).
+*@
+
+<div style="margin-bottom: var(--space-3);">
+    <NavLink href="/admin/federation" class="btn btn-ghost" style="padding: 0; color: var(--accent-primary);">← Go back to Federation providers</NavLink>
+</div>
+
+<h1 style="margin: 0;">New federation provider</h1>
+<p class="text-secondary">Register an external OIDC / OAuth identity provider for federated login.</p>
+
+<div class="card" style="max-width: 720px;">
+    <section class="app-detail__section">
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Provider ID *</span>
+            <input class="app-detail__input app-detail__input--mono"
+                   placeholder="google, azure-ad, corp-github…"
+                   value="@_form.ProviderId"
+                   @oninput="@(e => { _form.ProviderId = e.Value?.ToString() ?? string.Empty; _providerIdError = ValidateProviderId(_form.ProviderId); })" />
+            <span class="app-detail__field-hint">
+                <RdbIcon Name="info" Size="12" />
+                Lowercase slug: letters, digits, «_» and «-», up to 64 chars. Becomes part of the login URL and cannot be changed later.
+            </span>
+            @if (_providerIdError is not null)
+            {
+                <span class="text-error" style="font-size: var(--font-size-sm); margin-top: var(--space-1);">@_providerIdError</span>
+            }
+        </label>
+
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Kind *</span>
+            <select class="app-detail__input" @bind="_form.Kind">
+                <option value="oidc">OIDC (discovery-based)</option>
+                <option value="github">GitHub (OAuth2 + email API)</option>
+            </select>
+            <span class="app-detail__field-hint">
+                <RdbIcon Name="info" Size="12" />
+                Picks the wire protocol adapter. Cannot be changed later.
+            </span>
+        </label>
+
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Display name *</span>
+            <input class="app-detail__input" placeholder="Continue with Google" @bind="_form.DisplayName" />
+            <span class="app-detail__field-hint">
+                <RdbIcon Name="info" Size="12" />
+                Shown on the login button.
+            </span>
+        </label>
+
+        @if (_form.Kind == "oidc")
+        {
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Authority (issuer URL) *</span>
+                <input class="app-detail__input app-detail__input--mono" placeholder="https://accounts.google.com" @bind="_form.Authority" />
+                <span class="app-detail__field-hint">
+                    <RdbIcon Name="info" Size="12" />
+                    OIDC discovery root — <code>/.well-known/openid-configuration</code> is resolved from here.
+                </span>
+            </label>
+        }
+    </section>
+
+    <section class="app-detail__section">
+        <h3 class="app-detail__section-title">Credentials</h3>
+
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Client ID *</span>
+            <input class="app-detail__input app-detail__input--mono" @bind="_form.ClientId" />
+        </label>
+
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Client secret</span>
+            <div style="position: relative;">
+                <input class="app-detail__input app-detail__input--mono"
+                       type="@(_secretVisible ? "text" : "password")"
+                       placeholder="(leave blank for public clients / PKCE)"
+                       @bind="_form.ClientSecret" />
+                <button type="button" class="btn btn-ghost" style="position:absolute; right: 4px; top: 4px; padding: 2px 8px;"
+                        @onclick="() => _secretVisible = !_secretVisible">
+                    <RdbIcon Name="@(_secretVisible ? "eye-off" : "eye")" Size="14" />
+                </button>
+            </div>
+            <span class="app-detail__field-hint">
+                <RdbIcon Name="info" Size="12" />
+                Stored encrypted at rest; never shown back — only replaceable.
+            </span>
+        </label>
+
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Scopes</span>
+            <input class="app-detail__input app-detail__input--mono" placeholder="openid profile email" @bind="_form.Scopes" />
+            <span class="app-detail__field-hint">
+                <RdbIcon Name="info" Size="12" />
+                Space-separated; requested from the external provider.
+            </span>
+        </label>
+    </section>
+
+    <section class="app-detail__section">
+        <h3 class="app-detail__section-title">Behaviour</h3>
+
+        <label style="display:flex; gap:var(--space-2); align-items:center; cursor:pointer;">
+            <input type="checkbox" @bind="_form.AutoProvision" />
+            <span>Auto-provision new users on first login</span>
+        </label>
+        <label style="display:flex; gap:var(--space-2); align-items:center; cursor:pointer; margin-top: var(--space-2);">
+            <input type="checkbox" @bind="_form.Enabled" />
+            <span>Enabled</span>
+        </label>
+
+        <label class="app-detail__field" style="margin-top: var(--space-3); max-width: 200px;">
+            <span class="app-detail__field-label">Priority</span>
+            <input class="app-detail__input" type="number" @bind="_form.Priority" />
+            <span class="app-detail__field-hint">
+                <RdbIcon Name="info" Size="12" />
+                Login buttons sort ascending by priority.
+            </span>
+        </label>
+    </section>
+
+    @if (_error is not null) { <p class="text-error">@_error</p> }
+
+    <div style="display:flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-3);">
+        <NavLink href="/admin/federation" class="btn btn-secondary">Cancel</NavLink>
+        <button class="btn btn-primary" @onclick="CreateAsync" disabled="@(_saving || !IsValid)">@(_saving ? "Creating…" : "Create provider")</button>
+    </div>
+</div>
+
+@code {
+    private sealed class FormState
+    {
+        public string ProviderId = "";
+        public string Kind = "oidc";
+        public string DisplayName = "";
+        public string? Authority;
+        public string ClientId = "";
+        public string? ClientSecret;
+        public string Scopes = "openid profile email";
+        public bool AutoProvision = true;
+        public bool Enabled = true;
+        public int Priority = 100;
+    }
+
+    private readonly FormState _form = new();
+    private bool _saving;
+    private bool _secretVisible;
+    private string? _error;
+    private string? _providerIdError;
+
+    // Mirrors the BFF federation-start route guard, so an id accepted here is routable.
+    private static readonly System.Text.RegularExpressions.Regex ProviderIdRx =
+        new("^[a-z0-9][a-z0-9_-]{0,63}$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static string? ValidateProviderId(string value) =>
+        value.Length == 0 ? null :
+        ProviderIdRx.IsMatch(value) ? null :
+        "Lowercase letters, digits, «_» and «-» only; must start with a letter or digit; max 64 chars.";
+
+    private bool IsValid =>
+        _providerIdError is null
+        && _form.ProviderId.Length > 0
+        && _form.DisplayName.Trim().Length > 0
+        && _form.ClientId.Trim().Length > 0
+        && (_form.Kind != "oidc" || !string.IsNullOrWhiteSpace(_form.Authority));
+
+    private async Task CreateAsync()
+    {
+        _saving = true; _error = null;
+        try
+        {
+            var created = await Client.CreateFederationProviderAsync(new CreateFederationProviderRequest
+            {
+                ProviderId = _form.ProviderId,
+                Kind = _form.Kind,
+                DisplayName = _form.DisplayName.Trim(),
+                Authority = string.IsNullOrWhiteSpace(_form.Authority) ? null : _form.Authority!.Trim(),
+                ClientId = _form.ClientId.Trim(),
+                ClientSecret = string.IsNullOrEmpty(_form.ClientSecret) ? null : _form.ClientSecret,
+                Scopes = _form.Scopes.Split(' ', StringSplitOptions.RemoveEmptyEntries),
+                AutoProvision = _form.AutoProvision,
+                Enabled = _form.Enabled,
+                Priority = _form.Priority,
+            });
+            Toast.Show($"Provider '{created.ProviderId}' created.", "online");
+            Nav.NavigateTo($"/admin/federation/{Uri.EscapeDataString(created.Id)}");
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+}

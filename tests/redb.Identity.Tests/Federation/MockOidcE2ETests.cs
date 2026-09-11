@@ -131,14 +131,15 @@ public class MockOidcE2ETests
             .FirstOrDefaultAsync();
         userPropsRow.Should().NotBeNull("UserProps must be created for federated user");
 
-        // Per-link reverse-lookup row: value_string format "{providerId}:{sub}".
+        // Per-link reverse-lookup row: [RedbUnique] LinkKey format "{providerId}:{sub}"
+        // (V4-UNIQUE; was the value_string mirror before Ф2).
         var providerPrefix = MockOidcE2EFixture.ProviderId + ":";
         var fedRow = await _fx.Redb.Query<FederatedIdentityProps>()
             .WhereRedb(o => o.Key == userId)
             .FirstOrDefaultAsync();
         fedRow.Should().NotBeNull("FederatedIdentityProps row must be created for the link");
-        fedRow!.value_string.Should().StartWith(providerPrefix);
-        _out.WriteLine($"Federated link stored: value_string={fedRow.value_string}");
+        fedRow!.Props.LinkKey.Should().StartWith(providerPrefix);
+        _out.WriteLine($"Federated link stored: LinkKey={fedRow.Props.LinkKey}");
     }
 
     [Fact]

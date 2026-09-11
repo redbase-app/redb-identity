@@ -48,7 +48,6 @@ internal sealed class RedbScopeStore : IOpenIddictScopeStore<RedbObject<ScopePro
     public async ValueTask CreateAsync(RedbObject<ScopeProps> scope, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(scope);
-        scope.value_string = scope.Props.ScopeName;
         scope.id = await _redb.SaveAsync(scope).ConfigureAwait(false);
     }
 
@@ -70,19 +69,16 @@ internal sealed class RedbScopeStore : IOpenIddictScopeStore<RedbObject<ScopePro
             .WhereRedb(o => o.Id == id)
             .FirstOrDefaultAsync()
             .ConfigureAwait(false);
-        if (scope != null) scope.Hydrate();
         return scope;
     }
 
     public async ValueTask<RedbObject<ScopeProps>?> FindByNameAsync(
         string name, CancellationToken cancellationToken)
     {
-        var scope = await _redb.Query<ScopeProps>()
-            .WhereRedb(o => o.ValueString == name)
-            .FirstOrDefaultAsync()
+        // V4-UNIQUE: one probe of the unique index ([RedbUnique] ScopeName); an object found
+        // by its key has Props loaded, so no Hydrate.
+        return await _redb.GetByUniqueAsync<ScopeProps>(p => p.ScopeName, name)
             .ConfigureAwait(false);
-        if (scope != null) scope.Hydrate();
-        return scope;
     }
 
     public async IAsyncEnumerable<RedbObject<ScopeProps>> FindByNamesAsync(
@@ -91,15 +87,15 @@ internal sealed class RedbScopeStore : IOpenIddictScopeStore<RedbObject<ScopePro
         if (names.IsDefaultOrEmpty)
             yield break;
 
-        var results = await _redb.Query<ScopeProps>()
-            .WhereRedb(o => names.Contains(o.ValueString!))
-            .ToListAsync()
-            .ConfigureAwait(false);
-
-        foreach (var result in results)
+        // V4-UNIQUE: N point probes of the unique index. N is the scopes of one request
+        // (single digits); each probe is the same one-row index hit FindByNameAsync does,
+        // which beats a scheme-wide membership query at this cardinality.
+        foreach (var name in names)
         {
-            result.Hydrate();
-            yield return result;
+            var result = await _redb.GetByUniqueAsync<ScopeProps>(p => p.ScopeName, name)
+                .ConfigureAwait(false);
+            if (result != null)
+                yield return result;
         }
     }
 
@@ -113,7 +109,7 @@ internal sealed class RedbScopeStore : IOpenIddictScopeStore<RedbObject<ScopePro
             .ConfigureAwait(false);
 
         foreach (var result in results)
-            yield return result.Hydrate();
+            yield return result;
     }
 
     public ValueTask<TResult?> GetAsync<TState, TResult>(
@@ -181,7 +177,8 @@ internal sealed class RedbScopeStore : IOpenIddictScopeStore<RedbObject<ScopePro
         RedbObject<ScopeProps> scope, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(scope);
-        return new(scope.value_string ?? scope.Props.ScopeName);
+        // Props is the source of truth; value_string covers not-yet-backfilled legacy rows.
+        return new(scope.Props.ScopeName ?? scope.value_string);
     }
 
     public ValueTask<ImmutableDictionary<string, JsonElement>> GetPropertiesAsync(
@@ -225,7 +222,7 @@ internal sealed class RedbScopeStore : IOpenIddictScopeStore<RedbObject<ScopePro
         var results = await query.ToListAsync().ConfigureAwait(false);
 
         foreach (var result in results)
-            yield return result.Hydrate();
+            yield return result;
     }
 
     public IAsyncEnumerable<TResult> ListAsync<TState, TResult>(
@@ -279,7 +276,6 @@ internal sealed class RedbScopeStore : IOpenIddictScopeStore<RedbObject<ScopePro
     {
         ArgumentNullException.ThrowIfNull(scope);
         scope.Props.ScopeName = name;
-        scope.value_string = name;
         return default;
     }
 
@@ -325,7 +321,6 @@ internal sealed class RedbScopeStore : IOpenIddictScopeStore<RedbObject<ScopePro
             if (current.hash != scope.hash)
                 throw new OpenIddictExceptions.ConcurrencyException("The scope was concurrently updated.");
 
-            scope.value_string = scope.Props.ScopeName;
             await _redb.SaveAsync(scope).ConfigureAwait(false);
         }).ConfigureAwait(false);
     }

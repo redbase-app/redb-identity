@@ -1,42 +1,55 @@
 @page "/admin/federation"
 @attribute [Authorize]
 @inject IIdentityClient Client
-@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    Federation providers — listing. Phase 3 (П1, pages-not-dialogs): the create/edit
+    modal is gone; New goes to /admin/federation/new, a row click opens
+    /admin/federation/{id}, and Delete lives on the detail page behind the
+    typed-confirm dialog. A provider still carrying the REPLACE_ME placeholder is
+    flagged NOT CONFIGURED — such providers are hidden from /login by the core filter.
+*@
 
 <RdbPageHeader Title="Federation providers" Description="External OIDC / OAuth identity providers." />
 
 <div class="card">
     <div class="card-header">
         <span class="card-title">All providers</span>
-        <button class="btn btn-primary" @onclick="OpenCreate">
+        <NavLink href="/admin/federation/new" class="btn btn-primary">
             <RdbIcon Name="cluster" Size="14" /> New provider
-        </button>
+        </NavLink>
     </div>
 
     @if (_loading) { <p class="text-secondary">Loading…</p> }
     else if (_error is not null) { <p class="text-error">@_error</p> }
-    else if (_items.Count == 0) { <p class="text-secondary">No federation providers configured.</p> }
+    else if (_items.Count == 0)
+    {
+        <UiEmptyState Icon="cluster"
+                      Title="No federation providers"
+                      Description="Register an external OIDC / OAuth provider to enable federated login." />
+    }
     else
     {
         <table class="data-table">
             <thead>
-                <tr><th>Provider ID</th><th>Kind</th><th>Display name</th><th>Authority</th><th>Client ID</th><th>Secret</th><th>Enabled</th><th></th></tr>
+                <tr><th>Provider ID</th><th>Kind</th><th>Display name</th><th>Authority</th><th>Status</th><th>Priority</th><th></th></tr>
             </thead>
             <tbody>
                 @foreach (var p in _items)
                 {
-                    <tr>
+                    <tr style="cursor: pointer;" @onclick="() => Open(p)">
                         <td><strong>@p.ProviderId</strong></td>
                         <td><span class="badge">@p.Kind</span></td>
                         <td>@p.DisplayName</td>
                         <td class="text-secondary"><code>@p.Authority</code></td>
-                        <td><code>@p.ClientId</code></td>
-                        <td><RdbBadge Text="@(p.HasSecret ? "set" : "none")" Variant="@(p.HasSecret ? "online" : "offline")" /></td>
-                        <td><RdbBadge Text="@(p.Enabled ? "on" : "off")" Variant="@(p.Enabled ? "online" : "offline")" /></td>
-                        <td style="display:flex; gap:var(--space-1);">
-                            <button class="btn btn-sm" @onclick="() => OpenEdit(p)">Edit</button>
-                            <button class="btn btn-sm btn-danger" @onclick="() => Delete(p)">Delete</button>
+                        <td>
+                            @if (IsPlaceholder(p)) { <RdbBadge Text="NOT CONFIGURED" Variant="error" /> }
+                            else if (p.Enabled) { <RdbBadge Text="enabled" Variant="online" /> }
+                            else { <RdbBadge Text="disabled" Variant="offline" /> }
                         </td>
+                        <td class="text-secondary">@p.Priority</td>
+                        <td><RdbIcon Name="chevron-right" Size="14" /></td>
                     </tr>
                 }
             </tbody>
@@ -50,55 +63,6 @@
     }
 </div>
 
-@if (_editing is not null)
-{
-    <div class="modal-backdrop" @onclick="CloseModal">
-        <div class="modal" @onclick:stopPropagation="true">
-            <h3>@(string.IsNullOrEmpty(_editing.Id) ? "New federation provider" : $"Edit: {_editing.ProviderId}")</h3>
-
-            @if (string.IsNullOrEmpty(_editing.Id))
-            {
-                <label>Provider ID * <input @bind="_form.ProviderId" placeholder="google, azure-ad, corp-github…" /></label>
-                <label>Kind *
-                    <select @bind="_form.Kind">
-                        <option value="oidc">OIDC</option>
-                        <option value="github">GitHub</option>
-                    </select>
-                </label>
-            }
-            else
-            {
-                <label>Provider ID <input value="@_editing.ProviderId" disabled /></label>
-                <label>Kind <input value="@_editing.Kind" disabled /></label>
-            }
-
-            <label>Display name * <input @bind="_form.DisplayName" /></label>
-
-            @if (_form.Kind == "oidc")
-            {
-                <label>Authority (issuer URL) <input @bind="_form.Authority" placeholder="https://accounts.google.com" /></label>
-            }
-
-            <label>Client ID * <input @bind="_form.ClientId" /></label>
-            <label>Client secret <input type="password" @bind="_form.ClientSecret" placeholder="@(!string.IsNullOrEmpty(_editing.Id) && _editing.HasSecret ? "(unchanged — leave blank)" : "")" /></label>
-            <label>Scopes (space-separated) <input @bind="_form.Scopes" placeholder="openid profile email" /></label>
-
-            <label style="display:flex; gap:var(--space-2); align-items:center;">
-                <input type="checkbox" @bind="_form.AutoProvision" /> Auto-provision new users on first login
-            </label>
-            <label style="display:flex; gap:var(--space-2); align-items:center;">
-                <input type="checkbox" @bind="_form.Enabled" /> Enabled
-            </label>
-
-            @if (_modalError is not null) { <p class="text-error">@_modalError</p> }
-            <div class="modal-actions">
-                <button class="btn btn-secondary" @onclick="CloseModal">Cancel</button>
-                <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">@(_saving ? "Saving…" : "Save")</button>
-            </div>
-        </div>
-    </div>
-}
-
 @code {
     private readonly List<FederationProviderResponse> _items = new();
     private int _offset, _total;
@@ -106,23 +70,8 @@
     private bool _loading = true;
     private string? _error;
 
-    private FederationProviderResponse? _editing;
-    private FormState _form = new();
-    private bool _saving;
-    private string? _modalError;
-
-    private sealed class FormState
-    {
-        public string ProviderId = "";
-        public string Kind = "oidc";
-        public string DisplayName = "";
-        public string? Authority;
-        public string ClientId = "";
-        public string? ClientSecret;
-        public string Scopes = "openid profile email";
-        public bool AutoProvision = true;
-        public bool Enabled = true;
-    }
+    private static bool IsPlaceholder(FederationProviderResponse p) =>
+        p.ClientId == "REPLACE_ME" || p.Authority == "REPLACE_ME";
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
@@ -138,66 +87,8 @@
         finally { _loading = false; }
     }
 
-    private void OpenCreate()
-    {
-        _editing = new FederationProviderResponse { Id = "", ProviderId = "", Kind = "oidc", DisplayName = "", ClientId = "", Scopes = [], Enabled = true };
-        _form = new FormState(); _modalError = null;
-    }
-
-    private void OpenEdit(FederationProviderResponse p)
-    {
-        _editing = p;
-        _form = new FormState
-        {
-            ProviderId = p.ProviderId, Kind = p.Kind, DisplayName = p.DisplayName,
-            Authority = p.Authority, ClientId = p.ClientId, ClientSecret = null,
-            Scopes = string.Join(" ", p.Scopes), AutoProvision = p.AutoProvision, Enabled = p.Enabled,
-        };
-        _modalError = null;
-    }
-
-    private void CloseModal() { _editing = null; }
-
-    private async Task SaveAsync()
-    {
-        _saving = true; _modalError = null;
-        try
-        {
-            var scopes = _form.Scopes.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (string.IsNullOrEmpty(_editing!.Id))
-            {
-                await Client.CreateFederationProviderAsync(new CreateFederationProviderRequest
-                {
-                    ProviderId = _form.ProviderId, Kind = _form.Kind, DisplayName = _form.DisplayName,
-                    Authority = string.IsNullOrWhiteSpace(_form.Authority) ? null : _form.Authority,
-                    ClientId = _form.ClientId, ClientSecret = _form.ClientSecret,
-                    Scopes = scopes, AutoProvision = _form.AutoProvision, Enabled = _form.Enabled,
-                });
-            }
-            else
-            {
-                await Client.UpdateFederationProviderAsync(_editing.Id, new UpdateFederationProviderRequest
-                {
-                    Id = _editing.Id, DisplayName = _form.DisplayName,
-                    Authority = string.IsNullOrWhiteSpace(_form.Authority) ? null : _form.Authority,
-                    ClientId = _form.ClientId,
-                    ClientSecret = string.IsNullOrEmpty(_form.ClientSecret) ? null : _form.ClientSecret,
-                    Scopes = scopes, AutoProvision = _form.AutoProvision, Enabled = _form.Enabled,
-                });
-            }
-            Toast.Show("Saved.", "online");
-            CloseModal();
-            await LoadAsync();
-        }
-        catch (Exception ex) { _modalError = ex.Message; }
-        finally { _saving = false; }
-    }
-
-    private async Task Delete(FederationProviderResponse p)
-    {
-        try { await Client.DeleteFederationProviderAsync(p.Id); Toast.Show("Deleted.", "online"); await LoadAsync(); }
-        catch (Exception ex) { Toast.Show(ex.Message, "error"); }
-    }
+    private void Open(FederationProviderResponse p)
+        => Nav.NavigateTo($"/admin/federation/{Uri.EscapeDataString(p.Id)}");
 
     private async Task PrevPage() { _offset = Math.Max(0, _offset - PageSize); await LoadAsync(); }
     private async Task NextPage() { _offset += PageSize; await LoadAsync(); }

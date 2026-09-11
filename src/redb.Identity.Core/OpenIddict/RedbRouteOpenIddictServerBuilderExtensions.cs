@@ -90,6 +90,11 @@ public static class RedbRouteOpenIddictServerBuilderExtensions
         // downstream resource servers in addition to the implicit client_id default.
         AttachAdditionalIdTokenAudiences.Descriptor,
 
+        // RFC 9068 §2.2/§3: access_token aud = scope Resources ∪ ApplicationProps.
+        // AccessTokenAudiences, plus the OP's own audience for identity:* scopes or as
+        // the default resource indicator when nothing else names one.
+        AttachAccessTokenResources.Descriptor,
+
         // Strip OpenIddict's internal oi_au_id (authorization id) reference claim from the
         // id_token (leaks in a JWT config; kept on the access_token). oi_tkn_id is left in
         // by design — it drives id_token revocation / back-channel logout. OIDC hygiene.

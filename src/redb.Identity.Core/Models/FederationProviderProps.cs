@@ -11,9 +11,10 @@ namespace redb.Identity.Core.Models;
 /// <para>
 /// Storage:
 /// <list type="bullet">
-///   <item><c>RedbObject.value_string = ProviderId</c> — lowercase, UNIQUE per
-///   <c>_id_scheme</c>. Enables O(1) lookup by provider id and rejects duplicates at the
-///   DB level via the partial unique index.</item>
+///   <item><see cref="ProviderId"/> — lowercase, unique per scheme via <c>[RedbUnique]</c>
+///   (V4-UNIQUE). Historical note: the doc used to claim a partial unique index on
+///   <c>value_string</c> that no code ever created — duplicates were possible until Ф2
+///   (doc/v4/02); <c>value_string</c> is a transition mirror now.</item>
 ///   <item><see cref="ClientSecret"/> is stored encrypted via DataProtection
 ///   (<c>identity.federation-provider-secret</c> purpose) — admin API never returns the
 ///   plaintext, only metadata (`HasSecret: bool`).</item>
@@ -23,8 +24,12 @@ namespace redb.Identity.Core.Models;
 [RedbScheme("identity.federation_provider")]
 public class FederationProviderProps
 {
-    /// <summary>Provider id (slug). Mirrored to <c>RedbObject.value_string</c>. E.g. <c>google</c>.</summary>
-    [RedbIgnore]
+    /// <summary>
+    /// Provider id (slug), e.g. <c>google</c> — lowercase (the processor normalises),
+    /// unique per scheme via <c>[RedbUnique]</c>. V4-UNIQUE: was a <c>[RedbIgnore]</c>
+    /// phantom mirrored to <c>value_string</c>; the mirror is transition-only now.
+    /// </summary>
+    [RedbUnique]
     public string ProviderId { get; set; } = string.Empty;
 
     /// <summary>Discriminates wire protocol so the registry can pick the right

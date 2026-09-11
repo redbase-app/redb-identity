@@ -67,9 +67,8 @@ internal sealed class RedbApplicationStore : IOpenIddictApplicationStore<RedbObj
     public async ValueTask CreateAsync(RedbObject<ApplicationProps> application, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(application);
-        application.value_string = application.Props.ClientId;
         application.id = await _redb.SaveAsync(application).ConfigureAwait(false);
-        if (application.value_string is { } cid)
+        if ((application.Props.ClientId ?? application.value_string) is { } cid)
             _clientIdCache[cid] = application;
     }
 
@@ -81,7 +80,7 @@ internal sealed class RedbApplicationStore : IOpenIddictApplicationStore<RedbObj
         // otherwise fall back to SoftDelete. Application drags Authorization/Token cascades —
         // hard-delete here would block the request thread.
         await IdentityDeletionHelper.DeleteAsync(_redb, _backgroundDeletion, application.id).ConfigureAwait(false);
-        if (application.value_string is { } cid)
+        if ((application.Props.ClientId ?? application.value_string) is { } cid)
             _clientIdCache.Remove(cid);
     }
 
@@ -98,7 +97,6 @@ internal sealed class RedbApplicationStore : IOpenIddictApplicationStore<RedbObj
             .WhereRedb(o => o.Id == id)
             .FirstOrDefaultAsync()
             .ConfigureAwait(false);
-        if (app != null) app.Hydrate();
         var ms = (long)Stopwatch.GetElapsedTime(sw).TotalMilliseconds;
         var n = ++_fbidCalls;
         _fbidMs += ms;
@@ -120,11 +118,11 @@ internal sealed class RedbApplicationStore : IOpenIddictApplicationStore<RedbObj
         }
 
         var sw = Stopwatch.GetTimestamp();
-        var app = await _redb.Query<ApplicationProps>()
-            .WhereRedb(o => o.ValueString == identifier)
-            .FirstOrDefaultAsync()
+        // V4-UNIQUE: one probe of the unique index ([RedbUnique] ClientId) instead of a scheme
+        // query on the value_string mirror. Hot path: 8-11 calls per /connect/token request.
+        // No Hydrate: an object found by its unique key has Props loaded from _values.
+        var app = await _redb.GetByUniqueAsync<ApplicationProps>(p => p.ClientId, identifier)
             .ConfigureAwait(false);
-        if (app != null) app.Hydrate();
         _clientIdCache[identifier] = app;
         var ms = (long)Stopwatch.GetElapsedTime(sw).TotalMilliseconds;
         var n = ++_fbcidCalls;
@@ -144,7 +142,7 @@ internal sealed class RedbApplicationStore : IOpenIddictApplicationStore<RedbObj
             .ConfigureAwait(false);
 
         foreach (var result in results)
-            yield return result.Hydrate();
+            yield return result;
     }
 
     public async IAsyncEnumerable<RedbObject<ApplicationProps>> FindByRedirectUriAsync(
@@ -156,7 +154,7 @@ internal sealed class RedbApplicationStore : IOpenIddictApplicationStore<RedbObj
             .ConfigureAwait(false);
 
         foreach (var result in results)
-            yield return result.Hydrate();
+            yield return result;
     }
 
     public ValueTask<string?> GetApplicationTypeAsync(
@@ -178,7 +176,8 @@ internal sealed class RedbApplicationStore : IOpenIddictApplicationStore<RedbObj
         RedbObject<ApplicationProps> application, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(application);
-        return new(application.value_string ?? application.Props.ClientId);
+        // Props is the source of truth; value_string covers not-yet-backfilled legacy rows.
+        return new(application.Props.ClientId ?? application.value_string);
     }
 
     public ValueTask<string?> GetClientSecretAsync(
@@ -317,7 +316,7 @@ internal sealed class RedbApplicationStore : IOpenIddictApplicationStore<RedbObj
         var results = await query.ToListAsync().ConfigureAwait(false);
 
         foreach (var result in results)
-            yield return result.Hydrate();
+            yield return result;
     }
 
     public IAsyncEnumerable<TResult> ListAsync<TState, TResult>(
@@ -341,7 +340,6 @@ internal sealed class RedbApplicationStore : IOpenIddictApplicationStore<RedbObj
     {
         ArgumentNullException.ThrowIfNull(application);
         application.Props.ClientId = identifier;
-        application.value_string = identifier;
         return default;
     }
 
@@ -478,11 +476,10 @@ internal sealed class RedbApplicationStore : IOpenIddictApplicationStore<RedbObj
             if (current.hash != application.hash)
                 throw new OpenIddictExceptions.ConcurrencyException("The application was concurrently updated.");
 
-            application.value_string = application.Props.ClientId;
             await _redb.SaveAsync(application).ConfigureAwait(false);
         }).ConfigureAwait(false);
 
-        if (application.value_string is { } cid)
+        if ((application.Props.ClientId ?? application.value_string) is { } cid)
             _clientIdCache[cid] = application;
     }
 }

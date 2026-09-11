@@ -184,7 +184,9 @@ public class ScimUserTests
             DisplayName = afterName,
             Active = false,
             Name = new ScimName { GivenName = "After", FamilyName = "Replace" },
-            Emails = [new ScimMultiValuedAttribute { Value = "replaced@example.com", Primary = true }]
+            // Per run: the email is unique in _users, and the MSSQL test database is never wiped between
+            // runs — a fixed address is held by the previous run's user and the PUT answers 409.
+            Emails = [new ScimMultiValuedAttribute { Value = $"replaced-{tag}@example.com", Primary = true }]
         };
         var res = await _http.SendAsync(ScimPut($"/scim/v2/Users/{id}", replacement));
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);

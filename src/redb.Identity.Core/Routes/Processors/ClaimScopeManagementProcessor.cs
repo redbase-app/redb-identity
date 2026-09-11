@@ -75,9 +75,8 @@ internal sealed class ClaimScopeManagementProcessor : IProcessor
         err = IdentityProcessorHelpers.ValidateDescription(request.Description, "Description");
         if (err != null) { SetError(exchange, "validation_error", err); return; }
 
-        var existing = await redb.Query<ClaimScopeProps>()
-            .WhereRedb(o => o.ValueString == request.Name)
-            .FirstOrDefaultAsync().ConfigureAwait(false);
+        var existing = await redb.GetByUniqueAsync<ClaimScopeProps>(p => p.ScopeName, request.Name)
+            .ConfigureAwait(false);
         if (existing != null)
         { SetError(exchange, "duplicate", $"ClaimScope '{request.Name}' already exists"); return; }
 
@@ -88,10 +87,9 @@ internal sealed class ClaimScopeManagementProcessor : IProcessor
             Enabled = request.Enabled,
         });
         obj.Name = request.DisplayName ?? request.Name;
-        obj.value_string = request.Name;
 
         try { await redb.SaveAsync(obj).ConfigureAwait(false); }
-        catch (Exception ex) when (IdentityProcessorHelpers.IsUniqueViolation(ex))
+        catch (redb.Core.Exceptions.RedbUniqueViolationException)
         { SetError(exchange, "duplicate", $"ClaimScope '{request.Name}' already exists"); return; }
 
         exchange.Out ??= new redb.Route.Core.Message();
@@ -107,10 +105,9 @@ internal sealed class ClaimScopeManagementProcessor : IProcessor
         {
             if (dict.TryGetValue("id", out var idVal) && idVal != null
                 && long.TryParse(idVal.ToString(), out var id) && id > 0)
-                scope = (await redb.LoadAsync<ClaimScopeProps>(id).ConfigureAwait(false))?.Hydrate();
+                scope = (await redb.LoadAsync<ClaimScopeProps>(id).ConfigureAwait(false));
             else if (dict.TryGetValue("name", out var nVal) && nVal is string name && !string.IsNullOrEmpty(name))
-                scope = (await redb.Query<ClaimScopeProps>()
-                    .WhereRedb(o => o.ValueString == name).FirstOrDefaultAsync().ConfigureAwait(false))?.Hydrate();
+                scope = await redb.GetByUniqueAsync<ClaimScopeProps>(p => p.ScopeName, name).ConfigureAwait(false);
             else
             { SetError(exchange, "validation_error", "Either 'id' or 'name' required"); return; }
         }
@@ -130,7 +127,7 @@ internal sealed class ClaimScopeManagementProcessor : IProcessor
         if (request is null || !long.TryParse(request.Id, out var id) || id <= 0)
         { SetError(exchange, "validation_error", "Id is required"); return; }
 
-        var scope = (await redb.LoadAsync<ClaimScopeProps>(id).ConfigureAwait(false))?.Hydrate();
+        var scope = (await redb.LoadAsync<ClaimScopeProps>(id).ConfigureAwait(false));
         if (scope is null) { SetError(exchange, "not_found", $"ClaimScope {id} not found"); return; }
 
         if (request.DisplayName != null)
@@ -194,7 +191,6 @@ internal sealed class ClaimScopeManagementProcessor : IProcessor
         var total = await query.CountAsync().ConfigureAwait(false);
         var count = Math.Min(request.Count, 100);
         var items = await query.Skip(request.Offset).Take(count).ToListAsync().ConfigureAwait(false);
-        items.ForEach(i => i.Hydrate());
 
         exchange.Out ??= new redb.Route.Core.Message();
         exchange.Out.Body = new PagedResult<ClaimScopeResponse>
@@ -231,7 +227,7 @@ internal sealed class ClaimScopeManagementProcessor : IProcessor
         if (existing is not null)
         {
             exchange.Out ??= new redb.Route.Core.Message();
-            exchange.Out.Body = MapAssignment(existing, scope.Hydrate());
+            exchange.Out.Body = MapAssignment(existing, scope);
             return;
         }
 
@@ -248,7 +244,7 @@ internal sealed class ClaimScopeManagementProcessor : IProcessor
         await redb.SaveAsync(assignment).ConfigureAwait(false);
 
         exchange.Out ??= new redb.Route.Core.Message();
-        exchange.Out.Body = MapAssignment(assignment, scope.Hydrate());
+        exchange.Out.Body = MapAssignment(assignment, scope);
 
         exchange.Properties["identity-event-type"] = IdentityAuditEventIds.ClaimScopeAssigned;
         exchange.Properties["identity-event-data"] = new { ApplicationId = appId, ScopeId = scopeId };
@@ -316,7 +312,6 @@ internal sealed class ClaimScopeManagementProcessor : IProcessor
             ? new List<RedbObject<ClaimScopeProps>>()
             : await redb.Query<ClaimScopeProps>()
                 .WhereInRedb(o => o.Id, scopeIds).ToListAsync().ConfigureAwait(false);
-        scopes.ForEach(s => s.Hydrate());
         var scopeMap = scopes.ToDictionary(s => s.Id);
 
         exchange.Out ??= new redb.Route.Core.Message();

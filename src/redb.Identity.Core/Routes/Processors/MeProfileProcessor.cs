@@ -227,7 +227,7 @@ internal sealed class MeProfileProcessor : IProcessor
             || request.Address != null
             || request.CustomClaims is { Count: > 0 }))
         {
-            oidcObj = new RedbObject<UserProps>(new UserProps());
+            oidcObj = new RedbObject<UserProps>(new UserProps { UserId = coreUser.Id });
             oidcObj.name = coreUser.Login;
             oidcObj.key = coreUser.Id;
             oidcObj.value_guid = Guid.NewGuid();

@@ -1,0 +1,248 @@
+@page "/admin/claim-mappers/{Id}"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    Claim mapper detail — full page (Phase 3, П3: pages-not-dialogs). Replaces the
+    edit half of the ClaimMappersList modal. The owner context the modal hid is a
+    first-class breadcrumb here, with a deep link to the owning application /
+    claim scope. Owner itself is immutable (create-time concept in the API).
+*@
+
+<div style="margin-bottom: var(--space-3);">
+    <NavLink href="/admin/claim-mappers" class="btn btn-ghost" style="padding: 0; color: var(--accent-primary);">← Go back to Claim mappers</NavLink>
+</div>
+
+@if (_loading) { <p class="text-secondary">Loading…</p> }
+else if (_loadError is not null) { <p class="text-error">@_loadError</p> }
+else if (_m is not null)
+{
+    <div style="display:flex; gap: var(--space-4); align-items: flex-start; margin-bottom: var(--space-4);">
+        <div class="apps-list__avatar" style="font-size: 1.5rem; width: 56px; height: 56px;">@char.ToUpperInvariant(_m.Name is { Length: > 0 } n ? n[0] : 'M')</div>
+        <div style="flex: 1;">
+            <h1 style="margin: 0;">@_m.Name</h1>
+            <div style="display:flex; gap: var(--space-2); margin-top: var(--space-1); align-items:center;">
+                <code>@_m.ClaimType</code>
+                <span class="badge">@_m.SourceKind</span>
+                @if (_form.Enabled) { <RdbBadge Text="enabled" Variant="online" /> } else { <RdbBadge Text="disabled" Variant="offline" /> }
+                @if (OwnerKind == "global") { <RdbBadge Text="global" Variant="online" /> }
+                else if (OwnerKind == "application")
+                {
+                    <NavLink href="@($"/admin/applications/{OwnerId}")"><RdbBadge Text="@($"application #{OwnerId}")" Variant="info" /></NavLink>
+                }
+                else if (OwnerKind == "scope")
+                {
+                    <NavLink href="@($"/admin/claim-scopes/{OwnerId}")"><RdbBadge Text="@($"claim-scope #{OwnerId}")" Variant="info" /></NavLink>
+                }
+            </div>
+        </div>
+        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">@(_saving ? "Saving…" : "Save")</button>
+    </div>
+
+    <div class="card" style="max-width: 720px;">
+        <section class="app-detail__section">
+            <h3 class="app-detail__section-title">Identity</h3>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Name *</span>
+                    <input class="app-detail__input" @bind="_form.Name" />
+                </label>
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Claim type *</span>
+                    <input class="app-detail__input app-detail__input--mono" @bind="_form.ClaimType" />
+                </label>
+            </div>
+
+            <dl class="app-detail__kv">
+                <dt>Owner</dt>
+                <dd>@_m.Owner (immutable — re-create the mapper to move it)</dd>
+                <dt>Internal id</dt><dd><code>@_m.Id</code></dd>
+            </dl>
+
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Description</span>
+                <input class="app-detail__input" @bind="_form.Description" />
+            </label>
+        </section>
+
+        <section class="app-detail__section">
+            <h3 class="app-detail__section-title">Source</h3>
+
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Source kind *</span>
+                <select class="app-detail__input" @bind="_form.SourceKind">
+                    <option value="Constant">Constant</option>
+                    <option value="UserProps">User property</option>
+                    <option value="CustomClaim">Custom claim</option>
+                </select>
+            </label>
+
+            @if (_form.SourceKind == "Constant")
+            {
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Constant value *</span>
+                    <input class="app-detail__input app-detail__input--mono" @bind="_form.ConstantValue" />
+                </label>
+            }
+            else
+            {
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Source path *</span>
+                    <input class="app-detail__input app-detail__input--mono" @bind="_form.SourcePath" />
+                </label>
+            }
+        </section>
+
+        <section class="app-detail__section">
+            <h3 class="app-detail__section-title">Emission</h3>
+
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Destinations</span>
+                <input class="app-detail__input app-detail__input--mono" @bind="_form.Destinations" />
+                <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Comma-separated token kinds the claim lands in.</span>
+            </label>
+
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Required scopes</span>
+                <input class="app-detail__input app-detail__input--mono" @bind="_form.RequiredScopes" />
+                <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Emit only when all listed scopes are on the request. Blank = always.</span>
+            </label>
+
+            <div style="display: grid; grid-template-columns: 200px 1fr; gap: var(--space-3); align-items: end;">
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Order</span>
+                    <input type="number" class="app-detail__input" @bind="_form.Order" />
+                </label>
+                <div>
+                    <label style="display:flex; gap: var(--space-2); align-items:center; cursor:pointer;">
+                        <input type="checkbox" @bind="_form.Enabled" /> <span>Enabled</span>
+                    </label>
+                    <label style="display:flex; gap: var(--space-2); align-items:center; cursor:pointer; margin-top: var(--space-2);">
+                        <input type="checkbox" @bind="_form.Required" /> <span>Required — reject token issuance when the source is missing</span>
+                    </label>
+                </div>
+            </div>
+        </section>
+
+        <section class="app-detail__section">
+            <h3 class="app-detail__section-title">Danger zone</h3>
+            <p class="text-secondary" style="margin-top: 0;">Deleting a mapper stops its claim from being emitted. Issued tokens are unaffected.</p>
+            <button class="btn btn-danger" @onclick="DeleteAsync">Delete this mapper</button>
+        </section>
+
+        @if (_saveError is not null) { <p class="text-error">@_saveError</p> }
+    </div>
+}
+
+<UiTypedConfirmDialog @ref="_confirm" />
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    private sealed class FormState
+    {
+        public string Name = "";
+        public string ClaimType = "";
+        public string SourceKind = "Constant";
+        public string? SourcePath, ConstantValue, Description;
+        public string Destinations = "";
+        public string? RequiredScopes;
+        public int Order;
+        public bool Enabled = true;
+        public bool Required;
+    }
+
+    private ClaimMapperResponse? _m;
+    private FormState _form = new();
+    private bool _loading = true;
+    private bool _saving;
+    private string? _loadError;
+    private string? _saveError;
+    private UiTypedConfirmDialog? _confirm;
+
+    private string OwnerKind =>
+        _m?.Owner is { } o && o.Contains(':') ? o[..o.IndexOf(':')] : "global";
+
+    private string OwnerId =>
+        _m?.Owner is { } o && o.Contains(':') ? o[(o.IndexOf(':') + 1)..] : "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _loadError = null;
+        try
+        {
+            _m = await Client.GetClaimMapperAsync(Id);
+            _form = new FormState
+            {
+                Name = _m.Name ?? "",
+                ClaimType = _m.ClaimType ?? "",
+                SourceKind = _m.SourceKind ?? "Constant",
+                SourcePath = _m.SourcePath,
+                ConstantValue = _m.ConstantValue,
+                Description = _m.Description,
+                Destinations = string.Join(", ", _m.Destinations ?? []),
+                RequiredScopes = string.Join(", ", _m.RequiredScopes ?? []),
+                Order = _m.Order,
+                Enabled = _m.Enabled,
+                Required = _m.Required,
+            };
+        }
+        catch (Exception ex) { _loadError = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_m is null) return;
+        _saving = true; _saveError = null;
+        try
+        {
+            var dest = _form.Destinations.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var reqScopes = string.IsNullOrWhiteSpace(_form.RequiredScopes)
+                ? null
+                : _form.RequiredScopes!.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            _m = await Client.UpdateClaimMapperAsync(_m.Id, new UpdateClaimMapperRequest
+            {
+                Id = _m.Id,
+                Name = _form.Name.Trim(),
+                ClaimType = _form.ClaimType.Trim(),
+                SourceKind = _form.SourceKind,
+                SourcePath = _form.SourcePath,
+                ConstantValue = _form.ConstantValue,
+                Description = _form.Description,
+                Destinations = dest,
+                RequiredScopes = reqScopes,
+                Order = _form.Order,
+                Enabled = _form.Enabled,
+                Required = _form.Required,
+            });
+            Toast.Show("Saved.", "online");
+        }
+        catch (Exception ex) { _saveError = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_m is null || _confirm is null) return;
+        var ok = await _confirm.ShowAsync(
+            expectedText: _m.Name ?? _m.Id,
+            title: "Delete claim mapper",
+            message: $"This deletes the mapper '{_m.Name}'. The claim stops being emitted; " +
+                     "already-issued tokens are unaffected.",
+            confirmLabel: "Delete this mapper");
+        if (!ok) return;
+
+        try
+        {
+            await Client.DeleteClaimMapperAsync(_m.Id);
+            Toast.Show($"Mapper '{_m.Name}' deleted.", "online");
+            Nav.NavigateTo("/admin/claim-mappers");
+        }
+        catch (Exception ex) { Toast.Show(ex.Message, "error"); }
+    }
+}

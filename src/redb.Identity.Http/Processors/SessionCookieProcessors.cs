@@ -214,10 +214,13 @@ internal static class SessionCookieProcessors
 
     /// <summary>
     /// Redirects to the consent page when the authorize endpoint returns <c>consent_required</c>.
-    /// Constructs <c>/consent?client_id=…&amp;app_name=…&amp;scopes=…&amp;returnUrl=…</c>.
+    /// The consent parameters travel in a server-signed ticket (<c>/consent?ct=…</c>), never as
+    /// query fields: the page used to render <c>app_name</c>/<c>scopes</c> from the URL, so a
+    /// crafted link could show the operator's trusted UI attributing an attacker's client to a
+    /// familiar name (<see cref="Security.SessionTicketService.ProtectConsent"/>).
     /// </summary>
     internal static Task RedirectToConsent(
-        IExchange e, CancellationToken ct, string consentPath)
+        IExchange e, CancellationToken ct, string consentPath, SessionTicketService ticketService)
     {
         // Same merge consideration as RedirectToLogin: body may live on In after Out→In merge.
         var rawBody = e.HasOut ? e.Out!.Body : e.In.Body;
@@ -268,11 +271,15 @@ internal static class SessionCookieProcessors
             return Task.CompletedTask;
         }
 
-        var redirectUrl = $"{consentPath}?client_id={Uri.EscapeDataString(clientId)}"
-                          + $"&app_name={Uri.EscapeDataString(appName ?? clientId)}"
-                          + $"&scopes={Uri.EscapeDataString(scopes ?? "")}"
-                          + $"&user_id={Uri.EscapeDataString(userId ?? "")}"
-                          + $"&returnUrl={Uri.EscapeDataString(originalUrl)}";
+        var consentUserId = userId is not null && long.TryParse(userId, out var parsedUid) ? parsedUid : 0;
+        var consentTicket = ticketService.ProtectConsent(new ConsentTicket(
+            UserId: consentUserId,
+            ClientId: clientId,
+            AppName: appName ?? clientId,
+            Scopes: scopes ?? "",
+            ReturnUrl: originalUrl));
+
+        var redirectUrl = $"{consentPath}?ct={Uri.EscapeDataString(consentTicket)}";
 
         msg.Body = Array.Empty<byte>();
         msg.Headers[HttpHeaders.ResponseCode] = 302;

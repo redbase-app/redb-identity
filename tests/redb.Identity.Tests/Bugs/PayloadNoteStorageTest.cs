@@ -254,6 +254,7 @@ public class PayloadNoteStorageTest
     public async Task PropsFieldsUnaffected_WhenPayloadInNote()
     {
         var (appId, authId) = await CreateTestInfraAsync();
+        var referenceId = $"ref-id-{Guid.NewGuid():N}";
 
         var token = new RedbObject<TokenProps>
         {
@@ -266,7 +267,9 @@ public class PayloadNoteStorageTest
                 AuthorizationObjectId = authId,
                 Status = "valid",
                 Type = "refresh_token",
-                ReferenceId = "ref-id-123"
+                // Unique per run: ReferenceId is a [RedbUnique] key since V4, and a persistent PG/MSSQL
+                // database keeps the previous run's token — a fixed value collides on the second run.
+                ReferenceId = referenceId
             }
         };
         await _store.CreateAsync(token, CancellationToken.None);
@@ -276,7 +279,7 @@ public class PayloadNoteStorageTest
         // PROPS fields are intact
         loaded.Props.Status.Should().Be("valid");
         loaded.Props.Type.Should().Be("refresh_token");
-        loaded.Props.ReferenceId.Should().Be("ref-id-123");
+        loaded.Props.ReferenceId.Should().Be(referenceId);
         loaded.Props.AuthorizationObjectId.Should().Be(authId);
 
         // Payload is in note, not in PROPS

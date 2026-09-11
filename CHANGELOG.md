@@ -11,6 +11,7 @@ This changelog covers the **planned NuGet/`.tpkg` packages** that ship from this
 | `redb.Identity.Management` | Transport-neutral management and self-service controllers — thin adapters over the `direct-vm://identity-manage-*` routes, shared by every facade |
 | `redb.Identity.Http` | HTTP / HTTPS facade `.tpkg` — OIDC discovery, `authorize`, `token`, `userinfo`, `introspect`, `revoke`, JWKS, PAR, DCR, SCIM, `/me`, management, browser flows |
 | `redb.Identity.Grpc` | gRPC facade `.tpkg` — service-to-service surface (`Token`, `Introspect`, `Revoke`, `UserInfo`, `Discovery`, `Jwks`) + management services; contract shipped in `redb.Identity.Contracts` under `Protos/` |
+| `redb.Identity.Soap` | WS-Trust facade `.tpkg` — `Issue`, `Validate`, `Cancel`, `Renew` over SOAP on the same core routes; WSDL published on GET |
 | `redb.Identity.Web` | Server-rendered host pages: login, native consent, MFA enrollment, e-mail verification, password recovery, account self-service |
 | `redb.Identity.Client` | In-process and HTTP client SDK for `direct-vm://identity-*` endpoints + backchannel OIDC client (`BackchannelOidcClient`) |
 | `redb.Identity.DataProtection` | Standalone `Microsoft.AspNetCore.DataProtection` wiring on redb-backed key-ring storage (no ASP.NET) |
@@ -31,6 +32,434 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > `redb.Tsak`) instead of its own `1.x` line — see the `[3.4.0]` entry. The `1.0.1`–`1.2.2` tags stay
 > as valid history; the jump to `3.4.0` is a realignment onto the shared number, not a breaking change.
 > NuGet publication follows the source cut.
+
+
+## [4.0.0] — 2026-09-12
+
+### Security — reserved header strip extended to the gRPC and SOAP facades
+
+The 2026-09-09 fix removed the internal-only header names a caller must never supply on every HTTP
+route. The gRPC connector copies caller metadata and envelope headers into the exchange the same
+way, and the WS-Trust listener is HTTP underneath — neither facade stripped anything, and both reach
+the audited `Token` / `Introspect` / `Revoke` routes, so a gRPC or SOAP caller could still sign the
+audit log with another user's id, a fabricated address and agent, or a foreign `client_id` by sending
+them as metadata or request headers. (The session names were harmless there only because those
+transports never reach the authorize, logout or consent routes.) The list now lives once in
+`IdentityReservedInboundHeaders` (Contracts) and every facade strips it as its first step.
+`operation` is HTTP-only: on the gRPC envelope route the caller names the operation by design.
+
+Audited in the same pass and found sound: `/me/*` and the management API carry the caller's
+identity in exchange properties (`identity:management-*`), which no transport fills from the wire;
+SCIM filters are parsed into a typed criteria object with whitelisted attributes and operators.
+
+### Fixed — audit attribution: client_id for form-authenticated clients, timestamps on SQLite
+
+`MapHttpToIdentityHeaders` documented two sources for the `client_id` / `client_secret` headers —
+Basic authentication and the form body — but implemented only the first. Token issuance never
+noticed (OpenIddict reads client credentials from the body itself), the audit envelope did:
+`EventDispatchProcessor` attributes events by the `client_id` header, so every client authenticating
+with form credentials — public PKCE clients included — was audited with `client_id` NULL. The form
+step now exists (Basic wins when both are present; the body is parsed, not replaced).
+
+The SQLite audit table declared `timestamp TEXT` and expected an RFC 3339 string, while the redb
+SQLite provider encodes every `DateTimeOffset` parameter as a Julian day number: the number landed
+in the TEXT column as text, the query layer failed to parse it back (every row read as
+`0001-01-01`), and `from`/`to` filters compared text to a number. The column is `REAL` now, matching
+the provider's `_date_*` convention. No migration is shipped: SQLite has no conditional DDL and the
+table is created per file — drop existing SQLite audit files (or the table) before upgrading.
+
+### Security — an HTTP header could impersonate any user, and the consent page trusted its own URL
+
+Two findings from the 2026-09-09 facade audit, both fixed.
+
+**Session identity was trusted from a request header.** The HTTP consumer copies every request
+header into the exchange verbatim, and Identity carried the logged-in user between processors in
+those same headers (`session_user_id`, set from the decrypted session cookie by `ReadSessionCookie`,
+which returned without clearing anything when no cookie was present). `AttachSessionPrincipalHandler`
+then read `session_user_id` and built the principal from it. So `GET /connect/authorize?...` with a
+header `session_user_id: <victim>` — no cookie, no password — minted an authorization code for that
+user; the same header forged consent and logged other users out. A `StripReservedInboundHeaders` pass
+now runs first on every HTTP route (from `PropagateCorrelationId`, so no route can forget it) and
+removes the internal-only names a client must never supply — `session_*`, `reauth_marked_sid`,
+`client_id`, `client_secret`, `access_token`, `operation`, and the audit trio `user_id`,
+`ip_address`, `user_agent` — leaving only the trusted processors (cookie, `Authorization` header,
+Basic/body, request path) to populate them. In-process `direct-vm` callers are unaffected: the strip
+is at the HTTP edge, which is the untrusted boundary.
+
+The audit trio deserves its own sentence. `EventDispatchProcessor` reads `user_id`, `ip_address` and
+`user_agent` from the WireTap copy of the business exchange — the same headers — and nothing trusted
+ever set the latter two, so the security log's address and agent columns were either empty or
+whatever the client typed into a header, and its user column could be pointed at someone else. For
+HTTP-originated events the dispatcher now falls back to the transport-owned, proxy-sanitized
+`redbHttp.RemoteAddress` and the real `User-Agent`, and the user id comes from the event payload.
+
+**The consent page rendered from its own query string.** `GET /consent` showed `app_name` and
+`scopes` taken directly from the URL, so a link like
+`/consent?client_id=attacker&app_name=Your%20Bank&scopes=…` displayed the operator's own trusted
+consent UI attributing an attacker's client to a familiar name — a click on Allow then granted the
+attacker's client. The page now renders only from a server-signed **consent ticket** (`?ct=…`) minted
+by the authorization server once it has decided consent is required; app name and scopes come from the
+ticket, and the grant requires the ticket to have been issued for the current session's user (it
+cannot be replayed under another session). The console's BFF, which renders its own consent screen and
+posts with the session cookie, keeps working on the ticket-less, session-bound path.
+
+### Security — the HTTP facade's consent form could be submitted for any user by anyone
+
+The facade renders its own login, consent and MFA pages for deployments without the web console.
+Its consent POST read the consenting user from a hidden `user_id` form field and only fell back to
+the session cookie when the field was absent, while `ReadSessionCookie` let a request without any
+cookie continue down the pipeline. Together that meant an anonymous cross-site POST to `/consent`
+with `client_id`, `user_id` and `decision=allow` recorded a permanent authorization for the named
+user — no session, no click, no frame: the consent screen the victim would have seen for that client
+was silently pre-approved (and `decision=deny` revoked someone else's grant the same way).
+
+The user now comes from the session cookie only. Without a session the POST is refused with 401
+before anything downstream runs; the form and the redirect to `/consent` carry no `user_id` anymore.
+
+Two further gaps closed in the same pass. The facade pages set none of the browser-protection
+headers the web console has always sent, so login, consent and MFA could be embedded in a frame
+(clickjacking on the consent "Allow" button); every response through the facade's serializer now
+carries `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`,
+`X-Content-Type-Options: nosniff` and `Referrer-Policy`. And the form POSTs (`/login`, `/consent`,
+`/mfa`, `/mfa/recovery`) had no cross-site request check: they now refuse a request whose `Origin`
+(or, failing that, `Referer`) names another site, or is the opaque `null`, with 403 before reading the
+body. A request carrying neither header is let through on purpose — that is the shape of the web
+console's BFF (`RecordConsentGrantAsync`), the demo scripts and API clients, none of which a foreign
+page can drive; browsers always announce the origin of a cross-site form. The session cookie's
+`SameSite=Lax` default and the frame headers are the other two layers of the same defence.
+
+### Added — access tokens carry an RFC 9068 audience, and the management API checks it
+
+Issued access tokens matched the JWT profile for OAuth 2.0 access tokens (RFC 9068) in every
+respect but one: they had no `aud`. The scope store already served `ScopeProps.Resources` and the
+admin API let an operator set them, but no sign-in handler ever attached those resources to the
+principal, so the claim the profile marks REQUIRED never appeared, and the local validation stack
+never asked for one — any token our server signed was welcome at the management API regardless of
+what it had been minted for.
+
+`AttachAccessTokenResources` now composes the resource indicators at sign-in: the `Resources` of
+the granted scopes, joined by the application's new `AccessTokenAudiences` (the access-token twin of
+`IdTokenAudiences`, exposed on the application contracts and the Protocol tab of the console). The
+server's own audience joins whenever an `identity:*` scope is granted — those scopes are the
+server's own API — and stands alone as the §3 default resource indicator when nothing else names a
+resource. It is `{issuer}/resources` unless `RedbIdentityOptions.DefaultAccessTokenAudience` says
+otherwise. The requesting client's own `client_id` is always an audience as well (as with WSO2,
+Keycloak and Entra self-scoped tokens): once a token carries audiences OpenIddict admits only
+audience members to `/connect/introspect` and no longer falls back to the presenter, so without it a
+client could no longer introspect the tokens it holds. The validation stack behind the management API
+now requires the server's own audience (§4): a token minted for an external API only is refused with
+401, not merely 403 for a missing scope.
+
+Deployments that had set `Resources` on a scope will see those values steer `aud` for the first
+time; a client granted such a scope without any `identity:*` scope gets a token for that API alone
+and can no longer call the management API with it — which is what the resource assignment meant.
+
+Introspection changes with it. Until now no access token carried `aud`, so OpenIddict skipped its
+audience check at `/connect/introspect` and **any authenticated client could introspect any token** —
+an oracle that let one client confirm validity and read the claims of tokens issued to another. With
+`aud` present, OpenIddict admits only audience members (RFC 7662). A client introspecting its own
+tokens is unaffected (its `client_id` is always an audience). A backend that introspects tokens issued
+to *another* client — the classic SPA + BFF pair — must now be declared an audience of them: put the
+backend's `client_id` into the SPA application's `AccessTokenAudiences`, or into the `Resources` of the
+scopes it serves. The integration fixture does exactly that for its public/confidential pair.
+
+### Fixed — the admin web console could not reach the identity server it sits next to
+
+`redb.Identity.Web` was configured with `http://localhost:5002` while the HTTP facade serves TLS on
+that port, so every backchannel call died with "The response ended prematurely" — discovery, login,
+federation providers, the revoked-SIDs poll. And the scheme alone would not have been enough: the
+server's issuer is `https://host.docker.internal:5002` (named so that the OpenID conformance suite,
+which runs in Docker, can reach the host and match `iss` against the address it called), and an OIDC
+client's authority must equal the issuer. The console now uses the issuer's own name — which Docker
+Desktop also maps in the host's `hosts` file, so it resolves from the console too — plus
+`AcceptAnyBackchannelCert` in the Development profile for the bundled self-signed certificate.
+
+### Fixed — `demo_scim` no longer reports PASS while skipping its own body
+
+The demo asked dynamic registration for `identity:admin`, which DCR deliberately never grants, then
+aimed at the management mount (`/api/v1/identity/scim/v2`) that refuses DCR-obtainable tokens. Having
+failed to get a token it skipped the entire CRUD body and exited 0 — green in every suite summary,
+including nights when SCIM writes were actually broken. It now registers with the granular `scim`
+scope, uses the `/scim/v2` mount like the other SCIM demos, runs all thirteen steps, and treats a
+missing token as a loud failure instead of a shrug.
+
+### Changed — the contracts now ride in a carrier package of their own, and reloading one module can no longer fork them
+
+`redb.Identity.Contracts.dll` used to ship inside `Core.Module.tpkg`. A package's hot-reload
+force-replaces its own companion assemblies in the worker's tracker, so reloading the core alone handed
+the new core a new `Contracts` instance while every facade kept the old one — the same CLR type in two
+copies, and a typed body crossing `direct-vm://` quietly became `null` on the other side: register and
+SCIM writes answered "Request body is required" with nothing in the log (Tsak F-12).
+
+The new `redb.Identity.Contracts.tpkg` is an empty module whose payload is its companion: the one
+process-wide instance of the DTO assembly. Every other Identity package excludes it and declares the
+dependency, so the loader's topological sort brings the carrier up first. Reloading core or any facade
+now leaves the contracts untouched — verified live: after a core-only hot-reload, with no facade
+touched, register answers 200 and SCIM create 201, the exact calls that used to break.
+
+The deployment rule this makes explicit: redeploy the carrier only when the contracts change, and then
+redeploy every Identity module after it — which a contract change requires in any architecture.
+
+
+### Fixed — the upgrade-on-login rehash could silently undo a password change that landed after the login
+
+The C12 upgrade-on-login rehash runs detached, about a second after the login that scheduled it:
+Argon2id is slow by design, `Task.Run` adds scheduling, the fresh DI scope adds a connection. An admin
+password reset fits into that window comfortably — and when the rehash landed last, it wrote the
+**pre-login** password over the freshly set one. The account silently reverted to exactly the
+credential the operator had just tried to retire, while the reset call had already answered
+`success: true`.
+
+Measured on a live worker before the fix: nine resets out of nine lost when a login preceded them,
+three of three kept without one; every lost row still held the old hash in `_users`. Not
+provider-specific and not redb.Core's doing — pure timing inside `LoginService`, on any database.
+
+The rehash is now awaited on the login path, which removes the detached writer altogether: the login
+answers only after the rehash is on disk, so a later reset writes last and wins by construction. A
+check-before-write guard alone proved insufficient live — the ~250 ms of hashing sits between the
+check and the write, and the reset lands inside it. The guard stays as a second layer against other
+concurrent changers, and the attempt is capped to once per user per process, because the upgrade does
+not currently converge: the write goes through the core provider's own hasher (BCrypt), so the
+"upgraded" hash is BCrypt again and `NeedsRehash` stays true forever. Convergence needs a redb.Core
+API for handing over a ready-made hash — reported, not worked around. Pinned by
+`LoginRehashRaceTests`, red on the unguarded code; the second test holds the other half — an
+untouched hash must still be upgraded.
+
+The awaited rehash also goes through the request-scoped service rather than a fresh DI scope: the
+fresh scope existed only because fire-and-forget outlived the request, and once awaited it just meant
+a second connection — which on SQLite promptly answered `database is locked` against the login's own.
+Same connection: no second writer, and inside a transacted route the rehash joins that transaction.
+
+
+### Fixed — the identity core could not start in a Tsak worker, and three defects hid behind it
+
+Deploying all four modules to a live worker surfaced what the test suite could not, because each defect
+needed the real hosting model to appear at all.
+
+**The core did not start.** `IdentitySchemaInitListener` synchronises every Identity Props type by
+reflection, because the type is only known at runtime. When `ISchemeSyncProvider.SyncSchemeAsync<T>`
+gained its `CancellationToken`, that call site kept compiling without a word and threw
+`TargetParameterCountException` on the first type at startup. The loop then never ran, **no scheme was
+synchronised at all**, and every listener behind it failed with `Scheme for type 'X' not found` —
+`RoleProps`, `ScopeProps`, `DataProtectionKeyProps`, `SigningKeyProps`, `ApplicationProps`. One line
+produced a dozen unrelated-looking symptoms, and `identity.core` and `identity.http` both refused to
+come up. The arity is now checked once, up front, with a message naming what actually broke.
+
+**The WS-Trust facade served no WSDL.** Tsak loads a module's assembly straight from its `.tpkg` with
+`LoadFromStream`, so the assembly never lands on disk and `Assembly.Location` is empty: a file resolved
+next to the assembly could not be found because there is no "next to". The facade therefore registered
+`POST` only and answered `405` to the `GET` a client generator makes first — the one thing this facade
+exists to serve. The contract is now an embedded resource, with the loose file still read when present.
+`pack-tpkg.ps1` also ships content subdirectories, which it previously dropped.
+
+**`Validate` on a revoked token blamed the caller.** OpenIddict reports a revoked token as an error
+rather than RFC 7662's `active: false`, and the facade passed that through as a
+`wst:FailedAuthentication` fault. That answer is about the caller, who had authenticated fine and asked
+a fair question; a revoked token is the ordinary reason to run `Validate` at all. Token-scoped refusals
+(`invalid_token`, `invalid_grant`) now answer `wst:Status` `status/invalid` with the reason, while a
+refusal about the caller stays a fault. The existing test asserted only "not valid", which the fault
+satisfied too — it is now on the shape of the answer.
+
+Ten of ten demo steps pass against a live worker: WSDL, client registered over HTTP, token issued over
+SOAP, validate, cancel, validate again, wrong secret, anonymous, junk body, and a token issued over SOAP
+spent over HTTP.
+
+### Fixed — an unreadable `X-Forwarded-For` entry no longer lets the walk reach the client's part of the header
+
+`TrustedProxyResolverProcessor` walked the chain right to left and **skipped** any entry it could not
+parse as an address. RFC 7239 allows a proxy to write `unknown` for a peer it cannot name, and some
+emit an IPv6 with a zone id; after such an entry the walk carried on to the left, into the entries the
+client supplied, and took one of them as the client. The entry now ends the walk and the socket peer
+is kept. Pinned by `UnparseableHop_StopsTheWalk_KeepsSocketIp`, red on the previous code.
+
+The walk itself is now `ForwardedHeaderResolver` from `redb.Route.Http.Hosting`, one implementation of
+the trust model for the ecosystem; the processor keeps its gate (`TrustForwardedFor`, socket peer in
+`KnownProxies` / `KnownNetworks`) and delegates the rest. Its remaining role is a context whose host did
+not resolve; after the host did, the address it sees is the client's, which is not a trusted proxy,
+so it leaves it alone. Pinned by `HostAlreadyResolved_PeerNotInList_IsIdempotent`.
+
+### Changed — DPoP works behind a TLS-terminating proxy
+
+RFC 9449 §4.3 has the server compare the proof's `htu` with the URL the client used. Behind a proxy
+that terminates TLS the client signs `https://...` and the socket sees `http://...`, and
+`redbHttp.Url`, which the check reads, was built from the socket. The shared HTTP host now applies
+`X-Forwarded-Proto` from a trusted proxy, so the URL is the client's. When this module has to create
+the host itself (no other component registered one), it hands the host the same proxies
+`Identity:ReverseProxies` names, read as configuration because this facade does not reference Core.
+Under a Tsak worker the host comes from the worker and `Tsak:Http:TrustedProxies` governs.
+`Token_BehindTlsTerminator_HtuWithHttpsScheme_IsAccepted` was red before; its control,
+`Token_WithoutForwardedProto_HtuWithHttpsScheme_IsRejected`, pins that the header is what makes the
+difference and the scheme check is not loose.
+
+### Added — WS-Trust facade (`redb.Identity.Soap`)
+
+A third transport onto the same core routes HTTP and gRPC already use: `Issue`,
+`Validate`, `Cancel` and `Renew` over SOAP, for the callers whose stack builds
+clients from a WSDL and speaks WS-Trust rather than OAuth. Same issuer, same
+client registry, same token store — a client registered over HTTP gets a token
+over SOAP, which is the acceptance criterion the facade exists for and is
+covered end to end against the production OpenIddict pipeline.
+
+One route, not four. WS-Trust puts every operation on one address and tells them
+apart by the WS-Addressing `Action`, which is what generated clients emit, so the
+operation is resolved by parsing rather than by routing. The endpoint counter in
+a worker log therefore reads 1 for this module.
+
+The token in the `RequestSecurityTokenResponse` is our ordinary JWT, carried as a
+`wsse:BinarySecurityToken`. No second token format enters the system, so
+introspection and revocation work on it unchanged — the reasoning is recorded in
+`doc/SOAP/OPEN_QUESTIONS.md`.
+
+**TLS is mandatory and its absence is a refusal to start**, not a warning. This is
+stricter than the other facades for a specific reason rather than a cautious one:
+`UsernameToken` carries the client secret in clear text, so an STS on plain HTTP
+publishes credentials to anyone on the path, and a warning in a log is read after
+they have already travelled. `AllowPlaintext` is the single escape hatch, for a
+connection already terminated by a trusted proxy, and it exists so an operator
+states that choice instead of stumbling into it. mTLS is available with modes and
+thumbprint pinning; an unrecognised mode is refused at start rather than read as
+"no certificate", because a typo must not turn mTLS off on an endpoint whose
+operator believes it is on.
+
+Two gaps in `redb.Route.Soap` had to be closed first — the consumer could not
+serve TLS at all, and surfaced nothing about the connection to a route. Both are
+in that package's changelog.
+
+### Changed — one reading of the core's verdict, three renderings
+
+`redb.Identity.Contracts/IdentityVerdict.cs` now holds what every facade was
+about to hold a copy of: where the core states its verdict, that the stated
+status outranks the `error` string in the body, and how that string is read. Each
+transport keeps its own vocabulary — a status code, a gRPC status, a SOAP fault —
+and renders `IdentityVerdictKind` into it with a switch of a few lines.
+
+The gRPC facade is moved onto it in the same change rather than later. Left for
+later it would have become the third copy, which is exactly the outcome the SOAP
+plan set out to avoid. Its own suite passes 67/67 with no behavioural change: the
+tables matched down to `Unknown` for status codes outside the mapped bands.
+
+The reason this matters is on record. Read from the error string alone, a
+`rate_limited` answer falls through to "malformed request" and tells a caller to
+fix what is not broken instead of to wait; that was found and fixed on gRPC, and
+the fix is now in one place rather than three.
+
+### Changed — uniqueness moved off the hand-rolled indexes onto the core's V4 primitives (V4-UNIQUE)
+
+Verified on all three providers: 1962 of 1963 passed, the one long-standing deliberate skip,
+zero failures — SQLite and PostgreSQL against the usual databases, MSSQL against a fresh
+isolated database (which also exercised the from-scratch bootstrap: core bundle, scheme sync,
+backfill no-op, convergence flag). 1963 = the 1945-test pre-refactor baseline plus 17 new
+V4-UNIQUE tests; the hole-closing duplicate tests were proven red-before in a worktree on the
+pre-change code (4 + 2 failing).
+
+The pre-V4 mechanism was `IdentityUniqueIndexesInitListener`: raw `CREATE UNIQUE INDEX` DDL at
+boot, eight per-scheme partial indexes on `_objects` guarding a `value_string`/`_key`/`_name`
+column that mirrored a `[RedbIgnore]` phantom property, plus `Hydrate()` copying the mirror back
+into Props on every read. It moved to the core's V4 machinery (plan and decisions:
+`doc/v4/00-PLAN.md`):
+
+- **`[RedbUnique]` on the real properties** — `ApplicationProps.ClientId`, `ScopeProps.ScopeName`,
+  `ClaimScopeProps.ScopeName`, `TokenProps.ReferenceId`, `FederatedIdentityProps.LinkKey` (new
+  stored composite `"{provider}:{sub}"`), `FederationProviderProps.ProviderId`, and a new
+  `UserId` on `MfaProps`/`UserProps` written alongside `key` at every creation site (the 52
+  `Key ==` queries are untouched). Lookups are `GetByUniqueAsync` — one probe of the core's
+  unique index; `FindByClientIdAsync` runs 8–11 times per `/connect/token` request.
+- **`ValueUnique` for the root-only schemes** — `IdentitySystemFlagProps` (props empty by
+  design; first-wins: the losing bootstrap gets its 410 from the typed violation) and
+  `IdempotencyRecordProps`, whose enforced key is now the SHA-256 of the composite name
+  (`IdempotencyKeyHash`) so no client-chosen key can outgrow the 440-char column; the readable
+  composite stays in `_name`.
+- **One typed catch** — the scheme-key paths catch `RedbUniqueViolationException` instead of
+  duck-typing SQLSTATE/error numbers; `IsUniqueViolation` survives only for the two raw-index
+  cases below and for the route-level 409 mapping (the typed exception satisfies it through its
+  inner chain).
+- **Transition backfill** (`V4UniqueBackfillListener`, idempotent by construction, no flag):
+  copies the legacy mirrors into Props/`ValueUnique` on the first boot, reports duplicates and
+  leaves the losers outside the index (owner decision Р4а; a duplicated federated link is
+  flagged loudly — it is a potential account-takeover), then drops the seven retired indexes —
+  only when every scheme backfilled clean, otherwise the whole pass retries next boot. The
+  federated-link lookup keeps a fallback to the old mirror until then: a miss there would
+  auto-provision a second local user for an already-linked identity.
+- **What stays, by owner decision**: only `UX_users_email` on `_users(_email)` (Р1 — V4
+  primitives cannot express it; note for shared databases: it imposes email uniqueness on
+  every tenant of `_users`). The Р2 interim index on redb.Route's idempotent-entry scheme
+  was retired the same day: Route shipped its own fix (816a3d2a, `ValueUnique` + the typed
+  catch in `RedbIdempotentRepository` — bug report
+  `redb.Route/docs/BUG_IDEMPOTENT_REPOSITORY_UNIQUE_RACE.md`), so the index joined the
+  retired-drop list. The LDAP sync's legacy `UserProps.value_string` reverse-lookup key is
+  deliberately untouched — self-contained, never index-backed.
+
+Migration notes: a cluster upgrades by stop-deploy, not rolling — an old node looks keys up in
+`value_string`, which the new code no longer writes. A downgrade after this version needs the
+mirrors re-filled (the old code cannot see new rows' keys). Identity no longer issues DDL against
+`_objects` at boot; a role without DDL rights degrades to a logged statement for the two
+remaining indexes and the retired-index drops, never a dead host.
+
+### Fixed — two real uniqueness holes, proven red-before
+
+- **SQL Server never had the ClientId / ScopeName / ReferenceId indexes at all** — documented
+  trade-off of the old listener (NVARCHAR(MAX) cannot back a B-tree key), so those
+  check-then-save races were unprotected on MSSQL. The `[RedbUnique]` hash column is indexable
+  on every provider; the same duplicate tests are green on all three now.
+- **Three schemes promised an index that never existed.** The XML docs of
+  `FederatedIdentityProps`, `FederationProviderProps` and `ClaimScopeProps` claimed a partial
+  unique index no code created: duplicates went through on every provider — for federated links
+  that means one external identity could be linked to two local users by a race. Verified RED
+  in a worktree on the pre-change code (4 + 2 failing duplicate tests), green after.
+
+### Changed — admin console: pages, not dialogs (Phase 3)
+
+The owner's rule — a rich dialog must be a page — applied to every surviving edit modal
+(plan: `doc/webplan/PHASE-3-PAGES-NOT-DIALOGS.md`). Six entities left their overlays:
+
+- **Federation providers** got what they never had at all: a detail page
+  (`/admin/federation/{id}` — General / Credentials / Claim mappings / Danger zone tabs)
+  plus `/admin/federation/new`. The modal could not even show Priority or the
+  claim-mappings editor; the client secret is write-only with a show/hide toggle, and a
+  provider still carrying the `REPLACE_ME` placeholder wears a NOT CONFIGURED banner
+  explaining why it is hidden from `/login`.
+- **Claim definitions** — the console's most crowded modal (~14 fields at 640px) became
+  `/admin/claim-definitions/{id}` + `/new`, with the enforcement semantics explained next
+  to each control and the immutable identity (claim name / scope) rendered read-only.
+- **Claim mappers** — `/admin/claim-mappers/{id}` + `/new`. The page fixes the modal's
+  blind spot: the OWNER of a rule (`global` / `application:{id}` / `scope:{id}`) was not
+  selectable there, so every mapper landed global; the detail page renders the owner as a
+  deep-linked badge to the owning application / claim scope.
+- **Users** — the 4-field create overlay became a two-step wizard `/admin/users/new`
+  exposing the account + profile surface (the overlay showed 4 of the contract's 9 fields).
+- **Scopes and claim scopes** — `/admin/scopes/{id}` + `/new`,
+  `/admin/claim-scopes/{id}` + `/new`; the claim-scope page absorbs the old inline
+  master-detail panel — the scope's mappers are a section with deep links.
+
+Deletes moved to the detail pages behind the typed-confirm dialog — the one dialog
+pattern that stays, together with the shown-once webhook secret. The phase's own
+review then caught the last rich dialog standing: the group-create wizard — ironically
+the very component the plan cited as the wizard pattern to follow — floated in a
+modal-backdrop itself; it is a plain card now, hosted by `/admin/groups/new`. What
+remains overlaid is deliberate and light: typed confirms, shown-once secrets, the
+read-only SCIM JSON viewer, a one-field WebAuthn rename, and the two-field
+template-confirm inside application creation. No `modal-backdrop` edit overlay is left
+in the console.
+
+Two additions ride the same wave:
+
+- **`/admin/api-resources`** — the `resource:action` catalogue got a home: the gate's
+  precedence rules, the full resource tree with per-scope seeded/not-seeded state
+  (deep-linked into the scope store), and the list of operator scopes outside the model.
+- **Dashboard** rebuilt after the Tsak.Web composition the owner likes: a six-card KPI
+  row (real `PagedResult.Total` probes), an audit-by-category donut and a clickable
+  recent-activity table deep-linking into `/admin/audit`. No invented metrics: where no
+  telemetry source exists (sparkline history) the element is simply absent.
+
+Coverage: `Phase3PagesTests` pins all twelve new routes — each must exist (not 404) and
+must never render anonymously (not 200); it deliberately tightens the old "not 200"
+pattern, which a broken route template could satisfy by 404-ing.
+
+### Removed — the Hydrate mirror machinery
+
+`RedbObjectHydration` and its ~30 call sites are gone: a key found through `GetByUniqueAsync`
+is a stored prop and needs no copying; the three dead `sql/indexes/*.sql` files (applied by
+nothing since the listener took over) went with it.
 
 ## [3.7.2] — 2026-08-27
 

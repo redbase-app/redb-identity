@@ -56,7 +56,7 @@ internal sealed class HandleAuthorizationRequestHandler : IOpenIddictServerHandl
                 if (appIdEarly is > 0)
                 {
                     var appEarly = (await redbEarly.LoadAsync<ApplicationProps>(appIdEarly.Value)
-                        .ConfigureAwait(false))?.Hydrate();
+                        .ConfigureAwait(false));
                     if (appEarly?.Props.RequirePushedAuthorizationRequests == true)
                     {
                         context.Reject(
@@ -230,7 +230,7 @@ internal sealed class HandleAuthorizationRequestHandler : IOpenIddictServerHandl
             {
                 appObjectId = appId.Value;
                 var app = (await redb.LoadAsync<ApplicationProps>(appId.Value)
-                    .ConfigureAwait(false))?.Hydrate();
+                    .ConfigureAwait(false));
 
                 if (app?.Props.ConsentType == ConsentTypes.Explicit)
                 {

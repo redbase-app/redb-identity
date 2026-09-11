@@ -27,6 +27,45 @@ internal static class IdentityHttpConfigBinder
     public const string SectionName = "IdentityTransport";
 
     /// <summary>
+    /// Core's top-level section. The reverse-proxy list is declared once there
+    /// (<c>Identity:ReverseProxies</c>) and consumed by both Core's per-route processor and, when
+    /// this module has to create the shared HTTP host itself, by the host.
+    /// </summary>
+    public const string CoreSectionName = "Identity";
+
+    /// <summary>
+    /// Copies <c>Identity:ReverseProxies</c> (<c>TrustForwardedFor</c>, <c>KnownProxies</c>,
+    /// <c>KnownNetworks</c>) from <paramref name="context"/> onto <paramref name="hosting"/>, so a
+    /// host this module constructs resolves the client address and scheme on every listener with
+    /// the same list Core's processor uses. Nothing is copied unless <c>TrustForwardedFor</c> is
+    /// true. This facade does not reference Core, so the section is read as configuration rather
+    /// than through Core's options type.
+    /// </summary>
+    public static void BindTrustedProxies(IRouteContext context, redb.Route.Http.HttpHostingOptions hosting)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(hosting);
+
+        var raw = context.GetProperty<IDictionary<string, object?>>(CoreSectionName);
+        if (raw is null || raw.Count == 0)
+            return;
+
+        var flat = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        Flatten(raw, prefix: string.Empty, sink: flat);
+        var cfg = new ConfigurationBuilder()
+            .Add(new MemoryConfigurationSource { InitialData = flat })
+            .Build();
+
+        if (!cfg.GetValue("ReverseProxies:TrustForwardedFor", false))
+            return;
+
+        foreach (var entry in cfg.GetSection("ReverseProxies:KnownProxies").Get<string[]>() ?? [])
+            hosting.TrustedProxies.Add(entry);
+        foreach (var entry in cfg.GetSection("ReverseProxies:KnownNetworks").Get<string[]>() ?? [])
+            hosting.TrustedProxies.Add(entry);
+    }
+
+    /// <summary>
     /// Builds <see cref="IdentityTransportOptions"/> from <paramref name="context"/>'s
     /// <c>"IdentityTransport"</c> property. Returns defaults when the property is
     /// missing so the module can run in development without explicit configuration.

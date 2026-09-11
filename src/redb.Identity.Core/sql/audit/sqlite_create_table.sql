@@ -5,10 +5,14 @@
 --
 -- SQLite notes:
 --   * INTEGER PRIMARY KEY = rowid alias, behaves like BIGSERIAL on autoincrement.
---   * No native UUID / DATETIMEOFFSET / JSONB types — store as TEXT and let the
---     app layer encode (RFC 3339 timestamps, RFC 4122 GUID strings, plain JSON
---     for details). Matches what NpgsqlRedbConnection / MS SQL adapters emit
---     when the SQLite driver round-trips DateTimeOffset / Guid / object?.
+--   * No native UUID / JSONB types — GUIDs and details are stored as TEXT (RFC 4122
+--     strings, plain JSON) and decoded by the app layer.
+--   * timestamp is REAL: the redb SQLite provider encodes every DateTimeOffset
+--     parameter as a Julian day number (UTC) and decodes REAL columns back to
+--     DateTimeOffset — the same convention as the _date_* base columns. A TEXT column
+--     here would receive that number as text, and the query layer would then fail to
+--     parse it (timestamps read back as 0001-01-01, date filters compare text to a
+--     number). DEFAULT mirrors the encoding for rows inserted outside redb.
 --   * No NVARCHAR — SQLite columns are typeless (NUMERIC affinity by default,
 --     TEXT for our string-heavy schema). We still spell out a width so dialect
 --     parity is obvious to a human reader; SQLite ignores it but PostgreSQL /
@@ -20,7 +24,7 @@ CREATE TABLE IF NOT EXISTS identity_audit_log (
     event_id     TEXT NOT NULL,
     event_type   TEXT NOT NULL,
     category     TEXT,
-    timestamp    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    timestamp    REAL NOT NULL DEFAULT (julianday('now')),
     user_id      INTEGER,
     login        TEXT,
     client_id    TEXT,

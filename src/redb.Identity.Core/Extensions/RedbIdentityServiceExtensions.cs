@@ -281,6 +281,12 @@ public static class RedbIdentityServiceExtensions
                 validation.UseLocalServer();
                 validation.UseDataProtection();
 
+                // RFC 9068 §4: the OP's own resource side verifies aud. Tokens minted for an
+                // external API only (scope Resources without an identity:* scope) are
+                // rejected here with 401 — see AttachAccessTokenResources for the composition.
+                validation.AddAudiences(RedbIdentityOptions.ResolveDefaultAccessTokenAudience(
+                    options.Issuer, options.DefaultAccessTokenAudience));
+
                 // Custom handler: inject bearer token for programmatic validation
                 // (runs early in the pipeline, before built-in extraction handlers)
                 validation.AddEventHandler<OpenIddictValidationEvents.ProcessAuthenticationContext>(builder =>

@@ -84,9 +84,7 @@ internal sealed class PasswordForgotProcessor : IProcessor
         var logger = _sp.GetService<ILoggerFactory>()?.CreateLogger("PasswordForgotProcessor");
 
         // ── Gate 1: client + whitelist check (per C.6 / variant A) ────────────────
-        var app = await redb.Query<ApplicationProps>()
-            .WhereRedb(o => o.ValueString == request.ClientId)
-            .FirstOrDefaultAsync()
+        var app = await redb.GetByUniqueAsync<ApplicationProps>(p => p.ClientId, request.ClientId)
             .ConfigureAwait(false);
         if (app is null)
         {

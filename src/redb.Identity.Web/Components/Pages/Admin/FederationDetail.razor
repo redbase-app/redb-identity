@@ -1,0 +1,324 @@
+@page "/admin/federation/{Id}"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    Federation provider detail — full page with tabs (Phase 3, П1: pages-not-dialogs).
+    Replaces the edit half of the old FederationList modal. The page finally gives a
+    home to what the modal never showed: Priority and the claim-mappings editor.
+    Delete moved here too, behind the typed-confirm dialog (the one dialog pattern
+    that stays, by owner rule).
+*@
+
+<div style="margin-bottom: var(--space-3);">
+    <NavLink href="/admin/federation" class="btn btn-ghost" style="padding: 0; color: var(--accent-primary);">← Go back to Federation providers</NavLink>
+</div>
+
+@if (_loading) { <p class="text-secondary">Loading…</p> }
+else if (_loadError is not null) { <p class="text-error">@_loadError</p> }
+else if (_p is not null)
+{
+    <div style="display:flex; gap: var(--space-4); align-items: flex-start; margin-bottom: var(--space-4);">
+        <div class="apps-list__avatar" style="font-size: 1.5rem; width: 56px; height: 56px;">@char.ToUpperInvariant(_p.ProviderId is { Length: > 0 } pid ? pid[0] : 'F')</div>
+        <div style="flex: 1;">
+            <h1 style="margin: 0;">@_p.DisplayName</h1>
+            <div style="display:flex; gap: var(--space-2); margin-top: var(--space-1); align-items:center;">
+                <span class="badge">@_p.Kind</span>
+                <code>@_p.ProviderId</code>
+                @if (IsPlaceholder) { <RdbBadge Text="NOT CONFIGURED" Variant="error" /> }
+                else if (_form.Enabled) { <RdbBadge Text="enabled" Variant="online" /> }
+                else { <RdbBadge Text="disabled" Variant="offline" /> }
+                <RdbBadge Text="@(_p.HasSecret ? "secret set" : "no secret")" Variant="@(_p.HasSecret ? "online" : "offline")" />
+            </div>
+        </div>
+        <div style="display:flex; gap: var(--space-2);">
+            <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">@(_saving ? "Saving…" : "Save")</button>
+        </div>
+    </div>
+
+    @if (IsPlaceholder)
+    {
+        <div class="card" style="border-left: 3px solid var(--status-error); margin-bottom: var(--space-3);">
+            <p style="margin: 0;">
+                <strong>This provider still carries the <code>REPLACE_ME</code> placeholder.</strong>
+                It is hidden from the login page and from the public provider list until a real
+                Client ID / Authority is configured — see the Credentials tab and
+                <code>doc/DEPLOYMENT.md → Federation providers — operator setup</code>.
+            </p>
+        </div>
+    }
+
+    <UiTabBar @bind-ActiveTab="_tab" Tabs="@Tabs" AriaLabel="Federation provider sections" />
+
+    <div class="card" style="margin-top: var(--space-4);">
+        @if (_tab == "general")
+        {
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">General</h3>
+
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Display name *</span>
+                    <input class="app-detail__input" @bind="_form.DisplayName" />
+                    <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Shown on the login button.</span>
+                </label>
+
+                <dl class="app-detail__kv">
+                    <dt>Provider ID</dt><dd><code>@_p.ProviderId</code> (immutable)</dd>
+                    <dt>Kind</dt><dd><code>@_p.Kind</code> (immutable)</dd>
+                    <dt>Internal id</dt><dd><code>@_p.Id</code></dd>
+                </dl>
+
+                <label style="display:flex; gap:var(--space-2); align-items:center; cursor:pointer; margin-top: var(--space-3);">
+                    <input type="checkbox" @bind="_form.Enabled" />
+                    <span>Enabled — provider appears on the login page</span>
+                </label>
+                <label style="display:flex; gap:var(--space-2); align-items:center; cursor:pointer; margin-top: var(--space-2);">
+                    <input type="checkbox" @bind="_form.AutoProvision" />
+                    <span>Auto-provision new users on first login</span>
+                </label>
+
+                <label class="app-detail__field" style="margin-top: var(--space-3); max-width: 200px;">
+                    <span class="app-detail__field-label">Priority</span>
+                    <input class="app-detail__input" type="number" @bind="_form.Priority" />
+                    <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Login buttons sort ascending.</span>
+                </label>
+            </section>
+        }
+        else if (_tab == "credentials")
+        {
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">Credentials</h3>
+
+                @if (_form.Kind == "oidc")
+                {
+                    <label class="app-detail__field">
+                        <span class="app-detail__field-label">Authority (issuer URL) *</span>
+                        <input class="app-detail__input app-detail__input--mono" @bind="_form.Authority" />
+                        <span class="app-detail__field-hint">
+                            <RdbIcon Name="info" Size="12" />
+                            OIDC discovery root — <code>/.well-known/openid-configuration</code> is resolved from here.
+                        </span>
+                    </label>
+                }
+
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Client ID *</span>
+                    <input class="app-detail__input app-detail__input--mono" @bind="_form.ClientId" />
+                </label>
+
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Client secret</span>
+                    <div style="position: relative;">
+                        <input class="app-detail__input app-detail__input--mono"
+                               type="@(_secretVisible ? "text" : "password")"
+                               placeholder="@(_p.HasSecret ? "(unchanged — leave blank to keep the current secret)" : "(no secret stored)")"
+                               @bind="_form.ClientSecret" />
+                        <button type="button" class="btn btn-ghost" style="position:absolute; right: 4px; top: 4px; padding: 2px 8px;"
+                                @onclick="() => _secretVisible = !_secretVisible">
+                            <RdbIcon Name="@(_secretVisible ? "eye-off" : "eye")" Size="14" />
+                        </button>
+                    </div>
+                    <span class="app-detail__field-hint">
+                        <RdbIcon Name="info" Size="12" />
+                        Write-only: the stored secret is encrypted at rest and never shown back. Typing here replaces it on Save.
+                    </span>
+                </label>
+
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Scopes</span>
+                    <input class="app-detail__input app-detail__input--mono" @bind="_form.Scopes" />
+                    <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Space-separated; requested from the external provider.</span>
+                </label>
+            </section>
+        }
+        else if (_tab == "mappings")
+        {
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">Claim mappings</h3>
+                <p class="text-secondary" style="margin-top: 0;">
+                    Rename claims arriving from the external provider before they reach the local
+                    principal: <em>external claim type → local claim type</em>. Claims without a
+                    mapping pass through under their original name.
+                </p>
+
+                @if (_mappings.Count == 0)
+                {
+                    <p class="text-secondary">No mappings — all external claims pass through unchanged.</p>
+                }
+                else
+                {
+                    <table class="data-table" style="max-width: 640px;">
+                        <thead><tr><th>External claim</th><th>Maps to</th><th></th></tr></thead>
+                        <tbody>
+                            @for (var i = 0; i < _mappings.Count; i++)
+                            {
+                                var row = _mappings[i];
+                                <tr>
+                                    <td><input class="app-detail__input app-detail__input--mono" @bind="row.Key" placeholder="upn" /></td>
+                                    <td><input class="app-detail__input app-detail__input--mono" @bind="row.Value" placeholder="email" /></td>
+                                    <td><button class="btn btn-sm btn-danger" @onclick="() => _mappings.Remove(row)">Remove</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+
+                <button class="btn btn-secondary" style="margin-top: var(--space-2);" @onclick="@(() => _mappings.Add(new MappingRow()))">
+                    <RdbIcon Name="edit" Size="14" /> Add mapping
+                </button>
+                @if (_mappingError is not null) { <p class="text-error">@_mappingError</p> }
+            </section>
+        }
+        else if (_tab == "danger")
+        {
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">Danger zone</h3>
+                <p class="text-secondary" style="margin-top: 0;">
+                    Deleting a provider removes its configuration. Existing federated links of
+                    users are kept (orphaned) — users can still log in if the same Provider ID
+                    is re-created or remains in <code>appsettings</code>.
+                </p>
+                <button class="btn btn-danger" @onclick="DeleteAsync">Delete this provider</button>
+            </section>
+        }
+    </div>
+
+    @if (_saveError is not null) { <p class="text-error" style="margin-top: var(--space-2);">@_saveError</p> }
+}
+
+<UiTypedConfirmDialog @ref="_confirm" />
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    private static readonly IReadOnlyList<UiTabBar.Tab> Tabs = new[]
+    {
+        new UiTabBar.Tab("general", "General"),
+        new UiTabBar.Tab("credentials", "Credentials"),
+        new UiTabBar.Tab("mappings", "Claim mappings"),
+        new UiTabBar.Tab("danger", "Danger zone"),
+    };
+
+    private sealed class MappingRow
+    {
+        public string Key = "";
+        public string Value = "";
+    }
+
+    private sealed class FormState
+    {
+        public string Kind = "oidc";
+        public string DisplayName = "";
+        public string? Authority;
+        public string ClientId = "";
+        public string? ClientSecret;
+        public string Scopes = "";
+        public bool AutoProvision = true;
+        public bool Enabled = true;
+        public int Priority = 100;
+    }
+
+    private FederationProviderResponse? _p;
+    private FormState _form = new();
+    private readonly List<MappingRow> _mappings = new();
+
+    private string _tab = "general";
+    private bool _loading = true;
+    private bool _saving;
+    private bool _secretVisible;
+    private string? _loadError;
+    private string? _saveError;
+    private string? _mappingError;
+    private UiTypedConfirmDialog? _confirm;
+
+    private bool IsPlaceholder =>
+        _p is not null && (_p.ClientId == "REPLACE_ME" || _p.Authority == "REPLACE_ME");
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _loadError = null;
+        try
+        {
+            _p = await Client.GetFederationProviderAsync(Id);
+            _form = new FormState
+            {
+                Kind = _p.Kind,
+                DisplayName = _p.DisplayName,
+                Authority = _p.Authority,
+                ClientId = _p.ClientId,
+                ClientSecret = null,
+                Scopes = string.Join(" ", _p.Scopes),
+                AutoProvision = _p.AutoProvision,
+                Enabled = _p.Enabled,
+                Priority = _p.Priority,
+            };
+            _mappings.Clear();
+            if (_p.ClaimMappings is { Count: > 0 })
+                foreach (var kv in _p.ClaimMappings)
+                    _mappings.Add(new MappingRow { Key = kv.Key, Value = kv.Value });
+        }
+        catch (Exception ex) { _loadError = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_p is null) return;
+        _saving = true; _saveError = null; _mappingError = null;
+
+        var mappings = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var row in _mappings)
+        {
+            var key = row.Key.Trim();
+            var value = row.Value.Trim();
+            if (key.Length == 0 && value.Length == 0) continue; // ignore empty template rows
+            if (key.Length == 0 || value.Length == 0)
+            { _mappingError = "Every mapping needs both sides filled (or remove the row)."; _saving = false; _tab = "mappings"; return; }
+            if (!mappings.TryAdd(key, value))
+            { _mappingError = $"Duplicate external claim '{key}'."; _saving = false; _tab = "mappings"; return; }
+        }
+
+        try
+        {
+            _p = await Client.UpdateFederationProviderAsync(_p.Id, new UpdateFederationProviderRequest
+            {
+                Id = _p.Id,
+                DisplayName = _form.DisplayName.Trim(),
+                Authority = string.IsNullOrWhiteSpace(_form.Authority) ? null : _form.Authority!.Trim(),
+                ClientId = _form.ClientId.Trim(),
+                ClientSecret = string.IsNullOrEmpty(_form.ClientSecret) ? null : _form.ClientSecret,
+                Scopes = _form.Scopes.Split(' ', StringSplitOptions.RemoveEmptyEntries),
+                AutoProvision = _form.AutoProvision,
+                Enabled = _form.Enabled,
+                Priority = _form.Priority,
+                ClaimMappings = mappings,
+            });
+            _form.ClientSecret = null;
+            Toast.Show("Saved.", "online");
+        }
+        catch (Exception ex) { _saveError = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_p is null || _confirm is null) return;
+        var ok = await _confirm.ShowAsync(
+            expectedText: _p.ProviderId,
+            title: "Delete federation provider",
+            message: $"This deletes the provider configuration '{_p.ProviderId}'. Users' federated " +
+                     "links are kept but orphaned until the same Provider ID is re-created.",
+            confirmLabel: "Delete this provider");
+        if (!ok) return;
+
+        try
+        {
+            await Client.DeleteFederationProviderAsync(_p.Id);
+            Toast.Show($"Provider '{_p.ProviderId}' deleted.", "online");
+            Nav.NavigateTo("/admin/federation");
+        }
+        catch (Exception ex) { Toast.Show(ex.Message, "error"); }
+    }
+}

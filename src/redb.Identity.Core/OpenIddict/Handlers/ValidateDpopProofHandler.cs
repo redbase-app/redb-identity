@@ -60,11 +60,9 @@ internal sealed class ValidateDpopProofHandler
 
         try
         {
-            var app = await redb.Query<ApplicationProps>()
-                .WhereRedb(o => o.ValueString == clientId)
-                .FirstOrDefaultAsync()
+            var app = await redb.GetByUniqueAsync<ApplicationProps>(p => p.ClientId, clientId)
                 .ConfigureAwait(false);
-            return app?.Hydrate().Props.RequireDpop ?? false;
+            return app?.Props.RequireDpop ?? false;
         }
         catch (Exception ex)
         {

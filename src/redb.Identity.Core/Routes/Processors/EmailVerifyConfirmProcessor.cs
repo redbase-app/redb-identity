@@ -100,7 +100,7 @@ internal sealed class EmailVerifyConfirmProcessor : IProcessor
         var oidcObj = await MeProcessorHelpers.LoadOidcProps(redb, user.Id).ConfigureAwait(false);
         if (oidcObj is null)
         {
-            oidcObj = new RedbObject<UserProps>(new UserProps { EmailVerified = true });
+            oidcObj = new RedbObject<UserProps>(new UserProps { EmailVerified = true, UserId = user.Id });
             oidcObj.name = user.Login;
             oidcObj.key = user.Id;
             oidcObj.value_guid = Guid.NewGuid();

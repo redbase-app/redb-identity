@@ -90,11 +90,19 @@ internal sealed class IdempotencyProcessor : IProcessor
             var redb = _context.GetRedbService(_redbName, exchange);
             var now = _timeProvider.GetUtcNow();
 
-            // Indexed lookup on _objects._name (IX__objects__name).
+            // V4-UNIQUE (owner decision Р5(в), doc/v4/00 §6): the enforced key is
+            // ValueUnique = SHA-256(name) — a probe of the core unique index; the Name
+            // lookup covers legacy rows written before the upgrade (they fade with the TTL).
+            var keyHash = IdempotencyKeyHash.Sha256Hex(name);
             var matches = await redb.Query<IdempotencyRecordProps>()
-                .WhereRedb(o => o.Name == name)
+                .WhereRedb(o => o.ValueUnique == keyHash)
                 .ToListAsync()
                 .ConfigureAwait(false);
+            if (matches.Count == 0)
+                matches = await redb.Query<IdempotencyRecordProps>()
+                    .WhereRedb(o => o.Name == name)
+                    .ToListAsync()
+                    .ConfigureAwait(false);
 
             // Defensive equality check on Props guards against any name collision from a
             // foreign scheme that happens to share the composite name format.
@@ -220,10 +228,16 @@ internal sealed class IdempotencyCaptureProcessor : IProcessor
             // Re-check (TOCTOU): a concurrent request with the same key may have already
             // stored a record between the PRE-lookup and now. Keep the first writer's record
             // to give callers stable replay semantics.
+            var keyHash = IdempotencyKeyHash.Sha256Hex(name);
             var existing = await redb.Query<IdempotencyRecordProps>()
-                .WhereRedb(obj => obj.Name == name)
+                .WhereRedb(obj => obj.ValueUnique == keyHash)
                 .ToListAsync()
                 .ConfigureAwait(false);
+            if (existing.Count == 0)
+                existing = await redb.Query<IdempotencyRecordProps>()
+                    .WhereRedb(obj => obj.Name == name)
+                    .ToListAsync()
+                    .ConfigureAwait(false);
 
             if (existing.Any(e =>
                 e.Props.IdempotencyKey == key &&
@@ -237,7 +251,8 @@ internal sealed class IdempotencyCaptureProcessor : IProcessor
 
             var record = new RedbObject<IdempotencyRecordProps>
             {
-                name = name,
+                name = name,                // readable composite, exactly as before
+                ValueUnique = keyHash,      // V4-UNIQUE Р5(в): the DB-enforced key
                 date_complete = now.Add(_options.Ttl),
                 Props = new IdempotencyRecordProps
                 {
@@ -253,13 +268,13 @@ internal sealed class IdempotencyCaptureProcessor : IProcessor
 
             await redb.SaveAsync(record).ConfigureAwait(false);
         }
-        catch (Exception ex) when (IdentityProcessorHelpers.IsUniqueViolation(ex))
+        catch (redb.Core.Exceptions.RedbUniqueViolationException)
         {
-            // Concurrent capture won the race — the partial unique index on
-            // _objects(_name) WHERE _id_scheme = IdempotencyRecordProps rejected this
-            // insert. The other writer already persisted the authoritative response,
-            // so silently drop this attempt: the client still gets its 2xx from the
-            // business step, and future retries will hit the cached copy.
+            // Concurrent capture won the race — the core ValueUnique index rejected this
+            // insert (V4-UNIQUE, Р5(в): the key is the SHA-256 of the composite name).
+            // The other writer already persisted the authoritative response, so silently
+            // drop this attempt: the client still gets its 2xx from the business step,
+            // and future retries will hit the cached copy.
             _logger?.LogDebug(
                 "Idempotency capture race — another writer already stored name={Name}.", name);
         }

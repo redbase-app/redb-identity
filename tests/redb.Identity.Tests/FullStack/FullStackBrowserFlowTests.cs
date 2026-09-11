@@ -255,15 +255,39 @@ public class FullStackBrowserFlowTests
     [Fact]
     public async Task ConsentPage_Get_RendersForm()
     {
-        using var client = CreateBrowserClient();
+        // The consent page renders only from the server-signed ticket the authorize endpoint
+        // hands out (/consent?ct=…) — never from query parameters a link could carry. So the
+        // page is reached the way a browser reaches it: log in, start an authorize request for
+        // an explicit-consent client, follow the 302.
+        var (_, challenge) = GeneratePkce();
+        var cookies = new CookieContainer();
+        using var client = CreateBrowserClient(cookies, allowRedirect: false);
 
-        var resp = await client.GetAsync(
-            "/consent?client_id=test&app_name=TestApp&scopes=openid,profile&user_id=1&returnUrl=/connect/authorize");
+        var loginForm = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["username"] = ProductionHttpFixture.TestUsername,
+            ["password"] = ProductionHttpFixture.TestPassword
+        });
+        await client.PostAsync("/login", loginForm);
+        cookies.Count.Should().BeGreaterThan(0, "login must set a session cookie");
+
+        var authorize = await client.GetAsync("/connect/authorize?response_type=code"
+            + $"&client_id={ProductionHttpFixture.TestConsentClientId}"
+            + $"&redirect_uri={Uri.EscapeDataString(ProductionHttpFixture.TestRedirectUri)}"
+            + "&scope=openid%20profile"
+            + $"&code_challenge={challenge}&code_challenge_method=S256");
+        authorize.StatusCode.Should().Be(HttpStatusCode.Redirect, "an explicit-consent client is sent to the consent page");
+        var location = authorize.Headers.Location!.ToString();
+        location.Should().StartWith("/consent?ct=", "consent parameters travel in a signed ticket, not as query fields");
+
+        var resp = await client.GetAsync(location);
 
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await resp.Content.ReadAsStringAsync();
-        body.Should().Contain("TestApp", "consent page should show the app name");
+        body.Should().Contain("E2E Explicit Consent App", "the app name comes from the client record via the ticket");
         body.Should().Contain("<form", "consent page should contain a form element");
+        body.Should().Contain("name=\"ct\"", "the form posts the ticket back");
+        body.Should().NotContain("name=\"client_id\"", "the form carries nothing the browser could rewrite");
     }
 
     // ══════════════════════════════════════════════

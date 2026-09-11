@@ -32,8 +32,40 @@ internal static class HttpIdentityProcessors
     /// Safe to run first on every HTTP route — does not consume or mutate body/headers
     /// beyond the single correlation header.
     /// </summary>
+    /// <summary>
+    /// Header names that carry internal, server-derived identity/authorization state. They are
+    /// set by trusted processors from validated sources — the session cookie
+    /// (<c>ReadSessionCookie</c>), the <c>Authorization</c> header (<c>ExtractBearerToken</c>),
+    /// Basic auth or the form body (<c>MapHttpToIdentityHeaders</c>), the request path
+    /// (<c>ExtractDynamicRegistrationManagement</c>). The HTTP consumer copies EVERY request
+    /// header into the exchange verbatim (only <c>redbHttp.*</c> is filtered), and
+    /// <c>ReadSessionCookie</c> returns without clearing these when no cookie is present — so a
+    /// client sending a header literally named <c>session_user_id</c> would otherwise be trusted
+    /// as an authenticated principal by <c>AttachSessionPrincipalHandler</c>. The audit trio
+    /// (<c>user_id</c>, <c>ip_address</c>, <c>user_agent</c>) is read by
+    /// <c>EventDispatchProcessor</c> from the WireTap copy of the business exchange — the same
+    /// headers — so a client could sign the security log with someone else's user id and a
+    /// fabricated address. Stripped on ingress so only the trusted processors can populate them.
+    /// </summary>
+    /// <summary>
+    /// Removes the internal-only headers a client must never supply
+    /// (<see cref="redb.Identity.Contracts.Routes.IdentityReservedInboundHeaders"/> — the list is
+    /// shared with the gRPC and SOAP facades). Invoked from <see cref="PropagateCorrelationId"/> —
+    /// the first processor on every HTTP route — so no route can forget it; a per-route opt-in is
+    /// exactly how such a gap reappears.
+    /// </summary>
+    internal static void StripReservedInboundHeaders(IExchange e)
+    {
+        redb.Identity.Contracts.Routes.IdentityReservedInboundHeaders.Strip(e.In.Headers);
+        // HTTP-only: the operation is derived from the request method and path
+        // (ExtractDynamicRegistrationManagement); over gRPC the caller names it by design.
+        e.In.Headers.Remove("operation");
+    }
+
     internal static Task PropagateCorrelationId(IExchange e, CancellationToken ct)
     {
+        StripReservedInboundHeaders(e);
+
         var requestId = e.In.GetHeader<string>("X-Correlation-Id");
         if (string.IsNullOrWhiteSpace(requestId))
         {
@@ -69,6 +101,31 @@ internal static class HttpIdentityProcessors
         var contentType = e.In.GetHeader<string>(HttpHeaders.ContentType);
         if (contentType is not null)
             e.In.Headers["Content-Type"] = contentType;
+
+        // Step 2: form-encoded client authentication (RFC 6749 §2.3.1). OpenIddict reads these
+        // from the body itself, so token issuance never needed them as headers — but the audit
+        // envelope (EventDispatchProcessor) attributes events by the client_id header, and until
+        // this step existed every form-authenticated client (public PKCE ones included) was
+        // audited with client_id NULL. Basic wins when both are present; the body is parsed here
+        // without being replaced (MapFormToBody runs later and owns that).
+        if (!e.In.Headers.ContainsKey("client_id")
+            && contentType?.StartsWith("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            var raw = e.In.Body switch
+            {
+                byte[] bytes => Encoding.UTF8.GetString(bytes),
+                string text => text,
+                _ => null
+            };
+            if (!string.IsNullOrEmpty(raw))
+            {
+                var form = ParseFormUrlEncoded(raw);
+                if (form.TryGetValue("client_id", out var cid) && cid is string { Length: > 0 } cidText)
+                    e.In.Headers["client_id"] = cidText;
+                if (form.TryGetValue("client_secret", out var sec) && sec is string { Length: > 0 } secText)
+                    e.In.Headers["client_secret"] = secText;
+            }
+        }
 
         return Task.CompletedTask;
     }
@@ -485,7 +542,28 @@ internal static class HttpIdentityProcessors
             msg.Headers["DPoP-Nonce"] = dpopNonce;
         }
 
+        AttachSecurityHeaders(msg);
+
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Browser-protection baseline on every response that ends in
+    /// <see cref="SerializeJsonResponse"/> — all page routes and the OAuth/OIDC protocol
+    /// endpoints. The facade serves its own login / consent / MFA pages, and until now
+    /// nothing forbade framing them — the consent form in an invisible frame is a textbook
+    /// clickjacking target. Same set the web console's <c>SecurityHeadersMiddleware</c>
+    /// emits; only the frame directive of CSP is used because the page templates rely on
+    /// inline styles. Harmless on JSON and redirects, so it is applied uniformly rather than
+    /// per page route — a forgotten route is exactly how such a gap reappears. Rejections
+    /// that stop the pipeline before the serializer must call this themselves.
+    /// </summary>
+    internal static void AttachSecurityHeaders(IMessage msg)
+    {
+        msg.Headers.TryAdd("X-Frame-Options", "DENY");
+        msg.Headers.TryAdd("Content-Security-Policy", "frame-ancestors 'none'");
+        msg.Headers.TryAdd("X-Content-Type-Options", "nosniff");
+        msg.Headers.TryAdd("Referrer-Policy", "strict-origin-when-cross-origin");
     }
 
     /// <summary>

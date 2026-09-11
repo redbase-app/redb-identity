@@ -1,0 +1,171 @@
+@page "/admin/api-resources"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@using redb.Identity.Contracts.Configuration
+
+@*
+    API resources — the global resource:action catalogue (Phase 3, П6).
+    Until now the granular scope model (IdentityScopes, GranularScopeGuardProcessor)
+    was visible only from inside the Role permission picker and per-application tabs;
+    this page is its home: the full resource tree, the gate's precedence rules, and
+    for every catalogue scope whether it is actually seeded in the scope store
+    (deep-linked to /admin/scopes/{id} when it is). Data is the static contracts
+    catalogue joined with the live scope list — nothing invented.
+*@
+
+<RdbPageHeader Title="API resources"
+               Description="The resource:action scope catalogue enforced by the management gate." />
+
+<div class="card" style="margin-bottom: var(--space-4);">
+    <div class="card-header"><span class="card-title">How the gate decides</span></div>
+    <ol style="margin: 0; padding-left: var(--space-4); line-height: 1.9;">
+        <li>Token holds <code>@IdentityScopes.Manage</code> → pass (master admin).</li>
+        <li>Token holds <code>@IdentityScopes.Account</code> and the path is <code>/me/*</code> → pass.</li>
+        <li>Token holds <code>@IdentityScopes.ReadOnly</code> and the method is GET-class → pass.</li>
+        <li>Token holds the resource's <code>:read</code> for GET, or <code>:write</code> for mutations → pass.</li>
+        <li>Otherwise → <code>403 insufficient_scope</code>.</li>
+    </ol>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Resource catalogue</span>
+        <span class="text-secondary" style="font-size: var(--font-size-sm);">
+            @_seededCount of @_catalogTotal catalogue scopes seeded
+        </span>
+    </div>
+
+    @if (_loading) { <p class="text-secondary">Loading…</p> }
+    else
+    {
+        @if (_loadError is not null)
+        {
+            <p class="text-error">@_loadError — seeded-state badges are unavailable, the catalogue itself is static.</p>
+        }
+
+        <h3 class="app-detail__section-title">Universal</h3>
+        <table class="data-table" style="margin-bottom: var(--space-4);">
+            <thead><tr><th>Scope</th><th>Grants</th><th>Store</th></tr></thead>
+            <tbody>
+                <tr><td><code>@IdentityScopes.Manage</code></td><td>Full administrative access — short-circuits the granular gate</td><td>@SeededBadge(IdentityScopes.Manage)</td></tr>
+                <tr><td><code>@IdentityScopes.Account</code></td><td>Self-service — only the owning user's <code>/me/*</code> endpoints</td><td>@SeededBadge(IdentityScopes.Account)</td></tr>
+                <tr><td><code>@IdentityScopes.ReadOnly</code></td><td>Read-only admin — GET everywhere, mutations rejected</td><td>@SeededBadge(IdentityScopes.ReadOnly)</td></tr>
+                <tr><td><code>@IdentityScopes.Impersonate</code></td><td>Mint impersonate-as tokens (RFC 8693 token exchange)</td><td>@SeededBadge(IdentityScopes.Impersonate)</td></tr>
+            </tbody>
+        </table>
+
+        <h3 class="app-detail__section-title">Resources</h3>
+        <table class="data-table">
+            <thead><tr><th>Resource</th><th><code>:read</code></th><th></th><th><code>:write</code></th><th></th></tr></thead>
+            <tbody>
+                @foreach (var r in _resources)
+                {
+                    <tr>
+                        <td><strong>@r.Resource</strong></td>
+                        <td>@(r.Read is not null ? (MarkupString)$"<code>{r.Read}</code>" : (MarkupString)"<span class=\"text-secondary\">—</span>")</td>
+                        <td>@(r.Read is not null ? SeededBadge(r.Read) : null)</td>
+                        <td>@(r.Write is not null ? (MarkupString)$"<code>{r.Write}</code>" : (MarkupString)"<span class=\"text-secondary\">—</span>")</td>
+                        <td>@(r.Write is not null ? SeededBadge(r.Write) : null)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        @if (_customScopes.Count > 0)
+        {
+            <h3 class="app-detail__section-title" style="margin-top: var(--space-4);">Scopes outside the catalogue</h3>
+            <p class="text-secondary" style="margin-top: 0;">
+                Operator-defined OAuth scopes not part of the <code>resource:action</code> model —
+                managed on <NavLink href="/admin/scopes">Scopes</NavLink>.
+            </p>
+            <div style="display:flex; gap: var(--space-2); flex-wrap: wrap;">
+                @foreach (var s in _customScopes)
+                {
+                    <NavLink href="@($"/admin/scopes/{Uri.EscapeDataString(s.Id)}")"><span class="badge">@s.Name</span></NavLink>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private sealed record ResourceRow(string Resource, string? Read, string? Write);
+
+    private readonly Dictionary<string, ScopeResponse> _byName = new(StringComparer.Ordinal);
+    private readonly List<ResourceRow> _resources = new();
+    private readonly List<ScopeResponse> _customScopes = new();
+    private bool _loading = true;
+    private string? _loadError;
+    private int _seededCount, _catalogTotal;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Build the resource tree from the static catalogue: "resource:action" pairs,
+        // universal scopes (no action suffix beyond the model) rendered separately.
+        var universal = new HashSet<string>(StringComparer.Ordinal)
+        { IdentityScopes.Manage, IdentityScopes.Account, IdentityScopes.ReadOnly, IdentityScopes.Impersonate };
+
+        var grouped = IdentityScopes.All
+            .Where(s => !universal.Contains(s))
+            .Select(s => (Scope: s, Sep: s.LastIndexOf(':')))
+            .Where(t => t.Sep > 0)
+            .GroupBy(t => t.Scope[..t.Sep], StringComparer.Ordinal)
+            .OrderBy(g => g.Key, StringComparer.Ordinal);
+
+        foreach (var g in grouped)
+        {
+            string? read = null, write = null;
+            foreach (var (scope, sep) in g)
+            {
+                var action = scope[(sep + 1)..];
+                if (action == "read") read = scope;
+                else if (action == "write") write = scope;
+                else read ??= scope; // future non-read/write action: show it, do not drop it
+            }
+            _resources.Add(new ResourceRow(g.Key, read, write));
+        }
+
+        _catalogTotal = IdentityScopes.All.Length;
+
+        try
+        {
+            var page = await Client.ListScopesAsync(0, 500);
+            foreach (var s in page.Items)
+                if (s.Name is { Length: > 0 } name)
+                    _byName[name] = s;
+
+            _seededCount = IdentityScopes.All.Count(s => _byName.ContainsKey(s));
+
+            var catalog = new HashSet<string>(IdentityScopes.All, StringComparer.Ordinal);
+            _customScopes.AddRange(page.Items
+                .Where(s => s.Name is { Length: > 0 } n && !catalog.Contains(n))
+                .OrderBy(s => s.Name, StringComparer.Ordinal));
+        }
+        catch (Exception ex) { _loadError = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private RenderFragment SeededBadge(string scopeName) => builder =>
+    {
+        if (_byName.TryGetValue(scopeName, out var s))
+        {
+            builder.OpenComponent<Microsoft.AspNetCore.Components.Routing.NavLink>(0);
+            builder.AddAttribute(1, "href", $"/admin/scopes/{Uri.EscapeDataString(s.Id)}");
+            builder.AddAttribute(2, "ChildContent", (RenderFragment)(b =>
+            {
+                b.OpenComponent<RdbBadge>(0);
+                b.AddAttribute(1, "Text", "seeded");
+                b.AddAttribute(2, "Variant", "online");
+                b.CloseComponent();
+            }));
+            builder.CloseComponent();
+        }
+        else
+        {
+            builder.OpenComponent<RdbBadge>(0);
+            builder.AddAttribute(1, "Text", "not seeded");
+            builder.AddAttribute(2, "Variant", "offline");
+            builder.CloseComponent();
+        }
+    };
+}

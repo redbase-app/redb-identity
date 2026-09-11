@@ -61,8 +61,13 @@ internal sealed class EventDispatchProcessor : IProcessor
             // the wider login OR-clause on every query.
             UserId = exchange.In.GetHeader<string>("user_id")
                 ?? ExtractStringFromDetails(detailsDict, "UserId"),
-            IpAddress = exchange.In.GetHeader<string>("ip_address"),
-            UserAgent = exchange.In.GetHeader<string>("user_agent"),
+            // ip_address / user_agent are internal names an HTTP client can no longer supply
+            // (the facade strips them on ingress); for HTTP-originated events fall back to the
+            // transport-owned, proxy-sanitized remote address and the real User-Agent header.
+            IpAddress = exchange.In.GetHeader<string>("ip_address")
+                ?? exchange.In.GetHeader<string>("redbHttp.RemoteAddress"),
+            UserAgent = exchange.In.GetHeader<string>("user_agent")
+                ?? exchange.In.GetHeader<string>("User-Agent"),
             Details = detailsDict
         };
 

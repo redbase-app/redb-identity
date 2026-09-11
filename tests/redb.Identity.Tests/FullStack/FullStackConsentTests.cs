@@ -60,7 +60,7 @@ public class FullStackConsentTests
                 ?? throw new Exception("Test user not found");
 
             var app = await redb.Query<ApplicationProps>()
-                .WhereRedb(o => o.ValueString == ProductionHttpFixture.TestClientId)
+                .Where(p => p.ClientId == ProductionHttpFixture.TestClientId)
                 .FirstOrDefaultAsync();
             app.Should().NotBeNull();
 
@@ -114,7 +114,7 @@ public class FullStackConsentTests
             var coreUser = await redb.UserProvider.GetUserByLoginAsync(ProductionHttpFixture.TestUsername)
                 ?? throw new Exception("Test user not found");
             var app = await redb.Query<ApplicationProps>()
-                .WhereRedb(o => o.ValueString == ProductionHttpFixture.TestClientId)
+                .Where(p => p.ClientId == ProductionHttpFixture.TestClientId)
                 .FirstOrDefaultAsync();
 
             await consentService.GrantAsync(coreUser.Id, app!.id, ["openid"]);
@@ -149,10 +149,10 @@ public class FullStackConsentTests
             var coreUser = await redb.UserProvider.GetUserByLoginAsync(ProductionHttpFixture.TestUsername)
                 ?? throw new Exception("Test user not found");
             var app1 = await redb.Query<ApplicationProps>()
-                .WhereRedb(o => o.ValueString == ProductionHttpFixture.TestClientId)
+                .Where(p => p.ClientId == ProductionHttpFixture.TestClientId)
                 .FirstOrDefaultAsync();
             var app2 = await redb.Query<ApplicationProps>()
-                .WhereRedb(o => o.ValueString == ProductionHttpFixture.TestPublicClientId)
+                .Where(p => p.ClientId == ProductionHttpFixture.TestPublicClientId)
                 .FirstOrDefaultAsync();
 
             await consentService.GrantAsync(coreUser.Id, app1!.id, ["openid"]);

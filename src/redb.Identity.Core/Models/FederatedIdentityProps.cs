@@ -7,10 +7,11 @@ namespace redb.Identity.Core.Models;
 /// One row per (user, provider) tuple. Stored in PROPS with:
 /// <list type="bullet">
 ///   <item><c>RedbObject.key = userId</c> — fast filter for "all my federations".</item>
-///   <item><c>RedbObject.value_string = "{providerId}:{externalSub}"</c> — UNIQUE per
-///   <c>_id_scheme</c>, enables O(1) reverse lookup at federated callback time.
-///   Indexed by partial unique index on <c>_objects(_value_string)
-///   WHERE _id_scheme = identity.federated_identity</c>.</item>
+///   <item><see cref="LinkKey"/> = <c>"{providerId}:{externalSub}"</c> — unique per scheme
+///   via <c>[RedbUnique]</c> (V4-UNIQUE), enables the O(1) reverse lookup at federated
+///   callback time. Historical note: the doc used to claim a partial unique index on
+///   <c>value_string</c> that no code ever created — duplicates were possible until Ф2
+///   (doc/v4/02); <c>value_string</c> is a transition mirror now.</item>
 /// </list>
 /// <para>
 /// Replaces the legacy <see cref="UserProps.ExternalIdentities"/> dictionary which only
@@ -40,4 +41,18 @@ public class FederatedIdentityProps
 
     /// <summary>UTC timestamp of the last successful federated login through this link.</summary>
     public DateTimeOffset? LastLoginAt { get; set; }
+
+    /// <summary>
+    /// Reverse-lookup key <c>"{ProviderId}:{ExternalSub}"</c> — unique per scheme via
+    /// <c>[RedbUnique]</c> on all three providers. Composed ONLY through
+    /// <see cref="MakeLinkKey"/> so the writer and every reader agree on the format.
+    /// Nullable on purpose: a pre-V4 row has no key until the transition backfill
+    /// repairs it (NULL never participates in uniqueness).
+    /// </summary>
+    [RedbUnique]
+    public string? LinkKey { get; set; }
+
+    /// <summary>The one place the composite key format lives.</summary>
+    public static string MakeLinkKey(string providerId, string externalSub)
+        => $"{providerId}:{externalSub}";
 }

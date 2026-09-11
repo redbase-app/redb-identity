@@ -63,7 +63,7 @@ public sealed class MeSessionsRevokeOthersTests
             ?? throw new InvalidOperationException("Test user missing");
 
         var app = await _fx.Redb.Query<ApplicationProps>()
-            .WhereRedb(o => o.ValueString == ProductionHttpFixture.TestPublicClientId)
+            .Where(p => p.ClientId == ProductionHttpFixture.TestPublicClientId)
             .FirstOrDefaultAsync()
             ?? throw new InvalidOperationException("Public PKCE client not seeded");
 
@@ -127,7 +127,7 @@ public sealed class MeSessionsRevokeOthersTests
             ?? throw new InvalidOperationException("Test user missing");
 
         var app = await _fx.Redb.Query<ApplicationProps>()
-            .WhereRedb(o => o.ValueString == ProductionHttpFixture.TestPublicClientId)
+            .Where(p => p.ClientId == ProductionHttpFixture.TestPublicClientId)
             .FirstOrDefaultAsync()
             ?? throw new InvalidOperationException("Public PKCE client not seeded");
 

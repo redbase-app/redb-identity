@@ -28,7 +28,7 @@ public class ConsentIntegrationTests
         // with that concurrent writer surfaces as
         // "A command is already in progress: INSERT INTO identity_audit_log".
         var app = await _fx.WithRedb(redb => redb.Query<ApplicationProps>()
-            .WhereRedb(o => o.ValueString == ProductionBootstrapFixture.TestClientId)
+            .Where(p => p.ClientId == ProductionBootstrapFixture.TestClientId)
             .FirstOrDefaultAsync());
         app.Should().NotBeNull();
         app!.Props.ConsentType = "explicit";
@@ -86,7 +86,7 @@ public class ConsentIntegrationTests
         // Direct DB reads via _fx.WithRedb to avoid sharing NpgsqlConnection with the
         // Worker's WireTap audit pipeline (see comment on AuthCode_ExplicitConsent_*).
         var app = await _fx.WithRedb(redb => redb.Query<ApplicationProps>()
-            .WhereRedb(o => o.ValueString == ProductionBootstrapFixture.TestClientIdPublic)
+            .Where(p => p.ClientId == ProductionBootstrapFixture.TestClientIdPublic)
             .FirstOrDefaultAsync());
         app.Should().NotBeNull();
         app!.Props.ConsentType.Should().BeOneOf("implicit", null);
@@ -117,7 +117,7 @@ public class ConsentIntegrationTests
         var (app, coreUser) = await _fx.WithRedb(async redb =>
         {
             var a = await redb.Query<ApplicationProps>()
-                .WhereRedb(o => o.ValueString == ProductionBootstrapFixture.TestClientId)
+                .Where(p => p.ClientId == ProductionBootstrapFixture.TestClientId)
                 .FirstOrDefaultAsync();
             var u = await redb.UserProvider.GetUserByLoginAsync(ProductionBootstrapFixture.TestUsername)
                 ?? throw new Exception("Test user not found");
@@ -160,10 +160,10 @@ public class ConsentIntegrationTests
         var (app1, app2, coreUser) = await _fx.WithRedb(async redb =>
         {
             var a1 = await redb.Query<ApplicationProps>()
-                .WhereRedb(o => o.ValueString == ProductionBootstrapFixture.TestClientId)
+                .Where(p => p.ClientId == ProductionBootstrapFixture.TestClientId)
                 .FirstOrDefaultAsync();
             var a2 = await redb.Query<ApplicationProps>()
-                .WhereRedb(o => o.ValueString == ProductionBootstrapFixture.TestClientIdPublic)
+                .Where(p => p.ClientId == ProductionBootstrapFixture.TestClientIdPublic)
                 .FirstOrDefaultAsync();
             var u = await redb.UserProvider.GetUserByLoginAsync(ProductionBootstrapFixture.TestUsername)
                 ?? throw new Exception("Test user not found");

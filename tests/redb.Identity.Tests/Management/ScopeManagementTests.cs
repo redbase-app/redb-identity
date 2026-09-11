@@ -73,7 +73,11 @@ public class ScopeManagementTests
     {
         var existing = MockRedbQuery.CreateObject<ScopeProps>(1, "api",
             new ScopeProps { ScopeName = "api" });
-        MockRedbQuery.Setup(_redb, new List<RedbObject<ScopeProps>> { existing });
+        // V4-UNIQUE: the duplicate pre-check is a GetByUniqueAsync probe now.
+        _redb.GetByUniqueAsync<ScopeProps>(
+                Arg.Any<System.Linq.Expressions.Expression<Func<ScopeProps, object?>>>(),
+                "api", Arg.Any<int>())
+            .Returns(existing);
 
         var exchange = CreateExchange("create", new CreateScopeRequest { Name = "api" });
 
@@ -106,7 +110,11 @@ public class ScopeManagementTests
     {
         var scope = MockRedbQuery.CreateObject<ScopeProps>(10, "Profile",
             new ScopeProps { ScopeName = "profile" });
-        MockRedbQuery.Setup(_redb, new List<RedbObject<ScopeProps>> { scope });
+        // V4-UNIQUE: read-by-name is a GetByUniqueAsync probe now.
+        _redb.GetByUniqueAsync<ScopeProps>(
+                Arg.Any<System.Linq.Expressions.Expression<Func<ScopeProps, object?>>>(),
+                "profile", Arg.Any<int>())
+            .Returns(scope);
 
         var exchange = CreateExchange("read", new Dictionary<string, object?> { ["name"] = "profile" });
 

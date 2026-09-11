@@ -37,9 +37,13 @@ public class AuditElasticsearchIntegrationTests : IAsyncLifetime
         "Host=localhost;Port=5432;Username=postgres;Password=1;Database=redb;Include Error Detail=true";
 
     private const string EsNodes = "http://localhost:9200";
-    private const string EsIndex = "identity-audit-test";
+    // Per-process index: the three provider suites (PG / MSSQL / SQLite) share one Elasticsearch
+    // container and are routinely run side by side; with a fixed name each process purged and
+    // counted the others' documents (3 expected, 2 or 4 found). The setup still deletes the
+    // index, so nothing accumulates across runs.
+    private static readonly string EsIndex = $"identity-audit-test-{Guid.NewGuid():N}";
 
-    private const string EsUri =
+    private static readonly string EsUri =
         "es://" + EsIndex + "?nodes=" + EsNodes + "&refresh=wait_for";
 
     private ServiceProvider _sp = null!;
@@ -148,6 +152,10 @@ public class AuditElasticsearchIntegrationTests : IAsyncLifetime
     {
         if (_ctx != null) await _ctx.Stop();
         if (_sp != null) await _sp.DisposeAsync();
+        // The index is per process (see EsIndex); drop it so runs do not accumulate indices in
+        // the shared container. Best-effort — an unreachable ES must not fail teardown.
+        try { using var _ = await _http.DeleteAsync($"{EsNodes}/{EsIndex}"); }
+        catch (HttpRequestException) { }
         _http.Dispose();
     }
 

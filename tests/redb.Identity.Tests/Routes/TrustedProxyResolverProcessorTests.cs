@@ -172,4 +172,42 @@ public sealed class TrustedProxyResolverProcessorTests
 
         ex.In.Headers[SocketIpHeader].Should().Be("2001:db8::1");
     }
+
+    [Fact]
+    public async Task UnparseableHop_StopsTheWalk_KeepsSocketIp()
+    {
+        // "unknown" is a legal RFC 7239 identifier a proxy may write for a peer it could not name.
+        // It must END the walk. Skipping it would carry the walk left into "203.0.113.7", which in
+        // this header is the client-supplied part, and hand the client its own throttle bucket.
+        var opts = new ReverseProxyOptions
+        {
+            TrustForwardedFor = true,
+            KnownProxies = { IPAddress.Parse("10.0.0.1") }
+        };
+        var sut = new TrustedProxyResolverProcessor(opts);
+        var ex = MakeExchange("10.0.0.1", "203.0.113.7, unknown");
+
+        await sut.Process(ex);
+
+        ex.In.Headers[SocketIpHeader].Should().Be("10.0.0.1");
+    }
+
+    [Fact]
+    public async Task HostAlreadyResolved_PeerNotInList_IsIdempotent()
+    {
+        // When the shared Kestrel host has already rewritten RemoteAddress to the client, the
+        // processor sees a peer that is not a trusted proxy and must leave it alone. This is what
+        // makes host-level and processor-level resolution safe to run together.
+        var opts = new ReverseProxyOptions
+        {
+            TrustForwardedFor = true,
+            KnownProxies = { IPAddress.Parse("10.0.0.1") }
+        };
+        var sut = new TrustedProxyResolverProcessor(opts);
+        var ex = MakeExchange("203.0.113.7", "203.0.113.7, 10.0.0.9");
+
+        await sut.Process(ex);
+
+        ex.In.Headers[SocketIpHeader].Should().Be("203.0.113.7");
+    }
 }

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using redb.Core;
+using redb.Core.Exceptions;
 using redb.Core.Models.Contracts;
 using redb.Core.Models.Entities;
 using redb.Core.Models.Users;
@@ -143,36 +144,32 @@ public sealed class LoginService
         if (_passwordHasher is not null && !string.IsNullOrEmpty(coreUser.Password)
             && NeedsRehash(_passwordHasher, coreUser.Password))
         {
-            // C12 / BUG: the rehash is fire-and-forget, so it MUST NOT capture the
-            // request-scoped IRedbService (that scope will be disposed as soon as the
-            // login response returns, causing any subsequent use to hang or throw).
-            // Instead, create a fresh DI scope and resolve a new IRedbService there.
-            var scopeFactory = _scopeFactory;
-            var userId = coreUser.Id;
-            var capturedPassword = password;
-            if (scopeFactory is not null)
+            // AWAITED, deliberately — this used to be Task.Run and that was the bug. A detached
+            // rehash lands about a second after the login that scheduled it (the hash itself costs
+            // ~250 ms before anything reaches the database), and an admin password reset fits into
+            // that window comfortably. When the rehash landed last it put the pre-login password
+            // back over the freshly set one: the account silently reverted to exactly the credential
+            // the operator had just retired, while their reset had long answered success. Measured
+            // on a live worker: nine resets out of nine lost when a login preceded them. A guard
+            // that checks the stored hash before writing does not close this — the expensive hashing
+            // sits between the check and the write, and the reset lands inside it.
+            //
+            // Awaiting removes the detached writer altogether: the login answers only after the
+            // rehash is on disk, so anything that changes the password afterwards writes last and
+            // wins, by construction. The cost is one extra hash on the login path — capped to one
+            // attempt per user per process below, because until the upgrade actually converges
+            // (see the rehash method's remarks) every local login would pay it.
+            //
+            // Through the request-scoped service, not a fresh scope: the fresh scope existed only
+            // because fire-and-forget outlived the request. Awaited, a second scope means a second
+            // connection — and on SQLite that second writer promptly hits 'database is locked'
+            // against the login's own connection. Same connection: no second writer, and inside a
+            // transacted route the rehash simply joins the route's transaction.
+            if (RehashAttempted.TryAdd(coreUser.Id, 0))
             {
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        using var rehashScope = scopeFactory.CreateScope();
-                        var rehashRedb = rehashScope.ServiceProvider.GetRequiredService<IRedbService>();
-                        var freshUser = await rehashRedb.UserProvider.GetUserByIdAsync(userId).ConfigureAwait(false);
-                        if (freshUser is null) return;
-                        await rehashRedb.UserProvider.SetPasswordAsync(freshUser, capturedPassword, currentUser: freshUser)
-                            .ConfigureAwait(false);
-                        _logger.LogDebug("Password hash upgraded to current algorithm for user id={UserId}", userId);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Password hash auto-rehash failed for user id={UserId}", userId);
-                    }
-                });
-            }
-            else
-            {
-                _logger.LogDebug("Password hash rehash skipped for user id={UserId}: no IServiceScopeFactory available", userId);
+                await RehashPasswordIfUnchangedAsync(
+                    _redb, coreUser.Id, password, coreUser.Password, _logger)
+                    .ConfigureAwait(false);
             }
         }
 
@@ -241,6 +238,63 @@ public sealed class LoginService
     };
 
     /// <summary>
+    /// Users whose rehash was already attempted in this process. The upgrade does not currently
+    /// converge — the write goes through the core provider's own hasher, and when that is BCrypt the
+    /// "upgraded" hash is BCrypt again, so <see cref="NeedsRehash"/> stays true forever. Without this
+    /// cap every local login would pay the extra awaited hash; with it, one per user per process.
+    /// The convergence itself (writing with this module's Argon2id) needs a way to hand the core a
+    /// ready-made hash, which is a redb.Core API question — reported, not worked around.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<long, byte> RehashAttempted = new();
+
+    /// <summary>
+    /// C12 upgrade-on-login, second half. Runs on the caller's own <see cref="IRedbService"/> — it
+    /// is awaited from the login path (see the call site for why fire-and-forget was a security bug,
+    /// not a latency optimisation), so a separate DI scope would only add a second connection, and
+    /// on SQLite a second writer means 'database is locked' against the login's own.
+    /// <para>Internal and awaitable so both halves are testable.</para>
+    /// </summary>
+    /// <returns><c>true</c> when the hash was rewritten; <c>false</c> when skipped or failed.</returns>
+    internal static async Task<bool> RehashPasswordIfUnchangedAsync(
+        IRedbService rehashRedb, long userId, string password, string hashAtLogin, ILogger? logger)
+    {
+        try
+        {
+            var freshUser = await rehashRedb.UserProvider.GetUserByIdAsync(userId).ConfigureAwait(false);
+            if (freshUser is null) return false;
+
+            // Guard: rehash only while the stored hash is still the one this login verified.
+            // This task lands roughly a second after the login that scheduled it — Argon2id is slow
+            // by design, Task.Run adds scheduling, the fresh scope adds a connection — and an admin
+            // reset fits into that window comfortably. Writing without the check would put the
+            // pre-login password back over the freshly set one: the account silently reverts to
+            // exactly the credential the operator was trying to retire, while their reset call has
+            // long since answered success. Observed on a live worker, nine times out of nine.
+            //
+            // The check narrows the window to the read-to-write gap below; closing it fully needs a
+            // compare-and-set on the UPDATE itself (WHERE _password = @expected), which is a
+            // redb.Core API question, not this method's.
+            if (!string.Equals(freshUser.Password, hashAtLogin, StringComparison.Ordinal))
+            {
+                logger?.LogDebug(
+                    "Password rehash skipped for user id={UserId}: the stored hash changed since login",
+                    userId);
+                return false;
+            }
+
+            await rehashRedb.UserProvider.SetPasswordAsync(freshUser, password, currentUser: freshUser)
+                .ConfigureAwait(false);
+            logger?.LogDebug("Password hash upgraded to current algorithm for user id={UserId}", userId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Password hash auto-rehash failed for user id={UserId}", userId);
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Find-or-create local _users + UserProps for an externally authenticated user.
     /// On subsequent logins, updates profile from external source.
     /// </summary>
@@ -251,7 +305,7 @@ public sealed class LoginService
     }
 
     /// <summary>
-    /// Resolves a federated user by reverse lookup on <c>value_string</c> (indexed, O(1)).
+    /// Resolves a federated user by reverse lookup on the <c>[RedbUnique]</c> LinkKey (one index probe).
     /// Used by the federation callback flow where there is no username/password — only
     /// an <see cref="ExternalAuthResult"/> from the external IdP.
     /// On first login: auto-provisions a local user (login = email ?? sub).
@@ -263,13 +317,10 @@ public sealed class LoginService
         if (ext is null || !ext.Succeeded || string.IsNullOrEmpty(ext.ExternalId))
             return LoginResult.Failed("Invalid external authentication result.");
 
-        // H8: per-link reverse lookup via FederatedIdentityProps (UNIQUE on value_string).
-        // O(1) — supports many federated identities per user.
-        var valueString = $"{providerName}:{ext.ExternalId}";
-        var link = await _redb.Query<FederatedIdentityProps>()
-            .WhereRedb(o => o.ValueString == valueString)
-            .FirstOrDefaultAsync()
-            .ConfigureAwait(false);
+        // H8/V4-UNIQUE: per-link reverse lookup via the [RedbUnique] LinkKey — one probe of
+        // the unique index. O(1) — supports many federated identities per user.
+        var linkKey = FederatedIdentityProps.MakeLinkKey(providerName, ext.ExternalId);
+        var link = await FindLinkAsync(linkKey).ConfigureAwait(false);
 
         long? linkedUserId = link?.key;
 
@@ -411,7 +462,7 @@ public sealed class LoginService
 
         if (oidcObj is null)
         {
-            oidcObj = new RedbObject<UserProps>(new UserProps());
+            oidcObj = new RedbObject<UserProps>(new UserProps { UserId = coreUser.Id });
             oidcObj.name = username;
             oidcObj.key = coreUser.Id;
             oidcObj.value_guid = Guid.NewGuid();
@@ -509,51 +560,100 @@ public sealed class LoginService
     /// <summary>
     /// Upserts a single (user, provider) federated link in the per-link PROPS scheme.
     /// Idempotent — safe to call on every successful federated login. The
-    /// <c>value_string = "{provider}:{sub}"</c> is UNIQUE per scheme via the partial
-    /// index on <c>_objects</c>, so concurrent inserts of the same external identity
-    /// would collide at the DB level (caller logs and surfaces as a generic federation
-    /// error).
+    /// <c>[RedbUnique]</c> <see cref="FederatedIdentityProps.LinkKey"/> makes concurrent
+    /// inserts of one external identity collide at the DB level on every provider
+    /// (V4-UNIQUE; before Ф2 no index actually existed and duplicates were possible);
+    /// the loser re-reads the winner and runs the same integrity check.
     /// </summary>
     private async Task UpsertFederatedIdentityLinkAsync(
         long userId, string providerName, ExternalAuthResult ext, bool isNewLink)
     {
-        var valueString = $"{providerName}:{ext.ExternalId}";
-        var existing = await _redb.Query<FederatedIdentityProps>()
-            .WhereRedb(o => o.ValueString == valueString)
-            .FirstOrDefaultAsync()
-            .ConfigureAwait(false);
+        var linkKey = FederatedIdentityProps.MakeLinkKey(providerName, ext.ExternalId);
+        var existing = await FindLinkAsync(linkKey).ConfigureAwait(false);
 
         var now = _timeProvider.GetUtcNow();
-        var obj = existing ?? new RedbObject<FederatedIdentityProps>(new FederatedIdentityProps
-        {
-            ProviderId = providerName,
-            ExternalSub = ext.ExternalId,
-            LinkedAt = now,
-        });
 
         if (existing is null)
         {
-            obj.name = $"{providerName}:{ext.ExternalId}";
-            obj.key = userId;
-            obj.value_string = valueString;
+            var fresh = new RedbObject<FederatedIdentityProps>(new FederatedIdentityProps
+            {
+                ProviderId = providerName,
+                ExternalSub = ext.ExternalId,
+                LinkKey = linkKey,
+                LinkedAt = now,
+                ExternalEmail = ext.Email,
+                ExternalDisplayName = ext.DisplayName,
+                LastLoginAt = now,
+            });
+            fresh.name = linkKey;
+            fresh.key = userId;
+
+            try
+            {
+                await _redb.SaveAsync(fresh).ConfigureAwait(false);
+                return;
+            }
+            catch (RedbUniqueViolationException)
+            {
+                // Lost the creation race on the [RedbUnique] LinkKey. Deliberately NOT
+                // SaveByUniqueAsync: its last-writer-wins would silently re-point a link
+                // owned by ANOTHER user. Re-read the winner and fall through to the same
+                // integrity check every non-race path runs.
+                existing = await FindLinkAsync(linkKey).ConfigureAwait(false);
+                if (existing is null)
+                    throw; // key vanished between the violation and the re-read; surface it
+            }
         }
-        else if (existing.key != userId)
+
+        if (existing.key != userId)
         {
             // Hard data integrity: same external sub linked to a different local user.
-            // Should never happen because of the unique constraint, but log and refuse
-            // rather than silently re-pointing the link.
+            // Log and refuse rather than silently re-pointing the link.
             _securityLogger.LogError(
-                "FederatedIdentityProps integrity violation: value_string={ValueString} already links to userId={ExistingUserId}, refused re-link to userId={NewUserId}",
-                valueString, existing.key, userId);
+                "FederatedIdentityProps integrity violation: LinkKey={LinkKey} already links to userId={ExistingUserId}, refused re-link to userId={NewUserId}",
+                linkKey, existing.key, userId);
             throw new InvalidOperationException(
-                $"External identity '{valueString}' is already linked to a different user.");
+                $"External identity '{linkKey}' is already linked to a different user.");
         }
 
-        obj.Props.ExternalEmail = ext.Email;
-        obj.Props.ExternalDisplayName = ext.DisplayName;
-        obj.Props.LastLoginAt = now;
+        existing.Props.ExternalEmail = ext.Email;
+        existing.Props.ExternalDisplayName = ext.DisplayName;
+        existing.Props.LastLoginAt = now;
 
-        await _redb.SaveAsync(obj).ConfigureAwait(false);
+        await _redb.SaveAsync(existing).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The one lookup for a federated link (V4-UNIQUE): a probe of the <c>[RedbUnique]</c>
+    /// LinkKey index, with a transition fallback to the pre-V4 <c>value_string</c> mirror.
+    /// The fallback matters: a legacy row the backfill has not repaired yet MUST still
+    /// resolve — a miss on the login path would auto-provision a SECOND local user for an
+    /// already-linked external identity. A row found through the fallback is repaired in
+    /// place. The fallback goes away at teardown (doc/v4/04).
+    /// </summary>
+    private async Task<RedbObject<FederatedIdentityProps>?> FindLinkAsync(string linkKey)
+    {
+        var link = await _redb.GetByUniqueAsync<FederatedIdentityProps>(p => p.LinkKey, linkKey)
+            .ConfigureAwait(false);
+        if (link is not null)
+            return link;
+
+        link = await _redb.Query<FederatedIdentityProps>()
+            .WhereRedb(o => o.ValueString == linkKey)
+            .FirstOrDefaultAsync()
+            .ConfigureAwait(false);
+        if (link is not null && link.Props.LinkKey is null)
+        {
+            link.Props.LinkKey = linkKey;
+            try { await _redb.SaveAsync(link).ConfigureAwait(false); }
+            catch (RedbUniqueViolationException)
+            {
+                // A concurrent repair of the same legacy row won; harmless — re-read it.
+                return await _redb.GetByUniqueAsync<FederatedIdentityProps>(p => p.LinkKey, linkKey)
+                    .ConfigureAwait(false);
+            }
+        }
+        return link;
     }
 
     /// <summary>
@@ -575,7 +675,7 @@ public sealed class LoginService
 
         if (oidcObj is null)
         {
-            oidcObj = new RedbObject<UserProps>(new UserProps());
+            oidcObj = new RedbObject<UserProps>(new UserProps { UserId = userId });
             oidcObj.key = userId;
             oidcObj.value_guid = Guid.NewGuid();
         }

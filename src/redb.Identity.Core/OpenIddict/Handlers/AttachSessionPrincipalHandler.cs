@@ -140,7 +140,8 @@ internal sealed class AttachSessionPrincipalHandler
             // before token issuance.
             if (oidcObj is null)
             {
-                oidcObj = new redb.Core.Models.Entities.RedbObject<UserProps>(new UserProps())
+                oidcObj = new redb.Core.Models.Entities.RedbObject<UserProps>(
+                    new UserProps { UserId = coreUser.Id }) // V4-UNIQUE
                 {
                     name = coreUser.Login,
                     key = coreUser.Id,

@@ -11,6 +11,16 @@ namespace redb.Identity.Core.Models;
 [RedbScheme("identity.user")]
 public class UserProps
 {
+    /// <summary>
+    /// The owning user's <c>_users._id</c> — unique per scheme via <c>[RedbUnique]</c>
+    /// (V4-UNIQUE, doc/v4/03: replaces the artificial <c>UX_identity_user_ext_user_id</c>
+    /// index on <c>_objects._key</c>). Written alongside <c>RedbObject.key</c> at every
+    /// creation site; <c>key</c> stays for the many <c>Key ==</c> queries. Nullable so a
+    /// pre-V4 row stays outside the index until the transition backfill copies the key in.
+    /// </summary>
+    [RedbUnique]
+    public long? UserId { get; set; }
+
     // --- OIDC Standard Claims (profile scope) ---
     //
     // The full set OIDC Core §5.1 defines for `scope=profile`. The OIDF conformance suite

@@ -178,6 +178,7 @@ internal sealed class AccountRegisterProcessor : IProcessor
         var nowUtc = DateTimeOffset.UtcNow;
         var propsObj = new RedbObject<UserProps>(new UserProps
         {
+            UserId = coreUser.Id, // V4-UNIQUE: written alongside key at every creation site
             EmailVerified = false,
             PasswordChangedAt = nowUtc,
             HasUserPassword = true,

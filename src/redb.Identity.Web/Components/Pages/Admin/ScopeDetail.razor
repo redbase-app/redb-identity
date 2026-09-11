@@ -1,0 +1,141 @@
+@page "/admin/scopes/{Id}"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    OAuth scope detail — full page (Phase 3, П5: pages-not-dialogs). Replaces the
+    Scopes.razor edit modal; delete moved here behind the typed-confirm dialog.
+*@
+
+<div style="margin-bottom: var(--space-3);">
+    <NavLink href="/admin/scopes" class="btn btn-ghost" style="padding: 0; color: var(--accent-primary);">← Go back to Scopes</NavLink>
+</div>
+
+@if (_loading) { <p class="text-secondary">Loading…</p> }
+else if (_loadError is not null) { <p class="text-error">@_loadError</p> }
+else if (_s is not null)
+{
+    <div style="display:flex; gap: var(--space-4); align-items: flex-start; margin-bottom: var(--space-4);">
+        <div class="apps-list__avatar" style="font-size: 1.5rem; width: 56px; height: 56px;">@char.ToUpperInvariant(_s.Name is { Length: > 0 } n ? n[0] : 'S')</div>
+        <div style="flex: 1;">
+            <h1 style="margin: 0;"><code>@_s.Name</code></h1>
+            @if (!string.IsNullOrEmpty(_form.DisplayName))
+            {
+                <p class="text-secondary" style="margin: var(--space-1) 0 0 0;">@_form.DisplayName</p>
+            }
+        </div>
+        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">@(_saving ? "Saving…" : "Save")</button>
+    </div>
+
+    <div class="card" style="max-width: 640px;">
+        <section class="app-detail__section">
+            <h3 class="app-detail__section-title">Definition</h3>
+            <dl class="app-detail__kv">
+                <dt>Name</dt><dd><code>@_s.Name</code> (immutable)</dd>
+                <dt>Internal id</dt><dd><code>@_s.Id</code></dd>
+            </dl>
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Display name</span>
+                <input class="app-detail__input" @bind="_form.DisplayName" />
+            </label>
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Description</span>
+                <input class="app-detail__input" @bind="_form.Description" />
+            </label>
+        </section>
+
+        <section class="app-detail__section">
+            <h3 class="app-detail__section-title">Resources</h3>
+            <label class="app-detail__field">
+                <textarea rows="4" class="app-detail__input app-detail__input--mono" placeholder="one audience per line" @bind="_form.Resources"></textarea>
+                <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Resource servers this scope grants access to — each becomes an <code>aud</code> of issued tokens.</span>
+            </label>
+        </section>
+
+        <section class="app-detail__section">
+            <h3 class="app-detail__section-title">Danger zone</h3>
+            <p class="text-secondary" style="margin-top: 0;">Deleting a scope removes it from the catalogue; clients that still request it get <code>invalid_scope</code>.</p>
+            <button class="btn btn-danger" @onclick="DeleteAsync">Delete this scope</button>
+        </section>
+
+        @if (_saveError is not null) { <p class="text-error">@_saveError</p> }
+    </div>
+}
+
+<UiTypedConfirmDialog @ref="_confirm" />
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    private sealed class FormState
+    {
+        public string? DisplayName, Description;
+        public string Resources = "";
+    }
+
+    private ScopeResponse? _s;
+    private FormState _form = new();
+    private bool _loading = true;
+    private bool _saving;
+    private string? _loadError;
+    private string? _saveError;
+    private UiTypedConfirmDialog? _confirm;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _loadError = null;
+        try
+        {
+            _s = await Client.GetScopeAsync(Id);
+            _form = new FormState
+            {
+                DisplayName = _s.DisplayName,
+                Description = _s.Description,
+                Resources = string.Join("\n", _s.Resources ?? Array.Empty<string>()),
+            };
+        }
+        catch (Exception ex) { _loadError = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_s is null) return;
+        _saving = true; _saveError = null;
+        try
+        {
+            _s = await Client.UpdateScopeAsync(_s.Id, new UpdateScopeRequest
+            {
+                Id = _s.Id,
+                DisplayName = _form.DisplayName,
+                Description = _form.Description,
+                Resources = _form.Resources.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                ConcurrencyToken = _s.ConcurrencyToken,
+            });
+            Toast.Success("Saved");
+        }
+        catch (Exception ex) { _saveError = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_s is null || _confirm is null) return;
+        var ok = await _confirm.ShowAsync(
+            expectedText: _s.Name ?? _s.Id,
+            title: "Delete scope",
+            message: $"This deletes the scope '{_s.Name}'. Clients still requesting it will get invalid_scope.",
+            confirmLabel: "Delete this scope");
+        if (!ok) return;
+
+        try
+        {
+            await Client.DeleteScopeAsync(_s.Id);
+            Toast.Success($"Scope '{_s.Name}' deleted");
+            Nav.NavigateTo("/admin/scopes");
+        }
+        catch (Exception ex) { Toast.Show(ex.Message, "error"); }
+    }
+}

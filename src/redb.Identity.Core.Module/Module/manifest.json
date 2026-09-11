@@ -4,5 +4,5 @@
   "EntryPoints": [
     "redb.Identity.Core.Module.dll"
   ],
-  "Dependencies": []
+  "Dependencies": ["redb.Identity.Contracts"]
 }

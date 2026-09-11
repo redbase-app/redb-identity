@@ -47,7 +47,10 @@ public sealed class MfaRecoveryProcessorTests
         var ctx = Substitute.For<redb.Core.Data.IRedbContext>();
         ctx.BeginTransactionAsync().Returns(Task.FromResult(tx));
         _redb.Context.Returns(ctx);
-        _redb.LockForUpdateAsync(Arg.Any<long[]>()).Returns(Task.CompletedTask);
+        // LockForUpdateAsync returns Task<int> (locked-row count) and, since the
+        // CancellationToken waves, has a second (long[], ct) overload — stub both.
+        _redb.LockForUpdateAsync(Arg.Any<long[]>()).Returns(0);
+        _redb.LockForUpdateAsync(Arg.Any<long[]>(), Arg.Any<CancellationToken>()).Returns(0);
 
         var sp = BuildServiceProvider(_mfaService, _redb);
         _sut = new MfaRecoveryProcessor(sp);

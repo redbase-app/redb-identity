@@ -69,10 +69,27 @@ internal sealed class IdentitySchemaInitListener : IRouteLifecycleListener
             var syncMethod = typeof(ISchemeSyncProvider)
                 .GetMethod(nameof(ISchemeSyncProvider.SyncSchemeAsync))
                 ?? throw new InvalidOperationException("ISchemeSyncProvider.SyncSchemeAsync not found.");
+
+            // The call below is by reflection because the type is only known at runtime, and that makes
+            // it invisible to the compiler: when SyncSchemeAsync gained its CancellationToken, this site
+            // kept building without a word and threw "Parameter count mismatch" on the first type at
+            // startup. The loop then never ran, no scheme was synchronised, and every listener after it
+            // failed with "Scheme for type 'X' not found" — a dozen symptoms with nothing pointing here.
+            // So the arity is checked once, up front, and says what actually broke.
+            var syncParameters = syncMethod.GetParameters();
+            if (syncParameters.Length != 1 || syncParameters[0].ParameterType != typeof(CancellationToken))
+            {
+                throw new InvalidOperationException(
+                    "ISchemeSyncProvider.SyncSchemeAsync<T> no longer takes exactly one CancellationToken " +
+                    $"(now: {string.Join(", ", syncParameters.Select(p => p.ParameterType.Name))}). " +
+                    "This reflection call site in IdentitySchemaInitListener must be updated to match, " +
+                    "otherwise no Identity scheme is synchronised and the whole module fails to start.");
+            }
+
             foreach (var t in IdentitySchemaRegistry.Types)
             {
                 var generic = syncMethod.MakeGenericMethod(t);
-                var task = (Task?)generic.Invoke(redb, null);
+                var task = (Task?)generic.Invoke(redb, [ct]);
                 if (task is not null) await task.ConfigureAwait(false);
 
                 // CRITICAL: explicitly register each (scheme_id ↔ CLR Type)

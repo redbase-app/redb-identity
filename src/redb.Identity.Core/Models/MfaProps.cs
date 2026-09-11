@@ -10,6 +10,17 @@ namespace redb.Identity.Core.Models;
 [RedbScheme("identity.mfa")]
 public class MfaProps
 {
+    /// <summary>
+    /// The owning user's <c>_users._id</c> — unique per scheme via <c>[RedbUnique]</c>
+    /// (V4-UNIQUE, doc/v4/03: replaces the artificial <c>UX_identity_mfa_user_id</c> index
+    /// on <c>_objects._key</c>). Written alongside <c>RedbObject.key</c> in
+    /// <c>MfaService.LoadOrCreateMfaPropsAsync</c> — the single creation site; <c>key</c>
+    /// stays for the existing <c>Key ==</c> queries. Nullable so a pre-V4 row stays outside
+    /// the index until the transition backfill copies the key in.
+    /// </summary>
+    [RedbUnique]
+    public long? UserId { get; set; }
+
     /// <summary>Whether MFA is globally enabled for this user.</summary>
     public bool Enabled { get; set; }
 

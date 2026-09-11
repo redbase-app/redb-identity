@@ -132,6 +132,7 @@ internal sealed class UserManagementProcessor : IProcessor
         // (avoids cross-Identity-instance bigint collisions on _users._id sequences).
         var oidcObj = new RedbObject<UserProps>(new UserProps
         {
+            UserId = coreUser.Id, // V4-UNIQUE
             GivenName = request.GivenName,
             FamilyName = request.FamilyName,
             Picture = request.Picture,
@@ -253,7 +254,7 @@ internal sealed class UserManagementProcessor : IProcessor
             || request.Address != null || request.CustomClaims is { Count: > 0 }))
         {
             // Create OIDC props on first OIDC field update
-            oidcObj = new RedbObject<UserProps>(new UserProps());
+            oidcObj = new RedbObject<UserProps>(new UserProps { UserId = coreUser.Id });
             oidcObj.name = coreUser.Login;
             oidcObj.key = coreUser.Id;
             oidcObj.value_guid = Guid.NewGuid();

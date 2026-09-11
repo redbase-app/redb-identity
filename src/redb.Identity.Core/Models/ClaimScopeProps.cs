@@ -11,17 +11,19 @@ namespace redb.Identity.Core.Models;
 /// <see cref="ClaimScopeAssignmentProps"/>. A token issued for an application gets
 /// claims from: global mappers ∪ application-overlay mappers ∪ assigned-scopes mappers.
 /// </para>
-/// Base fields used: <c>name</c> = unique scope identifier (slug-like, indexed via
-/// <c>value_string</c>).
+/// Base fields used: <c>name</c> = display name; the unique identifier lives in
+/// <see cref="ScopeName"/> under <c>[RedbUnique]</c>.
 /// </summary>
 [RedbScheme("identity.claim_scope")]
 public class ClaimScopeProps
 {
     /// <summary>
-    /// Unique scope identifier (slug). Stored in root <c>_objects.value_string</c>
-    /// for indexed uniqueness lookup.
+    /// Unique scope identifier (slug) — unique per scheme via <c>[RedbUnique]</c> on all
+    /// three providers. V4-UNIQUE: replaced the <c>[RedbIgnore]</c> + <c>value_string</c>
+    /// mirror, which was never actually backed by an index (the doc used to promise one
+    /// that did not exist); duplicates were possible until this attribute.
     /// </summary>
-    [RedbIgnore]
+    [RedbUnique]
     public string? ScopeName { get; set; }
 
     /// <summary>Free-form admin description.</summary>

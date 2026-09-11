@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using redb.Identity.Core.Configuration;
 using redb.Route.Abstractions;
+using redb.Route.Http;
 
 namespace redb.Identity.Core.Routes.Processors;
 
@@ -11,6 +12,7 @@ namespace redb.Identity.Core.Routes.Processors;
 /// throttling (C1) and other client-IP-aware logic observe it.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Behavior is controlled by <see cref="ReverseProxyOptions"/>:
 /// <list type="bullet">
 ///   <item><description>If <c>TrustForwardedFor=false</c> (default) — does nothing,
@@ -23,18 +25,31 @@ namespace redb.Identity.Core.Routes.Processors;
 ///   whitelisted — does nothing (an attacker cannot forge <c>X-Forwarded-For</c> from an
 ///   untrusted hop).</description></item>
 /// </list>
-/// Implements the same trust model as ASP.NET Core's <c>ForwardedHeadersMiddleware</c> but
-/// works at the redb.Route processor layer, which is the only layer redb.Identity owns.
+/// </para>
+/// <para>
+/// The walk itself is <see cref="ForwardedHeaderResolver"/> from the shared HTTP host: one
+/// implementation of the trust model for the whole ecosystem, including its rule that an entry
+/// which does not parse ends the walk rather than being skipped. The primary place for this
+/// resolution is the host (<c>HttpHostingOptions.TrustedProxies</c>), which rewrites the address
+/// and the scheme before any consumer runs. This processor remains for a context whose host did
+/// not resolve, and it is idempotent after the host did: the address it then sees is the client's,
+/// which is not a trusted proxy, so it leaves it alone.
+/// </para>
 /// </remarks>
 internal sealed class TrustedProxyResolverProcessor : IProcessor
 {
     private readonly ReverseProxyOptions _options;
+    private readonly TrustedProxyOptions _trust;
     private readonly ILogger _logger;
 
     public TrustedProxyResolverProcessor(ReverseProxyOptions options, ILogger? logger = null)
     {
         _options = options;
         _logger = logger ?? NullLogger.Instance;
+
+        _trust = new TrustedProxyOptions();
+        foreach (var ip in options.KnownProxies) _trust.KnownProxies.Add(TrustedProxyOptions.Normalize(ip));
+        foreach (var net in options.KnownNetworks) _trust.KnownNetworks.Add(net);
     }
 
     public Task Process(IExchange exchange, CancellationToken ct = default)
@@ -47,7 +62,7 @@ internal sealed class TrustedProxyResolverProcessor : IProcessor
             || !IPAddress.TryParse(socketIpStr, out var socketIp))
             return Task.CompletedTask;
 
-        if (!IsTrustedProxy(socketIp))
+        if (!_trust.IsTrusted(socketIp))
         {
             _logger.LogDebug(
                 "TrustedProxyResolver: socket peer {SocketIp} is not whitelisted; X-Forwarded-For ignored",
@@ -55,70 +70,18 @@ internal sealed class TrustedProxyResolverProcessor : IProcessor
             return Task.CompletedTask;
         }
 
-        if (!TryGetForwardedForChain(exchange, out var chain) || chain.Count == 0)
+        var forwardedFor = exchange.In.Headers.TryGetValue(ForwardedHeaderResolver.ForwardedFor, out var raw)
+            ? raw?.ToString()
+            : null;
+
+        var resolved = ForwardedHeaderResolver.Resolve(socketIp, forwardedFor, forwardedProto: null, _trust);
+        if (!resolved.AddressApplied || resolved.ClientAddress is null)
             return Task.CompletedTask;
 
-        // Walk right-to-left: the rightmost entry is the IP the *trusted* proxy itself saw
-        // as its client. If THAT IP is also trusted (multi-hop), continue walking left
-        // until we hit the first untrusted IP — that's the real client.
-        for (var i = chain.Count - 1; i >= 0; i--)
-        {
-            if (!IPAddress.TryParse(chain[i], out var hop))
-                continue;
-
-            if (IsTrustedProxy(hop))
-                continue;
-
-            exchange.In.Headers["redbHttp.RemoteAddress"] = hop.ToString();
-            _logger.LogDebug(
-                "TrustedProxyResolver: socket peer {SocketIp} is trusted; resolved client IP from X-Forwarded-For: {ClientIp}",
-                socketIpStr, hop);
-            return Task.CompletedTask;
-        }
-
-        // Whole chain consists of trusted hops; leave the socket IP in place.
+        exchange.In.Headers["redbHttp.RemoteAddress"] = resolved.ClientAddress.ToString();
+        _logger.LogDebug(
+            "TrustedProxyResolver: socket peer {SocketIp} is trusted; resolved client IP from X-Forwarded-For: {ClientIp}",
+            socketIpStr, resolved.ClientAddress);
         return Task.CompletedTask;
-    }
-
-    private bool IsTrustedProxy(IPAddress ip)
-    {
-        foreach (var known in _options.KnownProxies)
-        {
-            if (known.Equals(ip)) return true;
-        }
-        foreach (var network in _options.KnownNetworks)
-        {
-            if (network.Contains(ip)) return true;
-        }
-        return false;
-    }
-
-    private static bool TryGetForwardedForChain(IExchange exchange, out List<string> chain)
-    {
-        chain = new List<string>();
-        if (!exchange.In.Headers.TryGetValue("X-Forwarded-For", out var raw) || raw is null)
-            return false;
-
-        var s = raw.ToString();
-        if (string.IsNullOrWhiteSpace(s))
-            return false;
-
-        foreach (var part in s.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            // Strip optional :port (IPv4) or [v6]:port suffix produced by some proxies.
-            var token = part;
-            if (token.StartsWith('[') && token.Contains(']'))
-            {
-                var end = token.IndexOf(']');
-                token = token.Substring(1, end - 1);
-            }
-            else if (token.Count(c => c == ':') == 1)
-            {
-                // IPv4:port — strip port. Bare IPv6 has multiple colons; leave as-is.
-                token = token.Split(':')[0];
-            }
-            chain.Add(token);
-        }
-        return chain.Count > 0;
     }
 }

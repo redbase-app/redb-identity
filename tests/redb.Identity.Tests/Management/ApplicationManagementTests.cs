@@ -160,7 +160,11 @@ public class ApplicationManagementTests
     {
         var app = MockRedbQuery.CreateObject<ApplicationProps>(10, "Test App",
             new ApplicationProps { ClientId = "by-cid" });
-        MockRedbQuery.Setup(_redb, new List<RedbObject<ApplicationProps>> { app });
+        // V4-UNIQUE: read-by-clientId is a GetByUniqueAsync probe now.
+        _redb.GetByUniqueAsync<ApplicationProps>(
+                Arg.Any<System.Linq.Expressions.Expression<Func<ApplicationProps, object?>>>(),
+                "by-cid", Arg.Any<int>())
+            .Returns(app);
 
         var exchange = CreateExchange("read", new Dictionary<string, object?> { ["clientId"] = "by-cid" });
 

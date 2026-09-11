@@ -10,10 +10,14 @@ namespace redb.Identity.Core.Models;
 public class ApplicationProps
 {
     /// <summary>
-    /// OAuth client_id (unique).
-    /// Stored in root <c>_objects.value_string</c> (indexed), not in PROPS.
+    /// OAuth client_id — unique per scheme, enforced by the database via <c>[RedbUnique]</c>
+    /// (hash in <c>_values._unique</c>, partial unique index, all three providers).
+    /// Point lookup: <c>GetByUniqueAsync&lt;ApplicationProps&gt;(p =&gt; p.ClientId, id)</c>.
+    /// V4-UNIQUE: replaced the <c>[RedbIgnore]</c> + <c>_objects.value_string</c> mirror
+    /// (which SQL Server could not index); the mirror is no longer written — legacy rows
+    /// are repaired by the boot backfill (doc/v4/04 §3).
     /// </summary>
-    [RedbIgnore]
+    [RedbUnique]
     public string? ClientId { get; set; }
 
     /// <summary>Hashed client_secret (confidential clients only).</summary>
@@ -123,6 +127,15 @@ public class ApplicationProps
     /// id_token to be consumed by federated downstream resource servers.
     /// </summary>
     public string[]? IdTokenAudiences { get; set; }
+
+    /// <summary>
+    /// Resource indicators attached to issued <c>access_token</c>s as <c>aud</c> values
+    /// (RFC 9068 §2.2), in addition to the <c>Resources</c> of the granted scopes.
+    /// <see cref="OpenIddict.Handlers.AttachAccessTokenResources"/> composes the final set;
+    /// when neither source names a resource, the OP's own audience
+    /// (<c>RedbIdentityOptions.DefaultAccessTokenAudience</c>) is used instead.
+    /// </summary>
+    public string[]? AccessTokenAudiences { get; set; }
 
     /// <summary>
     /// A.6: RFC 9101 (JAR) — JWT signing algorithm the client is expected to use

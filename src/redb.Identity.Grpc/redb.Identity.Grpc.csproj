@@ -13,7 +13,7 @@
       See doc/PHASE-8-FACADE-ISOLATION-PLAN-RU.md and doc/gRPC/ARCHITECTURE.md.
     -->
     <ProjectReference Include="..\redb.Identity.Contracts\redb.Identity.Contracts.csproj" />
-    <PackageReference Include="redb.Route.Grpc" Version="3.7.2" />
+    <PackageReference Include="redb.Route.Grpc" Version="4.0.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -34,7 +34,7 @@
       the contract, and the copy that drifts is the one that accepts what the other rejects.
     -->
     <ProjectReference Include="..\redb.Identity.Management\redb.Identity.Management.csproj" />
-    <PackageReference Include="redb.Route.Controllers" Version="3.7.2" />
+    <PackageReference Include="redb.Route.Controllers" Version="4.0.0" />
     <Protobuf Include="..\redb.Identity.Contracts\Protos\identity.v1.proto"
               ProtoRoot="..\redb.Identity.Contracts\Protos"
               GrpcServices="None" />

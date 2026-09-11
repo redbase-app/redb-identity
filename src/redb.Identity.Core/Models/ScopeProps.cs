@@ -10,10 +10,13 @@ namespace redb.Identity.Core.Models;
 public class ScopeProps
 {
     /// <summary>
-    /// Unique scope identifier (e.g. "openid", "profile", "api").
-    /// Stored in root <c>_objects.value_string</c> (indexed), not in PROPS.
+    /// Unique scope identifier (e.g. "openid", "profile", "api") — unique per scheme via
+    /// <c>[RedbUnique]</c> (all three providers). Point lookup:
+    /// <c>GetByUniqueAsync&lt;ScopeProps&gt;(p =&gt; p.ScopeName, name)</c>.
+    /// V4-UNIQUE: replaced the <c>[RedbIgnore]</c> + <c>value_string</c> mirror; the mirror
+    /// is no longer written — legacy rows are repaired by the boot backfill (doc/v4/04 §3).
     /// </summary>
-    [RedbIgnore]
+    [RedbUnique]
     public string? ScopeName { get; set; }
 
     /// <summary>Human-readable description.</summary>

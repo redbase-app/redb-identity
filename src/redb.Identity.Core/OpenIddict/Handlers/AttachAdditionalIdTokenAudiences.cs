@@ -85,11 +85,9 @@ internal sealed class AttachAdditionalIdTokenAudiences
         ApplicationProps? props = null;
         try
         {
-            var app = await redb.Query<ApplicationProps>()
-                .WhereRedb(o => o.ValueString == clientId)
-                .FirstOrDefaultAsync()
+            var app = await redb.GetByUniqueAsync<ApplicationProps>(p => p.ClientId, clientId)
                 .ConfigureAwait(false);
-            props = app?.Hydrate().Props;
+            props = app?.Props;
         }
         catch (Exception ex)
         {
@@ -117,7 +115,7 @@ internal sealed class AttachAdditionalIdTokenAudiences
 
             var claim = new Claim(Claims.Audience, aud);
             // Restrict to IdentityToken — access_token audiences are a separate
-            // concept (resource indicators / RFC 8707) that we'd compose elsewhere.
+            // concept (resource indicators / RFC 8707) composed by AttachAccessTokenResources.
             claim.SetDestinations(Destinations.IdentityToken);
             identity.AddClaim(claim);
         }

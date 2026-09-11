@@ -11,10 +11,19 @@ internal static partial class IdentityProcessorHelpers
     ///   <item>PostgreSQL (Npgsql): SQLSTATE <c>23505</c>.</item>
     ///   <item>SQL Server: errors <c>2601</c> (unique index) and <c>2627</c> (unique/PK constraint).</item>
     /// </list>
-    /// Used by management processors that write under a partial unique index on
-    /// <c>_objects</c> (see <c>IdentityUniqueIndexesInitListener</c>) so that a race
-    /// between two concurrent creates surfaces as a 409-style "duplicate" response
-    /// instead of a 500, without depending on RDBMS-specific exception types.
+    /// V4-UNIQUE (doc/v4/04 §1): the scheme-key catches moved to the typed
+    /// <c>RedbUniqueViolationException</c>. This duck-typed recognizer SURVIVES for the two
+    /// places a raw driver violation can still reach Identity code:
+    /// <list type="bullet">
+    ///   <item>the <c>UX_users_email</c> index on the core <c>_users</c> table (owner
+    ///   decision Р1 — not a redb scheme key, the core never wraps it), reached through the
+    ///   route-level generic 409 mapping in <c>IdentityCoreRouteBuilder</c>;</item>
+    ///   <item><c>UX_route_idempotent_entry_name</c> on redb.Route's scheme (Р2 interim,
+    ///   until the Route-side fix ships).</item>
+    /// </list>
+    /// A typed <c>RedbUniqueViolationException</c> also satisfies this predicate — the
+    /// driver exception rides its inner chain — so the route-level mapping covers both
+    /// worlds with one check.
     /// </summary>
     public static bool IsUniqueViolation(Exception? ex)
     {

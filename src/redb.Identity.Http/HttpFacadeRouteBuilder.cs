@@ -292,7 +292,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .To(IdentityEndpoints.Authorize)
             .Process(HttpIdentityProcessors.HandleRedirectResponse)
             .Process((e, ct) => SessionCookieProcessors.RedirectToLogin(e, ct, loginPath))
-            .Process((e, ct) => SessionCookieProcessors.RedirectToConsent(e, ct, consentPath))
+            .Process((e, ct) => SessionCookieProcessors.RedirectToConsent(e, ct, consentPath, _ticketService))
             .Process((e, ct) => SessionCookieProcessors.HandleReauthCookie(e, ct, _ticketService, secureCookie, sessionSameSite, useHostPrefix))
             .Process(HttpIdentityProcessors.MapOAuthErrorToHttpStatus)
             .Process((e, ct) => HttpIdentityProcessors.RenderAuthorizeErrorPage(e, ct, _transportOptions))
@@ -307,7 +307,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .To(IdentityEndpoints.Authorize)
             .Process(HttpIdentityProcessors.HandleRedirectResponse)
             .Process((e, ct) => SessionCookieProcessors.RedirectToLogin(e, ct, loginPath))
-            .Process((e, ct) => SessionCookieProcessors.RedirectToConsent(e, ct, consentPath))
+            .Process((e, ct) => SessionCookieProcessors.RedirectToConsent(e, ct, consentPath, _ticketService))
             .Process((e, ct) => SessionCookieProcessors.HandleReauthCookie(e, ct, _ticketService, secureCookie, sessionSameSite, useHostPrefix))
             .Process(HttpIdentityProcessors.MapOAuthErrorToHttpStatus)
             .Process((e, ct) => HttpIdentityProcessors.RenderAuthorizeErrorPage(e, ct, _transportOptions))
@@ -320,9 +320,12 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process((e, ct) => LoginPageProcessors.RenderLoginPage(e, ct, loginPath, _transportOptions))
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
 
+        // Every form POST the facade renders itself starts with the cross-site guard:
+        // a submission announcing a foreign Origin/Referer is refused before the body is read.
         From($"{_scheme}:POST:0.0.0.0:{port}{loginPath}?inOut=true{_sslParams}")
             .RouteId("http-login-post")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
+            .Process((e, ct) => AntiForgeryProcessors.RejectCrossSiteFormPost(e, ct, _transportOptions.Issuer, _transportOptions))
             .Process(HttpIdentityProcessors.MapFormToBody)
             .To(IdentityEndpoints.Login)
             .Process((e, ct) => SessionCookieProcessors.WriteSessionCookie(e, ct, _ticketService, cookieMaxAge, secureCookie, sessionCookieName, sessionSameSite, useHostPrefix))
@@ -350,6 +353,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         From($"{_scheme}:POST:0.0.0.0:{port}{mfaPath}?inOut=true{_sslParams}")
             .RouteId("http-mfa-post")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
+            .Process((e, ct) => AntiForgeryProcessors.RejectCrossSiteFormPost(e, ct, _transportOptions.Issuer, _transportOptions))
             .Process(HttpIdentityProcessors.MapFormToBody)
             .Process(MfaCookieProcessors.ReadMfaStateCookie)
             .To(IdentityEndpoints.MfaVerify)
@@ -369,6 +373,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         From($"{_scheme}:POST:0.0.0.0:{port}{mfaRecoveryPath}?inOut=true{_sslParams}")
             .RouteId("http-mfa-recovery-post")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
+            .Process((e, ct) => AntiForgeryProcessors.RejectCrossSiteFormPost(e, ct, _transportOptions.Issuer, _transportOptions))
             .Process(HttpIdentityProcessors.MapFormToBody)
             .Process(MfaCookieProcessors.ReadMfaStateCookie)
             .To(IdentityEndpoints.MfaRecovery)
@@ -404,15 +409,18 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         From($"{_scheme}:GET:0.0.0.0:{port}{consentPath}?inOut=true{_sslParams}")
             .RouteId("http-consent-get")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
-            .Process((e, ct) => ConsentPageProcessors.RenderConsentPage(e, ct, consentPath, _transportOptions))
+            .Process((e, ct) => ConsentPageProcessors.RenderConsentPage(e, ct, _ticketService, consentPath, _transportOptions))
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
 
         From($"{_scheme}:POST:0.0.0.0:{port}{consentPath}?inOut=true{_sslParams}")
             .RouteId("http-consent-post")
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
+            .Process((e, ct) => AntiForgeryProcessors.RejectCrossSiteFormPost(e, ct, _transportOptions.Issuer, _transportOptions))
             .Process((e, ct) => SessionCookieProcessors.ReadSessionCookie(e, ct, _ticketService, cookieMaxAge, sessionCookieName))
             .Process(HttpIdentityProcessors.MapFormToBody)
-            .Process(ConsentPageProcessors.PrepareConsentBody)
+            // Consenting user from the session cookie only; parameters from the signed ticket
+            // (our page) or the session-bound form (BFF). No session → 401, pipeline stops.
+            .Process((e, ct) => ConsentPageProcessors.PrepareConsentBody(e, ct, _ticketService, _transportOptions))
             .To(IdentityEndpoints.ConsentGrant)
             .Process((e, ct) => ConsentPageProcessors.HandleConsentResponse(e, ct, _transportOptions))
             .Process(HttpIdentityProcessors.SerializeJsonResponse);

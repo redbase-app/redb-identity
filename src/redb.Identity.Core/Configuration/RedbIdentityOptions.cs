@@ -209,6 +209,28 @@ public class RedbIdentityOptions
     public bool DisableAccessTokenEncryption { get; set; }
 
     /// <summary>
+    /// The OP's own audience for access tokens (RFC 9068 §3 default resource indicator).
+    /// Issued access tokens carry it whenever an <c>identity:*</c> scope is granted, or when
+    /// the granted scopes' <c>Resources</c> and the application's <c>AccessTokenAudiences</c>
+    /// are both empty; the local validation stack (management API) accepts only tokens that
+    /// carry it. <c>null</c> resolves to <c>{Issuer}/resources</c>
+    /// (see <see cref="ResolveDefaultAccessTokenAudience"/>).
+    /// </summary>
+    public string? DefaultAccessTokenAudience { get; set; }
+
+    /// <summary>
+    /// Resolves the effective OP audience: a configured value wins (trimmed), otherwise
+    /// <c>{issuer}/resources</c> with a single slash regardless of the issuer's trailing slash.
+    /// </summary>
+    public static string ResolveDefaultAccessTokenAudience(Uri issuer, string? configured)
+    {
+        ArgumentNullException.ThrowIfNull(issuer);
+        if (!string.IsNullOrWhiteSpace(configured))
+            return configured.Trim();
+        return issuer.AbsoluteUri.TrimEnd('/') + "/resources";
+    }
+
+    /// <summary>
     /// Required OAuth scope for management API access.
     /// Clients must request this scope to call <c>/api/v1/identity/*</c> endpoints.
     /// Default: <c>identity:manage</c>.

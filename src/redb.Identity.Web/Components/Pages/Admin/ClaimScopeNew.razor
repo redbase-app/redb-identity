@@ -1,0 +1,75 @@
+@page "/admin/claim-scopes/new"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@* New claim scope — full-page form (Phase 3, П5: pages-not-dialogs). *@
+
+<div style="margin-bottom: var(--space-3);">
+    <NavLink href="/admin/claim-scopes" class="btn btn-ghost" style="padding: 0; color: var(--accent-primary);">← Go back to Claim scopes</NavLink>
+</div>
+
+<h1 style="margin: 0;">New claim scope</h1>
+<p class="text-secondary">A reusable bundle of claim mappers, assignable to applications (Keycloak's «client scope»).</p>
+
+<div class="card" style="max-width: 640px;">
+    <section class="app-detail__section">
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Name *</span>
+            <input class="app-detail__input app-detail__input--mono" placeholder="tenant_metadata" @bind="_form.Name" />
+            <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Slug-like identifier, immutable after creation.</span>
+        </label>
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Display name</span>
+            <input class="app-detail__input" @bind="_form.DisplayName" />
+        </label>
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Description</span>
+            <input class="app-detail__input" @bind="_form.Description" />
+        </label>
+        <label style="display:flex; gap:var(--space-2); align-items:center; cursor:pointer;">
+            <input type="checkbox" @bind="_form.Enabled" />
+            <span>Enabled — assignments referencing this scope apply their mappers</span>
+        </label>
+    </section>
+
+    @if (_error is not null) { <p class="text-error">@_error</p> }
+
+    <div style="display:flex; gap: var(--space-2); justify-content: flex-end;">
+        <NavLink href="/admin/claim-scopes" class="btn btn-secondary">Cancel</NavLink>
+        <button class="btn btn-primary" @onclick="CreateAsync" disabled="@(_saving || _form.Name.Trim().Length == 0)">@(_saving ? "Creating…" : "Create claim scope")</button>
+    </div>
+</div>
+
+@code {
+    private sealed class FormState
+    {
+        public string Name = "";
+        public string? DisplayName, Description;
+        public bool Enabled = true;
+    }
+
+    private readonly FormState _form = new();
+    private bool _saving;
+    private string? _error;
+
+    private async Task CreateAsync()
+    {
+        _saving = true; _error = null;
+        try
+        {
+            var created = await Client.CreateClaimScopeAsync(new CreateClaimScopeRequest
+            {
+                Name = _form.Name.Trim(),
+                DisplayName = string.IsNullOrWhiteSpace(_form.DisplayName) ? null : _form.DisplayName,
+                Description = string.IsNullOrWhiteSpace(_form.Description) ? null : _form.Description,
+                Enabled = _form.Enabled,
+            });
+            Toast.Show($"Claim scope '{created.Name}' created.", "online");
+            Nav.NavigateTo($"/admin/claim-scopes/{Uri.EscapeDataString(created.Id)}");
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+}

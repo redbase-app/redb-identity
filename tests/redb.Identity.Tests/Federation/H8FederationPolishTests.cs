@@ -84,7 +84,8 @@ public class H8FederationPolishTests
         stored.Should().NotBeNull();
         stored!.Props.EncryptedClientSecret.Should().NotBeNullOrEmpty();
         stored.Props.EncryptedClientSecret.Should().NotContain(clientSecret, "must be encrypted at rest");
-        stored.value_string.Should().Be(providerId, "value_string must mirror ProviderId for O(1) reverse lookup");
+        stored.Props.ProviderId.Should().Be(providerId,
+            "ProviderId is the [RedbUnique] key now (V4-UNIQUE); the value_string mirror is gone");
 
         // Round-trip via DataProtection: the protector decrypts back to the original.
         var protector = _fx.ServiceProvider.GetRequiredService<FederationProviderSecretProtector>();
@@ -128,9 +129,8 @@ public class H8FederationPolishTests
         var deleteResult = await Forward(IdentityEndpoints.ManageFederationProviders, "delete",
             new Dictionary<string, object?> { ["id"] = createdId });
         deleteResult.Should().NotBeNull();
-        var afterDelete = await _fx.WithRedb(redb => redb.Query<FederationProviderProps>()
-            .WhereRedb(o => o.ValueString == providerId)
-            .FirstOrDefaultAsync());
+        var afterDelete = await _fx.WithRedb(redb =>
+            redb.GetByUniqueAsync<FederationProviderProps>(p => p.ProviderId, providerId));
         afterDelete.Should().BeNull("deletion must remove the PROPS row from queries");
     }
 
@@ -257,17 +257,12 @@ public class H8FederationPolishTests
         links.Should().HaveCount(2);
         links.Select(l => l.ProviderId).Should().BeEquivalentTo(new[] { "h8-prov-a", "h8-prov-b" });
 
-        // Both reverse lookups must find the same user via the per-link UNIQUE value_string.
-        // Compose the value_string lookup keys outside the WhereRedb expression — the
-        // PROPS expression parser rejects in-place string concatenation in the predicate.
-        var keyA = "h8-prov-a:" + subA;
-        var keyB = "h8-prov-b:" + subB;
-        var rowA = await _fx.Redb.Query<FederatedIdentityProps>()
-            .WhereRedb(o => o.ValueString == keyA)
-            .FirstOrDefaultAsync();
-        var rowB = await _fx.Redb.Query<FederatedIdentityProps>()
-            .WhereRedb(o => o.ValueString == keyB)
-            .FirstOrDefaultAsync();
+        // Both reverse lookups must find the same user via the per-link [RedbUnique] LinkKey
+        // (V4-UNIQUE; was the value_string mirror before Ф2).
+        var keyA = FederatedIdentityProps.MakeLinkKey("h8-prov-a", subA);
+        var keyB = FederatedIdentityProps.MakeLinkKey("h8-prov-b", subB);
+        var rowA = await _fx.Redb.GetByUniqueAsync<FederatedIdentityProps>(p => p.LinkKey, keyA);
+        var rowB = await _fx.Redb.GetByUniqueAsync<FederatedIdentityProps>(p => p.LinkKey, keyB);
         rowA.Should().NotBeNull();
         rowB.Should().NotBeNull();
         rowA!.key.Should().Be(newUser.Id);

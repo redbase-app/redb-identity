@@ -31,6 +31,29 @@ public class GrpcIdentityProcessorsTests
     }
 
     [Fact]
+    public async Task Reserved_internal_headers_sent_as_metadata_are_stripped_on_ingress()
+    {
+        // The gRPC connector copies caller metadata and envelope headers into In.Headers verbatim;
+        // Core trusts these names (audit attribution, credentials, idempotency operation). Before
+        // the strip a caller could sign the audit log with another user's id and a fabricated
+        // address by sending them as metadata on Token / Revoke / Introspect.
+        var exchange = NewExchange();
+        foreach (var name in redb.Identity.Contracts.Routes.IdentityReservedInboundHeaders.Names)
+            exchange.In.Headers[name] = "forged";
+        exchange.In.Headers["SESSION_USER_ID"] = "forged-upper";
+        exchange.In.Headers["Idempotency-Key"] = "legit-key";
+        exchange.In.Headers["authorization"] = "Bearer legit";
+
+        await Invoke("PropagateCorrelationId", exchange);
+
+        foreach (var name in redb.Identity.Contracts.Routes.IdentityReservedInboundHeaders.Names)
+            exchange.In.Headers.ContainsKey(name).Should().BeFalse($"'{name}' must only ever be set by a facade processor");
+        exchange.In.Headers.ContainsKey("SESSION_USER_ID").Should().BeFalse("header names are case-insensitive");
+        exchange.In.Headers["Idempotency-Key"].Should().Be("legit-key", "caller metadata that is not reserved stays");
+        exchange.In.Headers["authorization"].Should().Be("Bearer legit");
+    }
+
+    [Fact]
     public async Task A_correlation_id_is_invented_when_the_caller_sent_none()
     {
         var exchange = NewExchange();

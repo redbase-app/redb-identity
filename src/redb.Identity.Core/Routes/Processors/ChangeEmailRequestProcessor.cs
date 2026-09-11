@@ -98,9 +98,7 @@ internal sealed class ChangeEmailRequestProcessor : IProcessor
         }
 
         // ── Gate: client whitelist ────────────────────────────────────────────────
-        var app = await redb.Query<ApplicationProps>()
-            .WhereRedb(o => o.ValueString == request.ClientId)
-            .FirstOrDefaultAsync()
+        var app = await redb.GetByUniqueAsync<ApplicationProps>(p => p.ClientId, request.ClientId)
             .ConfigureAwait(false);
         if (app is null)
         {

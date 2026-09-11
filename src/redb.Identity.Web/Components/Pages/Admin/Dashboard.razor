@@ -1,33 +1,97 @@
 @page "/admin"
 @attribute [Authorize]
 @inject IIdentityClient Client
+@inject NavigationManager Nav
+
+@*
+    Dashboard — Phase 3 (П7): composed after the Tsak.Web dashboard the owner likes:
+    a KPI-card row, a status donut, and a clickable recent-activity grid that deep-links
+    into /admin/audit. Only real SDK data — counts come from PagedResult.Total probes
+    (count:1), the donut and the activity table from the last audit page. No invented
+    metrics, no sparkline history (there is no telemetry source for it yet).
+*@
 
 <RdbPageHeader Title="Dashboard" Description="Overview of your Identity tenant." />
 
 <div class="grid grid-cols-3" style="gap: var(--space-4); margin-bottom: var(--space-4);">
-    <RdbCard Title="Users" Icon="server" Value="@Fmt(_users)" />
+    <RdbCard Title="Users" Icon="user" Value="@Fmt(_users)" />
     <RdbCard Title="Applications" Icon="package" Value="@Fmt(_apps)" />
-    <RdbCard Title="Scopes" Icon="zap" Value="@Fmt(_scopes)" />
+    <RdbCard Title="Scopes" Icon="key" Value="@Fmt(_scopes)" />
+    <RdbCard Title="Federation providers" Icon="cluster" Value="@Fmt(_federation)" />
+    <RdbCard Title="Claim mappers" Icon="route" Value="@Fmt(_mappers)" />
+    <RdbCard Title="Webhooks" Icon="activity" Value="@Fmt(_webhooks)" />
 </div>
 
-<div class="card">
-    <div class="card-header">
-        <span class="card-title">Welcome</span>
-        <RdbIcon Name="info" Size="18" />
+@if (_error is not null) { <p class="text-error">@_error</p> }
+
+<div style="display:flex; gap: var(--space-4); align-items: stretch; flex-wrap: wrap;">
+    <div class="card" style="flex: 1; min-width: 280px;">
+        <div class="card-header">
+            <span class="card-title">Audit events by category</span>
+            <span class="text-secondary" style="font-size: var(--font-size-sm);">last @_auditSample</span>
+        </div>
+        @if (_auditLoaded && _categoryCounts.Count == 0)
+        {
+            <p class="text-secondary">No audit events yet.</p>
+        }
+        else
+        {
+            <RdbChart @ref="_donut" ChartId="admin-dashboard-audit" Height="200" />
+        }
     </div>
-    <p>Signed in as <strong>@(_userName ?? "—")</strong>.</p>
-    @if (_error is not null)
-    {
-        <p class="text-error">@_error</p>
-    }
-    <p class="text-secondary">Use the sidebar to manage users, groups, applications, and scopes.</p>
+
+    <div class="card" style="flex: 2; min-width: 380px;">
+        <div class="card-header">
+            <span class="card-title">Recent activity</span>
+            <NavLink href="/admin/audit" class="btn btn-sm">Open audit <RdbIcon Name="chevron-right" Size="12" /></NavLink>
+        </div>
+        @if (!_auditLoaded) { <p class="text-secondary">Loading…</p> }
+        else if (_recent.Count == 0) { <p class="text-secondary">Nothing recorded yet.</p> }
+        else
+        {
+            <table class="data-table">
+                <thead><tr><th>Time (UTC)</th><th>Event</th><th>Category</th><th>Login</th></tr></thead>
+                <tbody>
+                    @foreach (var e in _recent)
+                    {
+                        <tr style="cursor:pointer;" @onclick="@(() => Nav.NavigateTo("/admin/audit"))">
+                            <td class="text-secondary" style="white-space:nowrap;">@e.Timestamp.UtcDateTime.ToString("MM-dd HH:mm:ss")</td>
+                            <td><code>@e.EventType</code></td>
+                            <td><span class="badge">@e.Category</span></td>
+                            <td>@(e.Login ?? "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
 </div>
+
+<p class="text-secondary" style="margin-top: var(--space-4);">
+    Signed in as <strong>@(_userName ?? "—")</strong>. Use the sidebar to manage users, groups, applications and scopes.
+</p>
 
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private const int AuditSampleSize = 200;
+
     private string? _userName;
-    private int? _users, _apps, _scopes;
+    private int? _users, _apps, _scopes, _federation, _mappers, _webhooks;
     private string? _error;
+
+    private RdbChart? _donut;
+    private bool _auditLoaded;
+    private bool _donutRendered;
+    private int _auditSample;
+    private readonly List<AuditQueryItem> _recent = new();
+    private readonly List<KeyValuePair<string, int>> _categoryCounts = new();
+
+    // Fixed palette: chart.js canvas cannot resolve CSS custom properties.
+    private static readonly string[] Palette =
+    [
+        "#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#64748b",
+    ];
 
     protected override async Task OnInitializedAsync()
     {
@@ -42,13 +106,52 @@
             var users = await Client.ListUsersAsync(0, 1);
             var apps = await Client.ListApplicationsAsync(0, 1);
             var scopes = await Client.ListScopesAsync(0, 1);
-            _users = users.Total;
-            _apps = apps.Total;
-            _scopes = scopes.Total;
+            var federation = await Client.ListFederationProvidersAsync(0, 1);
+            var mappers = await Client.ListClaimMappersAsync(offset: 0, count: 1);
+            var webhooks = await Client.ListWebhooksAsync(0, 1);
+            _users = users.Total; _apps = apps.Total; _scopes = scopes.Total;
+            _federation = federation.Total; _mappers = mappers.Total; _webhooks = webhooks.Total;
         }
         catch (Exception ex)
         {
             _error = $"Failed to load metrics: {ex.Message}";
+        }
+
+        try
+        {
+            var audit = await Client.QueryAuditAsync(new AuditQueryRequest { Offset = 0, Count = AuditSampleSize });
+            var items = audit.Items ?? [];
+            _auditSample = items.Count;
+            _recent.Clear();
+            _recent.AddRange(items.Take(10));
+            _categoryCounts.Clear();
+            _categoryCounts.AddRange(items
+                .GroupBy(i => string.IsNullOrEmpty(i.Category) ? "other" : i.Category)
+                .Select(g => new KeyValuePair<string, int>(g.Key, g.Count()))
+                .OrderByDescending(kv => kv.Value));
+        }
+        catch (Exception ex)
+        {
+            _error ??= $"Failed to load audit sample: {ex.Message}";
+        }
+        finally { _auditLoaded = true; }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_donutRendered || _donut is null || _categoryCounts.Count == 0) return;
+        _donutRendered = true;
+        try
+        {
+            await _donut.CreateDonutAsync(
+                _categoryCounts.Select(kv => kv.Key).ToArray(),
+                _categoryCounts.Select(kv => (double)kv.Value).ToArray(),
+                _categoryCounts.Select((_, i) => Palette[i % Palette.Length]).ToArray());
+        }
+        catch
+        {
+            // Chart.js unavailable (blocked CDN, prerender edge) — the dashboard must not
+            // take the circuit down over a decoration; the numbers are all still on screen.
         }
     }
 

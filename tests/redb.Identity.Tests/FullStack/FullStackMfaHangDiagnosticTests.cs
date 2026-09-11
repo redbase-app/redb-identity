@@ -24,6 +24,14 @@ public class FullStackMfaHangDiagnosticTests
     private readonly ProductionHttpFixture _fx;
     private readonly ITestOutputHelper _out;
 
+    /// <summary>
+    /// These tests detect a HANG — a request that never completes — not latency. Three sequential
+    /// Argon2id logins take ~7 s on this bench in isolation, so the former 10 s budget left no room
+    /// for the provider suites the owner runs side by side (a PG run tripped it at exactly 10 s while
+    /// the MSSQL suite was loading the same machine). A real hang never completes and still fails.
+    /// </summary>
+    private static readonly TimeSpan HangBudget = TimeSpan.FromSeconds(60);
+
     public FullStackMfaHangDiagnosticTests(ProductionHttpFixture fx, ITestOutputHelper output)
     {
         _fx = fx;
@@ -44,7 +52,7 @@ public class FullStackMfaHangDiagnosticTests
     [Fact]
     public async Task TwoSequentialLogins_ShouldNotHang()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(HangBudget);
 
         _out.WriteLine("=== first POST /login ===");
         using (var c1 = NewClient())
@@ -83,7 +91,7 @@ public class FullStackMfaHangDiagnosticTests
     [Fact]
     public async Task TwoSequentialMfaPosts_ShouldNotHang()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(HangBudget);
 
         _out.WriteLine("=== first POST /mfa ===");
         using (var c1 = NewClient())
@@ -114,7 +122,7 @@ public class FullStackMfaHangDiagnosticTests
     [Fact]
     public async Task TwoFullMfaFlows_InOneTest_ShouldNotHang()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var cts = new CancellationTokenSource(HangBudget);
 
         async Task RunOne(string label)
         {
@@ -150,7 +158,7 @@ public class FullStackMfaHangDiagnosticTests
     [Fact]
     public async Task TwoLoginsWithMfaSeed_NoVerify_ShouldNotHang()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var cts = new CancellationTokenSource(HangBudget);
 
         async Task RunOne(string label)
         {

@@ -99,7 +99,9 @@ $ordered = @(
     'demo_account_register_verify.ps1',
     'demo_scim.ps1',
     # ── gRPC facade ───────────────────────────────────────────────────────────
-    'demo_grpc_facade.ps1'          # protocol + management surfaces via an independent @grpc/grpc-js client in a container
+    'demo_grpc_facade.ps1',         # protocol + management surfaces via an independent @grpc/grpc-js client in a container
+    # ── WS-Trust facade ───────────────────────────────────────────────────────
+    'demo_soap_facade.ps1'          # Issue/Validate/Cancel over raw SOAP envelopes, no tool to install
 )
 
 $demos = $ordered | Where-Object {

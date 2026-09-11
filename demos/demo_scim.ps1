@@ -9,7 +9,9 @@
 $BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
 $PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
 $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
-$SCIM    = "$BASE/api/v1/identity/scim/v2"
+# The scim-scoped door. The management mount (/api/v1/identity/scim/v2) is gated by the admin scope
+# table and refuses DCR-obtainable tokens - which is what silently parked this demo for so long.
+$SCIM    = "$BASE/scim/v2"
 $timings = [System.Collections.Generic.List[object]]::new()
 
 function Measure-Step {
@@ -34,62 +36,36 @@ function Measure-Step {
 $total = [System.Diagnostics.Stopwatch]::StartNew()
 
 # ── Obtain admin token ────────────────────────────────────────────────────────
-# Strategy 1: DCR with identity:admin scope via client_credentials.
-# Strategy 2: ROPC with a pre-seeded admin account.
-# This demo tries Strategy 1 first, falls back to a placeholder.
+# DCR with the granular `scim` scope — the scope the SCIM surface is actually gated on, and the one
+# dynamic registration hands out (the master admin scopes are deliberately not obtainable via DCR;
+# asking for identity:admin here is why this demo used to skip its own CRUD body and still exit 0).
 $adminBearer = $null
 
-$adminReg = Measure-Step "1. DCR /connect/register (client_credentials + identity:admin)" {
-    try {
-        $r = Invoke-RestMethod -Method Post "$BASE/connect/register" `
-          -ContentType "application/json" `
-          -Body (@{
-            client_name = "scim-admin-demo"
-            grant_types = @("client_credentials")
-            scope       = "identity:admin"
-          } | ConvertTo-Json)
-        Write-Host "  client_id: $($r.client_id)"
-        return $r
-    } catch {
-        $code = $_.Exception.Response.StatusCode.value__
-        Write-Host "  DCR for identity:admin failed ($code) — will try password grant" -ForegroundColor Yellow
-        return $null
-    }
+$adminReg = Measure-Step "1. DCR /connect/register (client_credentials + scim)" {
+    $r = Invoke-RestMethod -Method Post "$BASE/connect/register" `
+      -ContentType "application/json" `
+      -Body (@{
+        client_name = "scim-admin-demo"
+        grant_types = @("client_credentials")
+        scope       = "scim"
+      } | ConvertTo-Json)
+    Write-Host "  client_id: $($r.client_id)"
+    return $r
 }
 
-if ($adminReg) {
-    $adminTok = Measure-Step "2. client_credentials → identity:admin token" {
-        try {
-            $t = Invoke-RestMethod -Method Post "$BASE/connect/token" `
-              -ContentType "application/x-www-form-urlencoded" `
-              -Body @{
-                grant_type    = "client_credentials"
-                client_id     = $adminReg.client_id
-                client_secret = $adminReg.client_secret
-                scope         = "identity:admin"
-              }
-            Write-Host "  token_type: $($t.token_type)  expires_in: $($t.expires_in)"
-            return $t
-        } catch {
-            $code = $_.Exception.Response.StatusCode.value__
-            $body = if ($_.ErrorDetails) { $_.ErrorDetails.Message } else { "" }
-            Write-Host "  client_credentials failed ($code): $body" -ForegroundColor Yellow
-            Write-Host "  identity:admin scope may require explicit admin grant — using fallback" -ForegroundColor Yellow
-            return $null
-        }
-    }
-    if ($adminTok) {
-        $adminBearer = @{ Authorization = "Bearer $($adminTok.access_token)" }
-    }
+$adminTok = Measure-Step "2. client_credentials → scim token" {
+    $t = Invoke-RestMethod -Method Post "$BASE/connect/token" `
+      -ContentType "application/x-www-form-urlencoded" `
+      -Body @{
+        grant_type    = "client_credentials"
+        client_id    = $adminReg.client_id
+        client_secret = $adminReg.client_secret
+        scope         = "scim"
+      }
+    Write-Host "  token_type: $($t.token_type)  expires_in: $($t.expires_in)"
+    return $t
 }
-
-if (-not $adminBearer) {
-    Write-Host ""
-    Write-Host "!! No admin token available.  To run SCIM demos:" -ForegroundColor Red
-    Write-Host "   1. Pre-seed an admin user and set `$ADMIN_USER / `$ADMIN_PWD below." -ForegroundColor Yellow
-    Write-Host "   2. Or grant 'identity:admin' to a DCR client via the management API." -ForegroundColor Yellow
-    Write-Host "   Continuing with probes that do not require admin (discovery only)." -ForegroundColor DarkGray
-}
+$adminBearer = @{ Authorization = "Bearer $($adminTok.access_token)" }
 
 # ── SCIM Discovery (no auth needed per RFC 7644 §4) ──────────────────────────
 
@@ -113,14 +89,10 @@ if ([int]$totalSchemas -ge 2) {
 # ── SCIM CRUD (requires admin) ────────────────────────────────────────────────
 
 if (-not $adminBearer) {
-    Write-Host ""
-    Write-Host "  (skipping CRUD steps — no admin token)" -ForegroundColor DarkGray
-    $total.Stop()
-    Write-Host ""
-    Write-Host "================ TIMING SUMMARY ================" -ForegroundColor Cyan
-    $timings | Format-Table -AutoSize Step, Ms, Status
-    Write-Host ("TOTAL: {0:N0} ms" -f $total.Elapsed.TotalMilliseconds) -ForegroundColor Cyan
-    exit 0
+    # A gate that cannot open is a failure, not a shrug: this demo used to skip its whole CRUD body
+    # here and still exit 0, reading as PASS in every suite summary while SCIM writes were broken.
+    Write-Host "!! no admin token — the CRUD body cannot run" -ForegroundColor Red
+    exit 1
 }
 
 # 5) POST /Users — create SCIM user.

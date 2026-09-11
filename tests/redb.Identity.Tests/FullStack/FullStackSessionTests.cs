@@ -56,7 +56,7 @@ public class FullStackSessionTests
             ?? throw new Exception("Test user not found");
 
         var app = await _fx.Redb.Query<ApplicationProps>()
-            .WhereRedb(o => o.ValueString == ProductionHttpFixture.TestClientId)
+            .Where(p => p.ClientId == ProductionHttpFixture.TestClientId)
             .FirstOrDefaultAsync();
         app.Should().NotBeNull();
 
@@ -100,7 +100,7 @@ public class FullStackSessionTests
         var coreUser = await _fx.Redb.UserProvider.GetUserByLoginAsync(ProductionHttpFixture.TestUsername)
             ?? throw new Exception("Test user not found");
         var app = await _fx.Redb.Query<ApplicationProps>()
-            .WhereRedb(o => o.ValueString == ProductionHttpFixture.TestClientId)
+            .Where(p => p.ClientId == ProductionHttpFixture.TestClientId)
             .FirstOrDefaultAsync();
 
         var session = await sessionService.CreateAsync(coreUser.Id, app!.id);
@@ -123,7 +123,7 @@ public class FullStackSessionTests
         var coreUser = await _fx.Redb.UserProvider.GetUserByLoginAsync(ProductionHttpFixture.TestUsername)
             ?? throw new Exception("Test user not found");
         var app = await _fx.Redb.Query<ApplicationProps>()
-            .WhereRedb(o => o.ValueString == ProductionHttpFixture.TestClientId)
+            .Where(p => p.ClientId == ProductionHttpFixture.TestClientId)
             .FirstOrDefaultAsync();
 
         await sessionService.CreateAsync(coreUser.Id, app!.id);
@@ -154,7 +154,7 @@ public class FullStackSessionTests
         var coreUser = await _fx.Redb.UserProvider.GetUserByLoginAsync(ProductionHttpFixture.TestUsername)
             ?? throw new Exception("Test user not found");
         var app = await _fx.Redb.Query<ApplicationProps>()
-            .WhereRedb(o => o.ValueString == ProductionHttpFixture.TestClientId)
+            .Where(p => p.ClientId == ProductionHttpFixture.TestClientId)
             .FirstOrDefaultAsync();
 
         await sessionService.CreateAsync(coreUser.Id, app!.id);

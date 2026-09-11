@@ -21,7 +21,14 @@ public class TokenProps
     /// <summary>"access_token", "refresh_token", "id_token", or "authorization_code".</summary>
     public string? Type { get; set; }
 
-    /// <summary>Opaque reference id (for reference tokens).</summary>
+    /// <summary>
+    /// Opaque reference id (for reference tokens) — unique per scheme via <c>[RedbUnique]</c>
+    /// on all three providers; NULL (non-reference tokens) never participates.
+    /// V4-UNIQUE note: this property was always stored, but the store wrote the id only into
+    /// the <c>value_string</c> mirror, so <c>_values</c> could be empty for store-created
+    /// tokens — the transition backfill repairs that (doc/v4/04).
+    /// </summary>
+    [RedbUnique]
     public string? ReferenceId { get; set; }
 
     /// <summary>

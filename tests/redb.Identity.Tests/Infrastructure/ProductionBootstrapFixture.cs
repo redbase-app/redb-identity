@@ -285,6 +285,17 @@ public sealed class ProductionBootstrapFixture : IAsyncLifetime
             RedirectUris = { new Uri(TestRedirectUri) },
             Requirements = { OpenIddictConstants.Requirements.Features.ProofKeyForCodeExchange }
         });
+
+        // The confidential client is the public client's backend: it introspects and revokes
+        // the tokens the PKCE client obtains, so it must be an audience of them. Access tokens
+        // carry `aud` now (RFC 9068), and OpenIddict admits only audience members to
+        // introspection (RFC 7662) — the relationship has to be declared, not assumed.
+        await WithRedb(async redb =>
+        {
+            var publicApp = await redb.GetByUniqueAsync<ApplicationProps>(p => p.ClientId, TestClientIdPublic);
+            publicApp!.Props.AccessTokenAudiences = [TestClientId];
+            await redb.SaveAsync(publicApp);
+        });
     }
 
     private async Task SeedTestUser()

@@ -141,14 +141,14 @@ public sealed class LdapSyncHandler
         else if (existingProps is null && coreUser is not null)
         {
             // New user: create props directly, skip query for just-created user
-            oidcObj = new RedbObject<UserProps>(new UserProps());
+            oidcObj = new RedbObject<UserProps>(new UserProps { UserId = coreUser.Id }); // V4-UNIQUE
             oidcObj.name = externalId;
             oidcObj.key = coreUser.Id;
             oidcObj.value_guid = Guid.NewGuid();
         }
         else
         {
-            oidcObj = new RedbObject<UserProps>(new UserProps());
+            oidcObj = new RedbObject<UserProps>(new UserProps { UserId = coreUser!.Id }); // V4-UNIQUE
             oidcObj.name = externalId;
             oidcObj.key = coreUser!.Id;
             oidcObj.value_guid = Guid.NewGuid();

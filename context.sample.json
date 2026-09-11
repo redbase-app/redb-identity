@@ -95,6 +95,17 @@
       "Read by IdentityModuleConfigBinder.Bind → RedbIdentityOptions.",
       "Identity:* keys live here. The HTTP facade (identity.http) ignores this section."
     ],
+    "identity.contracts": {
+      "//": [
+        "The contracts CARRIER (redb.Identity.Contracts.tpkg) - an empty module whose payload is",
+        "redb.Identity.Contracts.dll, the one process-wide instance of the DTO assembly all Identity",
+        "modules resolve against. It has NO settings: this section exists so the operator's single",
+        "source of truth lists every Identity context. Deployment rule: redeploy this package only",
+        "when the contracts change, and then redeploy every Identity module after it - a contract",
+        "change requires that in any architecture. Reloading core/facades alone never touches it."
+      ]
+    },
+
     "identity.core": {
       "Identity": {
         "//RedbInstanceName": "Must match Contexts.default.RedbInstanceName above. Flip between 'identity-pg' and 'identity-sqlite' (or any other instance you register in Contexts.default.Redb) to switch the whole Identity stack between providers.",
@@ -737,6 +748,74 @@
           "Compression": "None",
           "MaxMessageSize": 4194304,
           "Health": true,
+          "EmitHttpCompatHeaders": true
+        }
+      }
+    },
+
+    "//identity.soap": [
+      "Read by the WS-Trust facade (IdentitySoapModuleHost + IdentitySoapTransportOptions binder).",
+      "Same IdentityTransport:* root as the other facades, different sub-section. Core ignores it.",
+      "Scope: Issue, Validate, Cancel, Renew — the service-to-service subset, as on gRPC.",
+      "Browser flows and DPoP stay on HTTP by design — see doc/SOAP/README.md.",
+      "One address serves all four operations: WS-Trust distinguishes them by the WS-Addressing",
+      "Action, which is what generated clients emit."
+    ],
+    "identity.soap": {
+      "IdentityTransport": {
+        "Soap": {
+          "//": [
+            "Host  — bind address. 0.0.0.0 to accept from outside the machine.",
+            "Port  — separate from the HTTP facade by default. SOAP is ordinary HTTP/1.1 and could",
+            "        technically share a host; a separate port buys something else — WS-Trust can be",
+            "        closed off from the internet while plain OIDC stays open, with its own limits",
+            "        and its own suspend switch.",
+            "Path  — where the STS answers. GET on the same path serves the WSDL.",
+            "Wsdl  — publish the contract on GET. Leave ON: this facade's audience builds clients",
+            "        with generators, and a generator needs a document to read.",
+            "EmitHttpCompatHeaders — mirror the client IP into redbHttp.RemoteAddress so Core's per-IP",
+            "        throttle and brute-force lockout work behind this facade. Leave ON: those",
+            "        protections silently no-op when the header is missing."
+          ],
+          "Host": "0.0.0.0",
+          "Port": 5021,
+          "Path": "/sts",
+
+          "//Ssl": [
+            "TLS is MANDATORY here, unlike the other facades, and its absence is a refusal to start",
+            "rather than a warning: WS-Security UsernameToken carries the client secret in CLEAR TEXT.",
+            "SslCertPassword is a SECRET in production — supply via an L5 Override env-var:",
+            "  Tsak__Contexts__identity.soap__Override__IdentityTransport__Soap__SslCertPassword=<PASSWORD>",
+            "AllowPlaintext is the single escape hatch, for a connection already terminated by a trusted",
+            "proxy. Setting it is the operator's statement that the wire is protected some other way;",
+            "with Ssl=false and AllowPlaintext=false the facade refuses to start."
+          ],
+          "//DEV-DEFAULT": [
+            "Ssl=false + AllowPlaintext=true is a DEVELOPMENT value, and it is spelled out rather than",
+            "hidden: it is what lets the module come up on a dev worker that has no certificate.",
+            "PRODUCTION: set Ssl=true with SslCertPath, and remove AllowPlaintext — or leave the",
+            "connection to a proxy that terminates TLS and keep AllowPlaintext as the statement that",
+            "someone else protects the wire. With Ssl=false and AllowPlaintext=false the facade refuses",
+            "to start, which is the intended behaviour and not a fault to work around."
+          ],
+          "Ssl": false,
+          "SslCertPath": null,
+          "SslCertPassword": null,
+          "AllowPlaintext": true,
+
+          "//ClientCertificateMode": [
+            "mTLS: NoCertificate | AllowCertificate | RequireCertificate. Requires Ssl=true.",
+            "OFF by default so deployments without a client-certificate PKI are not blocked.",
+            "RECOMMENDED for an STS in a closed contour — WS-Trust callers are known partners.",
+            "AllowedClientThumbprints — CSV of SHA-1 thumbprints; when set, a certificate outside the",
+            "list is rejected even if its chain validates.",
+            "An unrecognised value here is refused at start rather than read as NoCertificate: a typo",
+            "must not turn mTLS off on an endpoint whose operator believes it is on."
+          ],
+          "ClientCertificateMode": "NoCertificate",
+          "AllowedClientThumbprints": null,
+
+          "Wsdl": true,
           "EmitHttpCompatHeaders": true
         }
       }

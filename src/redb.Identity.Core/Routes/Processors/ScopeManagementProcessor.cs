@@ -72,10 +72,8 @@ internal sealed class ScopeManagementProcessor : IProcessor
         err = IdentityProcessorHelpers.ValidateDescription(request.Description, "Description");
         if (err != null) { SetError(exchange, "validation_error", err); return; }
 
-        // Check uniqueness (indexed root field)
-        var existing = await _redb.Query<ScopeProps>()
-            .WhereRedb(o => o.ValueString == request.Name)
-            .FirstOrDefaultAsync();
+        // Check uniqueness (one probe of the [RedbUnique] index; the DB still guards the race)
+        var existing = await _redb.GetByUniqueAsync<ScopeProps>(p => p.ScopeName, request.Name);
         if (existing != null)
         {
             SetError(exchange, "duplicate", $"Scope '{request.Name}' already exists");
@@ -89,17 +87,15 @@ internal sealed class ScopeManagementProcessor : IProcessor
             Resources = request.Resources
         });
         obj.Name = request.DisplayName ?? request.Name;
-        obj.value_string = request.Name;
 
         try
         {
             await _redb.SaveAsync(obj);
         }
-        catch (Exception ex) when (IdentityProcessorHelpers.IsUniqueViolation(ex))
+        catch (redb.Core.Exceptions.RedbUniqueViolationException)
         {
-            // Concurrent writer won the race — partial unique index on _objects
-            // (_value_string) WHERE _id_scheme = ScopeProps rejected this insert.
-            // Surface the same error as the app-level check above for clients.
+            // Concurrent writer won the race — the [RedbUnique] ScopeName index rejected
+            // this insert (V4-UNIQUE). Same error as the app-level check above.
             SetError(exchange, "duplicate", $"Scope '{request.Name}' already exists");
             return;
         }
@@ -119,12 +115,10 @@ internal sealed class ScopeManagementProcessor : IProcessor
         {
             if (dict.TryGetValue("id", out var idVal) && idVal != null
                 && long.TryParse(idVal.ToString(), out var id) && id > 0)
-                scope = (await _redb.LoadAsync<ScopeProps>(id))?.Hydrate();
+                scope = (await _redb.LoadAsync<ScopeProps>(id));
             else if (dict.TryGetValue("name", out var nVal) && nVal is string name
                      && !string.IsNullOrEmpty(name))
-                scope = (await _redb.Query<ScopeProps>()
-                    .WhereRedb(o => o.ValueString == name)
-                    .FirstOrDefaultAsync())?.Hydrate();
+                scope = await _redb.GetByUniqueAsync<ScopeProps>(p => p.ScopeName, name);
             else
                 throw new InvalidOperationException("Either 'id' or 'name' required");
         }
@@ -153,7 +147,7 @@ internal sealed class ScopeManagementProcessor : IProcessor
             return;
         }
 
-        var scope = (await _redb.LoadAsync<ScopeProps>(objectId))?.Hydrate();
+        var scope = (await _redb.LoadAsync<ScopeProps>(objectId));
         if (scope is null)
         {
             exchange.Out ??= new redb.Route.Core.Message();
@@ -217,7 +211,6 @@ internal sealed class ScopeManagementProcessor : IProcessor
             .Skip(request.Offset)
             .Take(count)
             .ToListAsync();
-        items.ForEach(i => i.Hydrate());
 
         exchange.Out ??= new redb.Route.Core.Message();
         exchange.Out.Body = new PagedResult<ScopeResponse>

@@ -1,0 +1,202 @@
+@page "/admin/claim-mappers/new"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    New claim mapper — full-page form (Phase 3, П3: pages-not-dialogs).
+    Replaces the create half of the ClaimMappersList modal, and fixes the modal's
+    blind spot: the OWNER of the rule (global / per-application overlay /
+    claim-scope bundle) was not selectable there at all — every mapper landed
+    global. The page exposes it with the same syntax the API takes.
+*@
+
+<div style="margin-bottom: var(--space-3);">
+    <NavLink href="/admin/claim-mappers" class="btn btn-ghost" style="padding: 0; color: var(--accent-primary);">← Go back to Claim mappers</NavLink>
+</div>
+
+<h1 style="margin: 0;">New claim mapper</h1>
+<p class="text-secondary">A rule that emits one claim into issued tokens.</p>
+
+<div class="card" style="max-width: 720px;">
+    <section class="app-detail__section">
+        <h3 class="app-detail__section-title">Identity</h3>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Name *</span>
+                <input class="app-detail__input" @bind="_form.Name" />
+            </label>
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Claim type *</span>
+                <input class="app-detail__input app-detail__input--mono" placeholder="e.g. email, groups" @bind="_form.ClaimType" />
+            </label>
+        </div>
+
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Owner</span>
+            <div style="display: grid; grid-template-columns: 220px 1fr; gap: var(--space-3);">
+                <select class="app-detail__input" @bind="_ownerKind">
+                    <option value="global">global — every token</option>
+                    <option value="application">application overlay</option>
+                    <option value="scope">claim-scope bundle</option>
+                </select>
+                @if (_ownerKind != "global")
+                {
+                    <input type="number" class="app-detail__input" placeholder="@(_ownerKind == "application" ? "application object id" : "claim-scope object id")"
+                           value="@_ownerId"
+                           @oninput="@(e => _ownerId = long.TryParse(e.Value?.ToString(), out var v) ? v : null)" />
+                }
+            </div>
+            <span class="app-detail__field-hint">
+                <RdbIcon Name="info" Size="12" />
+                Global mappers apply to every token; application overlays only to that client;
+                claim-scope mappers only when the scope is assigned to the requesting client.
+            </span>
+        </label>
+
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Description</span>
+            <input class="app-detail__input" @bind="_form.Description" />
+        </label>
+    </section>
+
+    <section class="app-detail__section">
+        <h3 class="app-detail__section-title">Source</h3>
+
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Source kind *</span>
+            <select class="app-detail__input" @bind="_form.SourceKind">
+                <option value="Constant">Constant</option>
+                <option value="UserProps">User property</option>
+                <option value="CustomClaim">Custom claim</option>
+            </select>
+        </label>
+
+        @if (_form.SourceKind == "Constant")
+        {
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Constant value *</span>
+                <input class="app-detail__input app-detail__input--mono" @bind="_form.ConstantValue" />
+            </label>
+        }
+        else
+        {
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Source path *</span>
+                <input class="app-detail__input app-detail__input--mono"
+                       placeholder="@(_form.SourceKind == "UserProps" ? "Email, DisplayName, …" : "custom-attr-key")"
+                       @bind="_form.SourcePath" />
+                <span class="app-detail__field-hint">
+                    <RdbIcon Name="info" Size="12" />
+                    @(_form.SourceKind == "UserProps"
+                        ? "A property of the user's OIDC profile extension."
+                        : "A key from the user's custom-claims bag.")
+                </span>
+            </label>
+        }
+    </section>
+
+    <section class="app-detail__section">
+        <h3 class="app-detail__section-title">Emission</h3>
+
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Destinations</span>
+            <input class="app-detail__input app-detail__input--mono" placeholder="access_token, id_token" @bind="_form.Destinations" />
+            <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Comma-separated token kinds the claim lands in.</span>
+        </label>
+
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Required scopes</span>
+            <input class="app-detail__input app-detail__input--mono" placeholder="profile, custom:hr" @bind="_form.RequiredScopes" />
+            <span class="app-detail__field-hint"><RdbIcon Name="info" Size="12" /> Emit only when the request carries all of these scopes. Comma-separated; blank = always.</span>
+        </label>
+
+        <div style="display: grid; grid-template-columns: 200px 1fr; gap: var(--space-3); align-items: end;">
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Order</span>
+                <input type="number" class="app-detail__input" @bind="_form.Order" />
+            </label>
+            <div>
+                <label style="display:flex; gap: var(--space-2); align-items:center; cursor:pointer;">
+                    <input type="checkbox" @bind="_form.Enabled" /> <span>Enabled</span>
+                </label>
+                <label style="display:flex; gap: var(--space-2); align-items:center; cursor:pointer; margin-top: var(--space-2);">
+                    <input type="checkbox" @bind="_form.Required" /> <span>Required — reject token issuance when the source is missing</span>
+                </label>
+            </div>
+        </div>
+    </section>
+
+    @if (_error is not null) { <p class="text-error">@_error</p> }
+
+    <div style="display:flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-3);">
+        <NavLink href="/admin/claim-mappers" class="btn btn-secondary">Cancel</NavLink>
+        <button class="btn btn-primary" @onclick="CreateAsync" disabled="@(_saving || !IsValid)">@(_saving ? "Creating…" : "Create mapper")</button>
+    </div>
+</div>
+
+@code {
+    private sealed class FormState
+    {
+        public string Name = "";
+        public string ClaimType = "";
+        public string SourceKind = "Constant";
+        public string? SourcePath, ConstantValue, Description;
+        public string Destinations = "access_token, id_token";
+        public string? RequiredScopes;
+        public int Order;
+        public bool Enabled = true;
+        public bool Required;
+    }
+
+    private readonly FormState _form = new();
+    private string _ownerKind = "global";
+    private long? _ownerId;
+    private bool _saving;
+    private string? _error;
+
+    private bool IsValid =>
+        _form.Name.Trim().Length > 0
+        && _form.ClaimType.Trim().Length > 0
+        && (_form.SourceKind == "Constant"
+            ? !string.IsNullOrWhiteSpace(_form.ConstantValue)
+            : !string.IsNullOrWhiteSpace(_form.SourcePath))
+        && (_ownerKind == "global" || _ownerId is > 0);
+
+    private string? OwnerString =>
+        _ownerKind == "global" ? null : $"{_ownerKind}:{_ownerId}";
+
+    private async Task CreateAsync()
+    {
+        _saving = true; _error = null;
+        try
+        {
+            var dest = _form.Destinations.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var reqScopes = string.IsNullOrWhiteSpace(_form.RequiredScopes)
+                ? null
+                : _form.RequiredScopes.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            var created = await Client.CreateClaimMapperAsync(new CreateClaimMapperRequest
+            {
+                Name = _form.Name.Trim(),
+                ClaimType = _form.ClaimType.Trim(),
+                SourceKind = _form.SourceKind,
+                SourcePath = _form.SourcePath,
+                ConstantValue = _form.ConstantValue,
+                Description = _form.Description,
+                Destinations = dest,
+                RequiredScopes = reqScopes,
+                Order = _form.Order,
+                Enabled = _form.Enabled,
+                Required = _form.Required,
+                Owner = OwnerString,
+            });
+            Toast.Show($"Mapper '{created.Name}' created.", "online");
+            Nav.NavigateTo($"/admin/claim-mappers/{Uri.EscapeDataString(created.Id)}");
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+}

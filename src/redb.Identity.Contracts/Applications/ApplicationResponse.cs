@@ -111,6 +111,15 @@ public sealed class ApplicationResponse
     [JsonPropertyName("idTokenAudiences")]
     public string[]? IdTokenAudiences { get; set; }
 
+    /// <summary>
+    /// Resource indicators carried by issued <c>access_token</c>s as <c>aud</c> values
+    /// (RFC 9068 §2.2), in addition to the Resources of the granted scopes. When neither
+    /// names a resource the server's default audience (<c>{issuer}/resources</c> unless
+    /// configured) is used.
+    /// </summary>
+    [JsonPropertyName("accessTokenAudiences")]
+    public string[]? AccessTokenAudiences { get; set; }
+
     /// <summary>A.6: RFC 9101 — JWT signing alg for the request object. Advisory.</summary>
     [JsonPropertyName("requestObjectSigningAlg")]
     public string? RequestObjectSigningAlg { get; set; }

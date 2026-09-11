@@ -608,7 +608,7 @@ public sealed partial class MfaService
         if (obj is not null)
             return obj;
 
-        obj = new RedbObject<MfaProps>(new MfaProps());
+        obj = new RedbObject<MfaProps>(new MfaProps { UserId = userId });
         obj.key = userId;
         return obj;
     }

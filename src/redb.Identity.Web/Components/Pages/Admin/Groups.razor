@@ -46,9 +46,9 @@
             </span>
             <button class="btn" disabled="@(_offset == 0 || _loading)" @onclick="PrevPage">‹ Prev</button>
             <button class="btn" disabled="@(_offset + PageSize >= _total || _loading)" @onclick="NextPage">Next ›</button>
-            <button class="btn btn-primary" @onclick="OpenCreate">
-                <RdbIcon Name="zap" Size="14" /> New Group
-            </button>
+            <NavLink href="/admin/groups/new" class="btn btn-primary">
+                <RdbIcon Name="edit" Size="14" /> New Group
+            </NavLink>
         </div>
     </div>
 
@@ -135,12 +135,6 @@
     }
 </div>
 
-@if (_creating)
-{
-    <GroupCreateWizard OnClose="@(() => { _creating = false; })"
-                       OnCreated="@OnGroupCreated" />
-}
-
 @code {
     private const int PageSize = 25;
     private const int SearchDebounceMs = 250;
@@ -153,7 +147,6 @@
     private string _typeFilter = "";
     private bool _loading = true;
     private string? _error;
-    private bool _creating;
 
     // Debounce timer for free-typing search
     private System.Threading.Timer? _debounce;
@@ -215,16 +208,6 @@
     {
         _offset += PageSize;
         return ReloadAsync();
-    }
-
-    private void OpenCreate() => _creating = true;
-
-    private async Task OnGroupCreated(GroupResponse g)
-    {
-        _creating = false;
-        Toast.Success($"Group '{g.Name}' created");
-        _offset = 0;
-        await ReloadAsync();
     }
 
     private void OpenDetail(long id) => Nav.NavigateTo($"/admin/groups/{id}");

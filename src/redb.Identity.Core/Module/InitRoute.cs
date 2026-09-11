@@ -79,6 +79,12 @@ public static class InitRoute
         // so it can look up scheme ids against an already-bootstrapped database.
         context.AddLifecycleListener(new IdentityUniqueIndexesInitListener(identitySp));
 
+        // V4-UNIQUE transition backfill (doc/v4/04 §3): copy the value_string mirrors of
+        // pre-V4 rows into Props so [RedbUnique] keys exist for them and GetByUniqueAsync
+        // sees legacy data. Idempotent, no flag; MUST run before the seed listeners —
+        // they look up by unique key now and would recreate legacy-seeded rows otherwise.
+        context.AddLifecycleListener(new V4UniqueBackfillListener(identitySp));
+
         // Audit log: ensure the flat relational table that backs
         // /api/v1/identity/audit exists. Idempotent CREATE IF NOT EXISTS per
         // dialect (Postgres / MSSQL / SQLite) shipped as embedded DDL.

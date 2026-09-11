@@ -107,25 +107,25 @@ internal class InMemoryRedbQueryable<TProps> : IRedbQueryable<TProps>, IOrderedR
     public IRedbQueryable<TProps> Skip(int count)
         => new InMemoryRedbQueryable<TProps>(_source.Skip(count));
 
-    public Task<List<RedbObject<TProps>>> ToListAsync()
+    public Task<List<RedbObject<TProps>>> ToListAsync(CancellationToken cancellationToken = default)
         => Task.FromResult(_source.ToList());
 
-    public Task<int> CountAsync()
+    public Task<int> CountAsync(CancellationToken cancellationToken = default)
         => Task.FromResult(_source.Count());
 
-    public Task<RedbObject<TProps>?> FirstOrDefaultAsync()
+    public Task<RedbObject<TProps>?> FirstOrDefaultAsync(CancellationToken cancellationToken = default)
         => Task.FromResult(_source.FirstOrDefault());
 
-    public Task<RedbObject<TProps>?> FirstOrDefaultAsync(Expression<Func<TProps, bool>> predicate)
+    public Task<RedbObject<TProps>?> FirstOrDefaultAsync(Expression<Func<TProps, bool>> predicate, CancellationToken cancellationToken = default)
     {
         var compiled = predicate.Compile();
         return Task.FromResult(_source.FirstOrDefault(o => compiled(o.Props)));
     }
 
-    public Task<bool> AnyAsync()
+    public Task<bool> AnyAsync(CancellationToken cancellationToken = default)
         => Task.FromResult(_source.Any());
 
-    public Task<bool> AnyAsync(Expression<Func<TProps, bool>> predicate)
+    public Task<bool> AnyAsync(Expression<Func<TProps, bool>> predicate, CancellationToken cancellationToken = default)
     {
         var compiled = predicate.Compile();
         return Task.FromResult(_source.Any(o => compiled(o.Props)));
@@ -135,7 +135,7 @@ internal class InMemoryRedbQueryable<TProps> : IRedbQueryable<TProps>, IOrderedR
 
     public IRedbQueryable<TProps> WhereIn<TValue>(Expression<Func<TProps, TValue>> selector, IEnumerable<TValue> values) => throw new NotSupportedException();
     public IRedbQueryable<TProps> WhereInRedb<TValue>(Expression<Func<IRedbObject, TValue>> selector, IEnumerable<TValue> values) => throw new NotSupportedException();
-    public Task<bool> AllAsync(Expression<Func<TProps, bool>> predicate) => throw new NotSupportedException();
+    public Task<bool> AllAsync(Expression<Func<TProps, bool>> predicate, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     public IRedbProjectedQueryable<TResult> Select<TResult>(Expression<Func<RedbObject<TProps>, TResult>> selector)
     {
         var compiled = selector.Compile();
@@ -147,7 +147,7 @@ internal class InMemoryRedbQueryable<TProps> : IRedbQueryable<TProps>, IOrderedR
     public IRedbQueryable<TProps> DistinctBy<TKey>(Expression<Func<TProps, TKey>> keySelector) => throw new NotSupportedException();
     public IRedbQueryable<TProps> DistinctByRedb<TKey>(Expression<Func<IRedbObject, TKey>> keySelector) => throw new NotSupportedException();
     public IRedbQueryable<TProps> WithMaxRecursionDepth(int depth) => throw new NotSupportedException();
-    public IRedbQueryable<TProps> WithLazyLoading(bool enabled = true) => throw new NotSupportedException();
+    public IRedbQueryable<TProps> WithLazyReferences(bool enabled = true) => throw new NotSupportedException();
     public IRedbQueryable<TProps> WhereHasAncestor<TTarget>(Expression<Func<TTarget, bool>> ancestorCondition, int? maxDepth = null) where TTarget : class => throw new NotSupportedException();
     public IRedbQueryable<TProps> WhereHasDescendant<TTarget>(Expression<Func<TTarget, bool>> descendantCondition, int? maxDepth = null) where TTarget : class => throw new NotSupportedException();
     public IRedbQueryable<TProps> WhereLevel(int level) => throw new NotSupportedException();
@@ -160,28 +160,28 @@ internal class InMemoryRedbQueryable<TProps> : IRedbQueryable<TProps>, IOrderedR
     public IRedbQueryable<TProps> WhereDescendantsOf(IRedbObject ancestorObject, int? maxDepth = null) => throw new NotSupportedException();
     public IRedbQueryable<TProps> WithMaxDepth(int depth) => throw new NotSupportedException();
     public IRedbQueryable<TProps> WithPropsDepth(int depth) => throw new NotSupportedException();
-    public Task<List<TreeRedbObject<TProps>>> ToTreeListAsync() => throw new NotSupportedException();
-    public Task<List<ITreeRedbObject>> ToRootListAsync() => throw new NotSupportedException();
-    public Task<List<TreeRedbObject<TProps>>> ToFlatListAsync() => throw new NotSupportedException();
-    public Task<int> DeleteAsync() => throw new NotSupportedException();
-    public Task<decimal> SumAsync<TField>(Expression<Func<TProps, TField>> selector) where TField : struct => throw new NotSupportedException();
-    public Task<decimal> AverageAsync<TField>(Expression<Func<TProps, TField>> selector) where TField : struct => throw new NotSupportedException();
-    public Task<TField?> MinAsync<TField>(Expression<Func<TProps, TField>> selector) where TField : struct => throw new NotSupportedException();
-    public Task<TField?> MaxAsync<TField>(Expression<Func<TProps, TField>> selector) where TField : struct => throw new NotSupportedException();
-    public Task<FieldStatistics<TField>> GetStatisticsAsync<TField>(Expression<Func<TProps, TField>> selector) where TField : struct => throw new NotSupportedException();
-    public Task<TResult> AggregateAsync<TResult>(Expression<Func<RedbObject<TProps>, TResult>> selector) => throw new NotSupportedException();
-    public Task<decimal> SumRedbAsync<TField>(Expression<Func<IRedbObject, TField>> selector) where TField : struct => throw new NotSupportedException();
-    public Task<decimal> AverageRedbAsync<TField>(Expression<Func<IRedbObject, TField>> selector) where TField : struct => throw new NotSupportedException();
-    public Task<TField?> MinRedbAsync<TField>(Expression<Func<IRedbObject, TField>> selector) where TField : struct => throw new NotSupportedException();
-    public Task<TField?> MaxRedbAsync<TField>(Expression<Func<IRedbObject, TField>> selector) where TField : struct => throw new NotSupportedException();
-    public Task<TResult> AggregateRedbAsync<TResult>(Expression<Func<IRedbObject, TResult>> selector) => throw new NotSupportedException();
+    public Task<List<TreeRedbObject<TProps>>> ToTreeListAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public Task<List<ITreeRedbObject>> ToRootListAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public Task<List<TreeRedbObject<TProps>>> ToFlatListAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public Task<int> DeleteAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public Task<decimal> SumAsync<TField>(Expression<Func<TProps, TField>> selector, CancellationToken cancellationToken = default) where TField : struct => throw new NotSupportedException();
+    public Task<decimal> AverageAsync<TField>(Expression<Func<TProps, TField>> selector, CancellationToken cancellationToken = default) where TField : struct => throw new NotSupportedException();
+    public Task<TField?> MinAsync<TField>(Expression<Func<TProps, TField>> selector, CancellationToken cancellationToken = default) where TField : struct => throw new NotSupportedException();
+    public Task<TField?> MaxAsync<TField>(Expression<Func<TProps, TField>> selector, CancellationToken cancellationToken = default) where TField : struct => throw new NotSupportedException();
+    public Task<FieldStatistics<TField>> GetStatisticsAsync<TField>(Expression<Func<TProps, TField>> selector, CancellationToken cancellationToken = default) where TField : struct => throw new NotSupportedException();
+    public Task<TResult> AggregateAsync<TResult>(Expression<Func<RedbObject<TProps>, TResult>> selector, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public Task<decimal> SumRedbAsync<TField>(Expression<Func<IRedbObject, TField>> selector, CancellationToken cancellationToken = default) where TField : struct => throw new NotSupportedException();
+    public Task<decimal> AverageRedbAsync<TField>(Expression<Func<IRedbObject, TField>> selector, CancellationToken cancellationToken = default) where TField : struct => throw new NotSupportedException();
+    public Task<TField?> MinRedbAsync<TField>(Expression<Func<IRedbObject, TField>> selector, CancellationToken cancellationToken = default) where TField : struct => throw new NotSupportedException();
+    public Task<TField?> MaxRedbAsync<TField>(Expression<Func<IRedbObject, TField>> selector, CancellationToken cancellationToken = default) where TField : struct => throw new NotSupportedException();
+    public Task<TResult> AggregateRedbAsync<TResult>(Expression<Func<IRedbObject, TResult>> selector, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     public IRedbGroupedQueryable<TKey, TProps> GroupBy<TKey>(Expression<Func<TProps, TKey>> keySelector) => throw new NotSupportedException();
     public IRedbGroupedQueryable<TKey, TProps> GroupByRedb<TKey>(Expression<Func<IRedbObject, TKey>> keySelector) => throw new NotSupportedException();
     public IRedbGroupedQueryable<TKey, TItem> GroupByArray<TItem, TKey>(Expression<Func<TProps, IEnumerable<TItem>>> arraySelector, Expression<Func<TItem, TKey>> keySelector) where TItem : class, new() => throw new NotSupportedException();
     public IRedbWindowedQueryable<TProps> WithWindow(Action<IWindowSpec<TProps>> windowConfig) => throw new NotSupportedException();
     public string ToSqlString() => throw new NotSupportedException();
-    public Task<string> ToSqlStringAsync() => throw new NotSupportedException();
-    public Task<string> ToFilterJsonAsync() => throw new NotSupportedException();
+    public Task<string> ToSqlStringAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public Task<string> ToFilterJsonAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
     // IOrderedRedbQueryable
     public IOrderedRedbQueryable<TProps> ThenBy<TKey>(Expression<Func<TProps, TKey>> keySelector) => throw new NotSupportedException();
@@ -226,15 +226,15 @@ internal class InMemoryRedbProjectedQueryable<TResult> : IRedbProjectedQueryable
     public IRedbProjectedQueryable<TResult> Distinct()
         => new InMemoryRedbProjectedQueryable<TResult>(_source.Distinct());
 
-    public Task<List<TResult>> ToListAsync()
+    public Task<List<TResult>> ToListAsync(CancellationToken cancellationToken = default)
         => Task.FromResult(_source.ToList());
 
-    public Task<int> CountAsync()
+    public Task<int> CountAsync(CancellationToken cancellationToken = default)
         => Task.FromResult(_source.Count());
 
-    public Task<TResult?> FirstOrDefaultAsync()
+    public Task<TResult?> FirstOrDefaultAsync(CancellationToken cancellationToken = default)
         => Task.FromResult(_source.FirstOrDefault());
 
-    public Task<string> GetProjectionInfoAsync()
+    public Task<string> GetProjectionInfoAsync(CancellationToken cancellationToken = default)
         => Task.FromResult("in-memory-projection");
 }

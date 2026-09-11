@@ -169,10 +169,8 @@ public sealed class ConsentService
                 .ToListAsync()
                 .ConfigureAwait(false);
 
-            // Hydrate copies _objects.value_string -> Props.ClientId, since ClientId is
-            // [RedbIgnore] and stored on the base object, not the PROPS facets.
             foreach (var app in apps)
-                appsById[app.id] = app.Hydrate();
+                appsById[app.id] = app;
         }
 
         var result = new List<ConsentInfo>(consents.Count);
@@ -209,9 +207,7 @@ public sealed class ConsentService
     /// </summary>
     public async Task<long?> FindApplicationIdAsync(string clientId, CancellationToken ct = default)
     {
-        var app = await _redb.Query<ApplicationProps>()
-            .WhereRedb(o => o.ValueString == clientId)
-            .FirstOrDefaultAsync()
+        var app = await _redb.GetByUniqueAsync<ApplicationProps>(p => p.ClientId, clientId)
             .ConfigureAwait(false);
 
         return app?.id;

@@ -71,7 +71,7 @@ internal sealed class RedbTokenStore : IOpenIddictTokenStore<RedbObject<TokenPro
         ArgumentNullException.ThrowIfNull(token);
         token.id = await _redb.SaveAsync(token).ConfigureAwait(false);
         _idCache[token.id] = token;
-        if (token.value_string is { } refId)
+        if ((token.Props.ReferenceId ?? token.value_string) is { } refId)
             _refCache[refId] = token;
     }
 
@@ -80,7 +80,7 @@ internal sealed class RedbTokenStore : IOpenIddictTokenStore<RedbObject<TokenPro
         ArgumentNullException.ThrowIfNull(token);
         await IdentityDeletionHelper.DeleteAsync(_redb, _backgroundDeletion, token.id).ConfigureAwait(false);
         _idCache.Remove(token.id);
-        if (token.value_string is { } refId)
+        if ((token.Props.ReferenceId ?? token.value_string) is { } refId)
             _refCache.Remove(refId);
     }
 
@@ -167,7 +167,7 @@ internal sealed class RedbTokenStore : IOpenIddictTokenStore<RedbObject<TokenPro
             .FirstOrDefaultAsync()
             .ConfigureAwait(false);
         _idCache[id] = tok;
-        if (tok?.value_string is { } refId)
+        if ((tok?.Props.ReferenceId ?? tok?.value_string) is { } refId)
             _refCache[refId] = tok;
         var ms = (long)Stopwatch.GetElapsedTime(sw).TotalMilliseconds;
         var n = ++_fbidCalls;
@@ -188,9 +188,8 @@ internal sealed class RedbTokenStore : IOpenIddictTokenStore<RedbObject<TokenPro
         }
 
         var sw = Stopwatch.GetTimestamp();
-        var tok = await _redb.Query<TokenProps>()
-            .WhereRedb(o => o.ValueString == identifier)
-            .FirstOrDefaultAsync()
+        // V4-UNIQUE: one probe of the unique index instead of a scheme query on value_string.
+        var tok = await _redb.GetByUniqueAsync<TokenProps>(p => p.ReferenceId, identifier)
             .ConfigureAwait(false);
         _refCache[identifier] = tok;
         if (tok != null)
@@ -297,7 +296,8 @@ internal sealed class RedbTokenStore : IOpenIddictTokenStore<RedbObject<TokenPro
         RedbObject<TokenProps> token, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(token);
-        return new(token.value_string);
+        // Props is the source of truth; value_string covers not-yet-backfilled legacy rows.
+        return new(token.Props.ReferenceId ?? token.value_string);
     }
 
     public ValueTask<string?> GetStatusAsync(
@@ -612,7 +612,10 @@ internal sealed class RedbTokenStore : IOpenIddictTokenStore<RedbObject<TokenPro
         RedbObject<TokenProps> token, string? identifier, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(token);
-        token.value_string = identifier;
+        // V4-UNIQUE: the key lives in Props under [RedbUnique]. Before V4 this method wrote
+        // ONLY the value_string mirror, leaving _values.ReferenceId empty for store-created
+        // tokens; the boot backfill repaired existing rows (doc/v4/04 §3).
+        token.Props.ReferenceId = identifier;
         return default;
     }
 

@@ -76,7 +76,7 @@ public class ExternalUserProviderTests : IDisposable
                 ? ExternalAuthResult.Success(
                     externalId: $"cn={extUsername},ou=users,dc=corp",
                     displayName: $"Alice {extUsername}",
-                    email: "alice-e2e@corp.example.com",
+                    email: $"alice-{extUsername}@corp.example.com",
                     givenName: "Alice",
                     familyName: "External",
                     additionalClaims: new Dictionary<string, string> { ["department"] = "R&D" })
@@ -107,7 +107,7 @@ public class ExternalUserProviderTests : IDisposable
         fn.GetString().Should().Be("External");
 
         claims.TryGetProperty("email", out var email).Should().BeTrue("JWT must contain email");
-        email.GetString().Should().Be("alice-e2e@corp.example.com");
+        email.GetString().Should().Be($"alice-{extUsername}@corp.example.com");
 
         // 3) DB state (proves LoginService.ResolveExternalUser created user + UserProps)
         var coreUser = await _fx.Redb.UserProvider.GetUserByLoginAsync(extUsername);
@@ -141,7 +141,7 @@ public class ExternalUserProviderTests : IDisposable
                 ? ExternalAuthResult.Success(
                     externalId: $"cn={extUsername},dc=corp",
                     displayName: $"Bob {extUsername}",
-                    email: "bob-v1@corp.example.com",
+                    email: $"bob-v1-{extUsername}@corp.example.com",
                     phone: "+1000000001",
                     givenName: "Bob",
                     familyName: "Original")
@@ -157,7 +157,7 @@ public class ExternalUserProviderTests : IDisposable
 
         // Verify first-login _users state
         var user1 = await _fx.Redb.UserProvider.GetUserByLoginAsync(extUsername);
-        user1!.Email.Should().Be("bob-v1@corp.example.com");
+        user1!.Email.Should().Be($"bob-v1-{extUsername}@corp.example.com");
         user1.Phone.Should().Be("+1000000001");
 
         // Change profile on external side (email, phone, name all change)
@@ -166,7 +166,7 @@ public class ExternalUserProviderTests : IDisposable
                 ? ExternalAuthResult.Success(
                     externalId: $"cn={extUsername},dc=corp",
                     displayName: $"BobUp {extUsername}",
-                    email: "bob-v2@corp.example.com",
+                    email: $"bob-v2-{extUsername}@corp.example.com",
                     phone: "+2000000002",
                     givenName: "Bobby",
                     familyName: "Updated")
@@ -185,11 +185,11 @@ public class ExternalUserProviderTests : IDisposable
         var claims2 = DecodeJwtPayload(resp2["access_token"]!.ToString()!);
         claims2.GetProperty("given_name").GetString().Should().Be("Bobby");
         claims2.GetProperty("family_name").GetString().Should().Be("Updated");
-        claims2.GetProperty("email").GetString().Should().Be("bob-v2@corp.example.com");
+        claims2.GetProperty("email").GetString().Should().Be($"bob-v2-{extUsername}@corp.example.com");
 
         // _users row updated (authoritative sync from external)
         var user2 = await _fx.Redb.UserProvider.GetUserByLoginAsync(extUsername);
-        user2!.Email.Should().Be("bob-v2@corp.example.com", "_users.Email must be synced");
+        user2!.Email.Should().Be($"bob-v2-{extUsername}@corp.example.com", "_users.Email must be synced");
         user2.Phone.Should().Be("+2000000002", "_users.Phone must be synced");
         user2.Name.Should().Be($"BobUp {extUsername}", "_users.Name must be synced");
 
@@ -240,7 +240,9 @@ public class ExternalUserProviderTests : IDisposable
             Login = localUsername,
             Password = localPassword,
             Name = $"LocalE2E {localUsername}",
-            Email = "locale2e@test.com",
+            // Per run: emails are unique in _users (UX_users_email); the MSSQL test database is never
+            // wiped between runs, so a fixed address collides on the second run.
+            Email = $"{localUsername}@test.com",
             Enabled = true
         });
 

@@ -12,11 +12,13 @@ public sealed class SessionTicketService
 {
     private const string Purpose = "redb.identity.session";
     private const string ReauthPurpose = "redb.identity.reauth";
+    private const string ConsentPurpose = "redb.identity.consent";
     private const byte Version1 = 1;
     private const byte Version2 = 2;
 
     private readonly IDataProtector _protector;
     private readonly IDataProtector _reauthProtector;
+    private readonly IDataProtector _consentProtector;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<SessionTicketService>? _logger;
 
@@ -38,6 +40,7 @@ public sealed class SessionTicketService
         ArgumentNullException.ThrowIfNull(provider);
         _protector = provider.CreateProtector(Purpose);
         _reauthProtector = provider.CreateProtector(ReauthPurpose);
+        _consentProtector = provider.CreateProtector(ConsentPurpose);
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger;
     }
@@ -87,6 +90,52 @@ public sealed class SessionTicketService
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "SessionTicketService: failed to decrypt reauth marker.");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Mints a signed consent ticket. The authorization server issues it (after it has
+    /// decided consent is required) so that the consent page can render — and be granted —
+    /// only from server-supplied, tamper-proof parameters. Before this, the page rendered
+    /// <c>app_name</c>/<c>scopes</c> straight from the query string, so a crafted
+    /// <c>/consent?app_name=Your%20Bank&amp;client_id=attacker</c> link showed the
+    /// operator's own trusted UI attributing an attacker's client to a familiar name. The
+    /// ticket also carries the user it was minted for, so the grant POST can refuse a ticket
+    /// replayed under a different session. A distinct protector purpose keeps it
+    /// non-interchangeable with session tickets.
+    /// </summary>
+    public string ProtectConsent(ConsentTicket ticket)
+    {
+        ArgumentNullException.ThrowIfNull(ticket);
+        var withStamp = ticket with { IssuedAt = _timeProvider.GetUtcNow() };
+        var payload = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(withStamp);
+        return Convert.ToBase64String(_consentProtector.Protect(payload));
+    }
+
+    /// <summary>
+    /// Verifies and decodes a consent ticket produced by <see cref="ProtectConsent"/>.
+    /// Returns <c>null</c> when the ticket is missing, tampered, or older than
+    /// <paramref name="maxAge"/>.
+    /// </summary>
+    public ConsentTicket? UnprotectConsent(string ticket, TimeSpan maxAge)
+    {
+        if (string.IsNullOrEmpty(ticket))
+            return null;
+
+        try
+        {
+            var payload = _consentProtector.Unprotect(Convert.FromBase64String(ticket));
+            var decoded = System.Text.Json.JsonSerializer.Deserialize<ConsentTicket>(payload);
+            if (decoded is null)
+                return null;
+            if (_timeProvider.GetUtcNow() - decoded.IssuedAt > maxAge)
+                return null;
+            return decoded;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "SessionTicketService: failed to decrypt consent ticket.");
             return null;
         }
     }
@@ -177,6 +226,16 @@ public sealed class SessionTicketService
 /// Decrypted session ticket data.
 /// </summary>
 public sealed record SessionTicket(long UserId, string Username, DateTimeOffset IssuedAt, long SessionId = 0);
+
+/// <summary>
+/// Server-signed consent parameters. Every field is set by the authorization server, never
+/// by the browser: <see cref="AppName"/> and <see cref="Scopes"/> are what the page displays,
+/// <see cref="ClientId"/> and <see cref="Scopes"/> are what the grant records, and
+/// <see cref="UserId"/> is the user it was minted for (the grant POST requires the session to
+/// match). <see cref="IssuedAt"/> is stamped by <see cref="SessionTicketService.ProtectConsent"/>.
+/// </summary>
+public sealed record ConsentTicket(
+    long UserId, string ClientId, string AppName, string Scopes, string ReturnUrl, DateTimeOffset IssuedAt = default);
 
 /// <summary>
 /// Decrypted re-authentication marker: the session that was active when re-auth was forced

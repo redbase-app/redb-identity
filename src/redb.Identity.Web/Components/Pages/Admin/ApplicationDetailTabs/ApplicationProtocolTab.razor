@@ -354,6 +354,25 @@
 </section>
 
 <section class="app-detail__section">
+    <h3 class="app-detail__section-title">Access Token audience</h3>
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Resource indicators</span>
+        <textarea class="app-detail__input app-detail__input--mono"
+                  rows="3"
+                  value="@_accessTokenAudiencesText"
+                  @oninput="@(e => { _accessTokenAudiencesText = e.Value?.ToString() ?? string.Empty; _dirty = true; })"
+                  placeholder="https://api.example.com"></textarea>
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            One audience per line, added to the <code>aud</code> of every <code>access_token</code>
+            (RFC 9068) next to the Resources of the granted scopes. When neither names a
+            resource, the server default (<code>{issuer}/resources</code>) applies. Leave empty
+            to rely on scope Resources alone.
+        </span>
+    </div>
+</section>
+
+<section class="app-detail__section">
     <h3 class="app-detail__section-title">Token lifetimes</h3>
 
     <div class="app-detail__field">
@@ -556,6 +575,9 @@
     // shape as _redirectUrisText: SplitLines on save, string.Join("\n") on load.
     private string _idTokenAudiencesText = "";
 
+    // RFC 9068: access_token resource indicators, same newline-joined shape.
+    private string _accessTokenAudiencesText = "";
+
     // A.4: derived from ClientType + JWKS presence. Server has no dedicated field;
     // we project on load and decompose on save.
     //   none              ↔ ClientType=public
@@ -665,6 +687,7 @@
         _refreshTokenSeconds = App.RefreshTokenLifetimeSeconds?.ToString() ?? string.Empty;
         _idTokenSeconds = App.IdentityTokenLifetimeSeconds?.ToString() ?? string.Empty;
         _idTokenAudiencesText = string.Join("\n", App.IdTokenAudiences ?? Array.Empty<string>());
+        _accessTokenAudiencesText = string.Join("\n", App.AccessTokenAudiences ?? Array.Empty<string>());
         // A.4: derive auth method from stored ClientType + JWKS presence.
         _newClientType = App.ClientType ?? "public";
         var isPublic = string.Equals(_newClientType, "public", StringComparison.OrdinalIgnoreCase);
@@ -845,6 +868,7 @@
                 // A.3: empty textarea becomes empty array, which the server interprets
                 // as "clear all extras" (the implicit client_id default still wins).
                 IdTokenAudiences = SplitLines(_idTokenAudiencesText),
+                AccessTokenAudiences = SplitLines(_accessTokenAudiencesText),
                 // A.6 — Request Object choices.
                 RequestObjectSigningAlg = _reqObjSigningAlg,
                 RequestObjectEncryptionAlg = _reqObjEncAlg,

@@ -114,6 +114,14 @@ public sealed class UpdateApplicationRequest
     public string[]? IdTokenAudiences { get; set; }
 
     /// <summary>
+    /// Resource indicators for issued <c>access_token</c>s (RFC 9068 <c>aud</c>). Null
+    /// leaves the existing list unchanged; an empty array clears it (scope Resources and
+    /// the server default still apply).
+    /// </summary>
+    [JsonPropertyName("accessTokenAudiences")]
+    public string[]? AccessTokenAudiences { get; set; }
+
+    /// <summary>
     /// A.6: RFC 9101 — JWT signing alg for the request object. Empty string clears,
     /// null leaves unchanged. Advisory until JAR enforcement handler ships.
     /// </summary>

@@ -352,7 +352,7 @@ internal sealed class RoleManagementProcessor : IProcessor
         {
             RoleId = roleId.Value,
             ScopeId = s.Id,
-            ScopeName = s.value_string ?? s.name,
+            ScopeName = s.Props.ScopeName ?? s.value_string ?? s.name,
             Description = s.Props.Description,
             AttachedAt = s.date_create
         }).ToList();

@@ -61,7 +61,7 @@ public class FullStackPasswordRecoveryTests
         await _fx.UseRedbAsync(async redb =>
         {
             var app = await redb.Query<ApplicationProps>()
-                .WhereRedb(o => o.ValueString == ClientId)
+                .Where(p => p.ClientId == ClientId)
                 .FirstOrDefaultAsync();
             app.Should().NotBeNull("seed for {0} must exist", ClientId);
             var existing = app!.Props.PasswordResetUris ?? Array.Empty<string>();

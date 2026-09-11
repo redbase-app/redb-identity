@@ -1,0 +1,192 @@
+@page "/admin/claim-scopes/{Id}"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    Claim scope detail — full page (Phase 3, П5: pages-not-dialogs). Replaces the
+    ClaimScopesList edit modal AND its inline master-detail mapper panel: the
+    mappers owned by this scope are a section here, deep-linked to the mapper pages.
+*@
+
+<div style="margin-bottom: var(--space-3);">
+    <NavLink href="/admin/claim-scopes" class="btn btn-ghost" style="padding: 0; color: var(--accent-primary);">← Go back to Claim scopes</NavLink>
+</div>
+
+@if (_loading) { <p class="text-secondary">Loading…</p> }
+else if (_loadError is not null) { <p class="text-error">@_loadError</p> }
+else if (_s is not null)
+{
+    <div style="display:flex; gap: var(--space-4); align-items: flex-start; margin-bottom: var(--space-4);">
+        <div class="apps-list__avatar" style="font-size: 1.5rem; width: 56px; height: 56px;">@char.ToUpperInvariant(_s.Name is { Length: > 0 } n ? n[0] : 'C')</div>
+        <div style="flex: 1;">
+            <h1 style="margin: 0;"><code>@_s.Name</code></h1>
+            <div style="display:flex; gap: var(--space-2); margin-top: var(--space-1);">
+                @if (_form.Enabled) { <RdbBadge Text="enabled" Variant="online" /> } else { <RdbBadge Text="disabled" Variant="offline" /> }
+            </div>
+        </div>
+        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">@(_saving ? "Saving…" : "Save")</button>
+    </div>
+
+    <div class="card" style="max-width: 720px;">
+        <section class="app-detail__section">
+            <h3 class="app-detail__section-title">Definition</h3>
+            <dl class="app-detail__kv">
+                <dt>Name</dt><dd><code>@_s.Name</code> (immutable)</dd>
+                <dt>Internal id</dt><dd><code>@_s.Id</code></dd>
+            </dl>
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Display name</span>
+                <input class="app-detail__input" @bind="_form.DisplayName" />
+            </label>
+            <label class="app-detail__field">
+                <span class="app-detail__field-label">Description</span>
+                <input class="app-detail__input" @bind="_form.Description" />
+            </label>
+            <label style="display:flex; gap:var(--space-2); align-items:center; cursor:pointer;">
+                <input type="checkbox" @bind="_form.Enabled" />
+                <span>Enabled — assignments referencing this scope apply their mappers</span>
+            </label>
+        </section>
+
+        <section class="app-detail__section">
+            <h3 class="app-detail__section-title">Mappers in this scope</h3>
+            @if (_mappersLoading) { <p class="text-secondary">Loading…</p> }
+            else if (_mappersError is not null) { <p class="text-error">@_mappersError</p> }
+            else if (_mappers.Count == 0)
+            {
+                <p class="text-secondary">No mappers yet — this scope emits nothing.</p>
+            }
+            else
+            {
+                <table class="data-table">
+                    <thead><tr><th>Name</th><th>Claim</th><th>Source</th><th>Enabled</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var m in _mappers)
+                        {
+                            <tr>
+                                <td><strong>@m.Name</strong></td>
+                                <td><code>@m.ClaimType</code></td>
+                                <td><span class="badge">@m.SourceKind</span></td>
+                                <td><RdbBadge Text="@(m.Enabled ? "on" : "off")" Variant="@(m.Enabled ? "online" : "offline")" /></td>
+                                <td style="text-align:right;">
+                                    <NavLink href="@($"/admin/claim-mappers/{Uri.EscapeDataString(m.Id)}")" class="btn btn-sm">
+                                        Open <RdbIcon Name="chevron-right" Size="12" />
+                                    </NavLink>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            <div style="margin-top: var(--space-2);">
+                <NavLink href="/admin/claim-mappers/new" class="btn btn-secondary">
+                    <RdbIcon Name="edit" Size="14" /> New mapper (pick owner «claim-scope #@_s.Id»)
+                </NavLink>
+            </div>
+        </section>
+
+        <section class="app-detail__section">
+            <h3 class="app-detail__section-title">Danger zone</h3>
+            <p class="text-secondary" style="margin-top: 0;">
+                Deleting a claim scope cascades: its assignments to applications and the mapper
+                rules under it are removed as well.
+            </p>
+            <button class="btn btn-danger" @onclick="DeleteAsync">Delete this claim scope</button>
+        </section>
+
+        @if (_saveError is not null) { <p class="text-error">@_saveError</p> }
+    </div>
+}
+
+<UiTypedConfirmDialog @ref="_confirm" />
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    private sealed class FormState
+    {
+        public string? DisplayName, Description;
+        public bool Enabled = true;
+    }
+
+    private ClaimScopeResponse? _s;
+    private FormState _form = new();
+    private readonly List<ClaimMapperResponse> _mappers = new();
+    private bool _loading = true, _mappersLoading;
+    private bool _saving;
+    private string? _loadError, _saveError, _mappersError;
+    private UiTypedConfirmDialog? _confirm;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _loadError = null;
+        try
+        {
+            _s = await Client.GetClaimScopeAsync(Id);
+            _form = new FormState
+            {
+                DisplayName = _s.DisplayName,
+                Description = _s.Description,
+                Enabled = _s.Enabled,
+            };
+            await LoadMappersAsync();
+        }
+        catch (Exception ex) { _loadError = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task LoadMappersAsync()
+    {
+        if (_s is null) return;
+        _mappersLoading = true; _mappersError = null;
+        try
+        {
+            var page = await Client.ListClaimMappersAsync(owner: $"scope:{_s.Id}", offset: 0, count: 100);
+            _mappers.Clear();
+            _mappers.AddRange(page.Items);
+        }
+        catch (Exception ex) { _mappersError = ex.Message; }
+        finally { _mappersLoading = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_s is null) return;
+        _saving = true; _saveError = null;
+        try
+        {
+            _s = await Client.UpdateClaimScopeAsync(_s.Id, new UpdateClaimScopeRequest
+            {
+                Id = _s.Id,
+                DisplayName = _form.DisplayName,
+                Description = _form.Description,
+                Enabled = _form.Enabled,
+            });
+            Toast.Show("Saved.", "online");
+        }
+        catch (Exception ex) { _saveError = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_s is null || _confirm is null) return;
+        var ok = await _confirm.ShowAsync(
+            expectedText: _s.Name ?? _s.Id,
+            title: "Delete claim scope",
+            message: $"This deletes the claim scope '{_s.Name}' AND cascades to its application " +
+                     "assignments and the mapper rules under it.",
+            confirmLabel: "Delete this claim scope");
+        if (!ok) return;
+
+        try
+        {
+            await Client.DeleteClaimScopeAsync(_s.Id);
+            Toast.Show($"Claim scope '{_s.Name}' deleted.", "online");
+            Nav.NavigateTo("/admin/claim-scopes");
+        }
+        catch (Exception ex) { Toast.Show(ex.Message, "error"); }
+    }
+}

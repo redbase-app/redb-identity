@@ -116,6 +116,53 @@ public class DpopFullCycleTests
         body.GetProperty("error").GetString().Should().Be("invalid_dpop_proof");
     }
 
+    // ─── Behind a TLS-terminating reverse proxy ───
+    //
+    // The proxy speaks plain HTTP to the server and reports the client's real origin in
+    // X-Forwarded-Proto. RFC 9449 §4.3 makes the server compare the proof's `htu` with the URL the
+    // client used, which is https://... on the client side and http://... on our socket. Without
+    // host-level forwarded-header resolution the two never match and DPoP cannot be deployed behind
+    // any TLS terminator. The fixture lists the loopback peer as a trusted proxy, so the header is
+    // honoured; the control test below proves the header is what makes the difference.
+
+    [Fact]
+    public async Task Token_BehindTlsTerminator_HtuWithHttpsScheme_IsAccepted()
+    {
+        using var ec = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        // What the client actually used: https on the public side of the proxy.
+        var publicUrl = $"https://localhost:{_fx.Port}/connect/token";
+        var proof = BuildDpopProof(ec, "POST", publicUrl);
+
+        using var req = BuildPasswordTokenRequest();
+        req.Headers.Add("DPoP", proof);
+        req.Headers.TryAddWithoutValidation("X-Forwarded-Proto", "https");
+
+        var resp = await _fx.Http.SendAsync(req);
+        var body = await resp.Content.ReadAsStringAsync();
+        resp.StatusCode.Should().Be(HttpStatusCode.OK,
+            "behind a trusted TLS-terminating proxy the server must see the https URL the client signed: {0}", body);
+        JsonDocument.Parse(body).RootElement.GetProperty("token_type").GetString().Should().Be("DPoP");
+    }
+
+    [Fact]
+    public async Task Token_WithoutForwardedProto_HtuWithHttpsScheme_IsRejected()
+    {
+        // Control: same proof, no forwarded header. The socket scheme is http, so the https `htu`
+        // must not match. This pins that the previous test passes because of the header, not
+        // because the scheme check is loose.
+        using var ec = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var publicUrl = $"https://localhost:{_fx.Port}/connect/token";
+        var proof = BuildDpopProof(ec, "POST", publicUrl);
+
+        using var req = BuildPasswordTokenRequest();
+        req.Headers.Add("DPoP", proof);
+
+        var resp = await _fx.Http.SendAsync(req);
+        ((int)resp.StatusCode).Should().BeGreaterOrEqualTo(400);
+        var body = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;
+        body.GetProperty("error").GetString().Should().Be("invalid_dpop_proof");
+    }
+
     /// <summary>
     /// Builds a /token request authenticated with the confidential test client + ROPC.
     /// Adds Authorization: Basic with the client secret.

@@ -8,7 +8,8 @@ namespace redb.Identity.Core.Models;
 /// <para>
 /// All payload fields use built-in <see cref="redb.Core.Models.Entities.RedbObject"/> base columns:
 /// <list type="bullet">
-///   <item><c>name</c> = flag identifier (e.g. <c>"bootstrap_completed"</c>) — UNIQUE per scheme.</item>
+///   <item><c>name</c> = flag identifier (e.g. <c>"bootstrap_completed"</c>), mirrored into
+///   <c>value_unique</c> — UNIQUE per scheme via the core index (V4-UNIQUE).</item>
 ///   <item><c>value_bool</c> = set / unset state.</item>
 ///   <item><c>value_datetime</c> = when the flag was set.</item>
 ///   <item><c>value_string</c> = optional context payload (e.g. client_id of the bootstrapped app).</item>
@@ -18,10 +19,11 @@ namespace redb.Identity.Core.Models;
 /// </para>
 /// <para>
 /// The Props body is intentionally empty: this class exists only so a typed
-/// <c>Query&lt;IdentitySystemFlagProps&gt;()</c> binds to a known scheme (and so
-/// <see cref="Module.IdentityUniqueIndexesInitListener"/> can hang a UNIQUE constraint
-/// on <c>(scheme_id, _name)</c> protecting against bootstrap races on both PostgreSQL
-/// and MSSQL — <c>_name</c> is a fixed-width column on both dialects).
+/// <c>Query&lt;IdentitySystemFlagProps&gt;()</c> binds to a known scheme. Bootstrap races
+/// are closed by the core's <c>ValueUnique</c> per-scheme unique index (V4-UNIQUE,
+/// doc/v4/03 §2, first-wins: the loser catches <c>RedbUniqueViolationException</c> and
+/// treats it as "already completed"); the pre-V4 artificial <c>(scheme_id, _name)</c>
+/// index from <see cref="Module.IdentityUniqueIndexesInitListener"/> is being retired.
 /// </para>
 /// </summary>
 [RedbScheme("identity.system_flag")]
