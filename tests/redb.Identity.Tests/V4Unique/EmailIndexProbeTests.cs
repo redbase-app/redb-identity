@@ -12,7 +12,7 @@ namespace redb.Identity.Tests.V4Unique;
 
 /// <summary>
 /// Permanent regression test born as a review-forensic probe: UX_users_email (the one index
-/// that STAYS, owner decision Р1) was absent on every live test database. The finding: the
+/// that STAYS, owner decision R1) was absent on every live test database. The finding: the
 /// full-stack fixtures never run InitRoute.main — they hand-register a single listener
 /// (AuditLog) — so NO artificial index has EVER existed in the test environment; only real
 /// module-host deployments create them. This test pins the listener itself: invoked directly,

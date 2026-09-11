@@ -6,7 +6,7 @@ using Xunit;
 namespace redb.Identity.Tests.Soap;
 
 /// <summary>
-/// Ф4–Ф5 end to end: WS-Trust against the real Core. A token is issued, validated, cancelled, and seen
+/// F4–F5 end to end: WS-Trust against the real Core. A token is issued, validated, cancelled, and seen
 /// dead afterwards — the same issuer, the same client registry and the same token store the other
 /// transports use. That is the acceptance criterion the whole facade exists for: a client registered over
 /// HTTP gets a token over SOAP.
@@ -77,7 +77,7 @@ public class SoapProtocolFlowTests : IClassFixture<SoapIdentityFixture>
         var body = Body(envelope);
         body.Descendants().Should().Contain(e => e.Name == Wst + "RequestSecurityTokenResponseCollection");
 
-        // A JWT, which is what the RSTR carries by the Ф0 decision — same issuer, same signature, same
+        // A JWT, which is what the RSTR carries by the F0 decision — same issuer, same signature, same
         // lifetime as on every other transport, because it is literally the same object.
         var token = ReadToken(envelope);
         token.Split('.').Should().HaveCount(3);

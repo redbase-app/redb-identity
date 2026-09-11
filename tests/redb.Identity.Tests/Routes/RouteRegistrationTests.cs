@@ -89,7 +89,7 @@ public class RouteRegistrationTests
         // + 1 B.3 role management (identity-manage-roles).
         // + 1 S2 claim-definitions management (identity-manage-claim-definitions).
         // + 1 W1 webhook subscription management (identity-manage-webhooks).
-        // + 1 Ф5 transport-neutral authorization check (identity-authz-check), unconditional:
+        // + 1 F5 transport-neutral authorization check (identity-authz-check), unconditional:
         //   a facade calling an address that is not registered would fail open.
         //   Total: 49 + 1 = 50.
         _builder.Definitions.Should().HaveCount(50);

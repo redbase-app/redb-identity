@@ -13,12 +13,12 @@ using Xunit;
 namespace redb.Identity.Tests.V4Unique;
 
 /// <summary>
-/// Ф2 of the V4-UNIQUE refactoring (doc/v4/02): the federation schemes get their FIRST real
+/// F2 of the V4-UNIQUE refactoring (doc/v4/02): the federation schemes get their FIRST real
 /// uniqueness — their XML docs used to promise a partial unique index that no code created.
 ///
 /// <para>
 /// Red-before protocol: the storage-level invariant "one external identity — one link row"
-/// was verified RED on the pre-Ф2 code in a worktree using the old writing shape (name/key/
+/// was verified RED on the pre-F2 code in a worktree using the old writing shape (name/key/
 /// value_string, no LinkKey — the property did not exist): two identical links saved fine.
 /// Here the same invariant is enforced through <c>[RedbUnique]</c> LinkKey / ProviderId.
 /// </para>
@@ -71,7 +71,7 @@ public sealed class V4UniqueFederationTests : IAsyncLifetime
 
         var act = async () => await redb.SaveAsync(loser);
         await act.Should().ThrowAsync<RedbUniqueViolationException>(
-            "pre-Ф2 nothing enforced this: the promised index never existed and a race "
+            "pre-F2 nothing enforced this: the promised index never existed and a race "
             + "could link one external identity to two local users");
 
         var found = await redb.GetByUniqueAsync<FederatedIdentityProps>(p => p.LinkKey, linkKey);
@@ -139,7 +139,7 @@ public sealed class V4UniqueFederationTests : IAsyncLifetime
             legacy.value_string = legacyKey;
             legacyId = await redb.SaveAsync(legacy);
 
-            // The pre-Ф2 defect in the flesh: a SECOND row for the same identity, other user.
+            // The pre-F2 defect in the flesh: a SECOND row for the same identity, other user.
             var dup = new RedbObject<FederatedIdentityProps>(new FederatedIdentityProps
             { ProviderId = "azure-ad", ExternalSub = sub });
             dup.name = legacyKey;
@@ -160,7 +160,7 @@ public sealed class V4UniqueFederationTests : IAsyncLifetime
         {
             var redb = scope.ServiceProvider.GetRequiredService<IRedbService>();
 
-            // Р4(а): one of the two rows won the key; the loser is preserved outside the
+            // R4(a): one of the two rows won the key; the loser is preserved outside the
             // index and was reported to the operator log — a duplicated federated link is
             // a potential account-takeover and is never resolved silently.
             var winner = await redb.GetByUniqueAsync<FederatedIdentityProps>(p => p.LinkKey, legacyKey);

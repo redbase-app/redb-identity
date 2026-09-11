@@ -33,7 +33,7 @@ public sealed class Phase3ComponentTests : TestContext
         Services.AddSingleton(new ToastService());
     }
 
-    // ── П4 UserNew — regression of the review fix: a create error must be VISIBLE
+    // ── P4 UserNew — regression of the review fix: a create error must be VISIBLE
     //    after the wizard bounces the operator back to step 1 ─────────────────────
 
     [Fact]
@@ -77,7 +77,7 @@ public sealed class Phase3ComponentTests : TestContext
         sent.PhoneNumber.Should().BeNull();
     }
 
-    // ── П3 ClaimMapperNew — the owner string the modal never let you choose ──────
+    // ── P3 ClaimMapperNew — the owner string the modal never let you choose ──────
 
     [Fact]
     public void ClaimMapperNew_composes_owner_string_for_application()
@@ -119,7 +119,7 @@ public sealed class Phase3ComponentTests : TestContext
         sent!.Owner.Should().BeNull("global is the API default and must not be sent as a string");
     }
 
-    // ── П1 FederationDetail — mappings validation and write-only secret ──────────
+    // ── P1 FederationDetail — mappings validation and write-only secret ──────────
 
     [Fact]
     public void FederationDetail_duplicate_mapping_blocks_save()
@@ -160,7 +160,7 @@ public sealed class Phase3ComponentTests : TestContext
             "an untouched secret field must keep the stored secret, never overwrite it");
     }
 
-    // ── П6 ApiResources — catalogue join with the live scope store ───────────────
+    // ── P6 ApiResources — catalogue join with the live scope store ───────────────
 
     [Fact]
     public void ApiResources_marks_seeded_scopes_and_lists_custom_ones()

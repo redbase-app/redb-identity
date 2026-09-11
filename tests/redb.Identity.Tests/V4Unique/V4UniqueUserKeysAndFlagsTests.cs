@@ -14,11 +14,11 @@ using Xunit;
 namespace redb.Identity.Tests.V4Unique;
 
 /// <summary>
-/// Ф3 of the V4-UNIQUE refactoring (doc/v4/03): Mfa/UserExt keyed by <c>[RedbUnique]</c>
-/// UserId (owner decision Р3а), SystemFlag and IdempotencyRecord keyed by <c>ValueUnique</c>
-/// (Р5в — SHA-256 of the composite). These are PARITY tests, not red-before: the pre-V4
-/// artificial indexes on <c>_key</c>/<c>_name</c> existed on all three providers — Ф3 moves
-/// the enforcement, it does not close a hole (unlike Ф1/Ф2).
+/// F3 of the V4-UNIQUE refactoring (doc/v4/03): Mfa/UserExt keyed by <c>[RedbUnique]</c>
+/// UserId (owner decision R3a), SystemFlag and IdempotencyRecord keyed by <c>ValueUnique</c>
+/// (R5v — SHA-256 of the composite). These are PARITY tests, not red-before: the pre-V4
+/// artificial indexes on <c>_key</c>/<c>_name</c> existed on all three providers — F3 moves
+/// the enforcement, it does not close a hole (unlike F1/F2).
 /// </summary>
 public sealed class V4UniqueUserKeysAndFlagsTests : IAsyncLifetime
 {
@@ -124,7 +124,7 @@ public sealed class V4UniqueUserKeysAndFlagsTests : IAsyncLifetime
         using var scope = _sp.CreateScope();
         var redb = scope.ServiceProvider.GetRequiredService<IRedbService>();
 
-        // Composite far beyond the 440-char ValueUnique limit — the reason Р5(в) hashes it.
+        // Composite far beyond the 440-char ValueUnique limit — the reason R5(v) hashes it.
         var longKey = new string('k', 300);
         var caller = new string('c', 200);
         var name = $"idem:test-scope:create:{caller}:{longKey}:{Guid.NewGuid():N}";
@@ -208,7 +208,7 @@ public sealed class V4UniqueUserKeysAndFlagsTests : IAsyncLifetime
             var rec = await redb.Query<IdempotencyRecordProps>()
                 .WhereRedb(o => o.ValueUnique == IdempotencyKeyHash.Sha256Hex(idemName))
                 .FirstOrDefaultAsync();
-            rec.Should().NotBeNull("the backfill hashed _name into ValueUnique (Р5в)");
+            rec.Should().NotBeNull("the backfill hashed _name into ValueUnique (R5v)");
         }
     }
 }

@@ -25,23 +25,23 @@ public sealed class Phase3PagesTests : IClassFixture<WebHostFixture>
     public Phase3PagesTests(WebHostFixture factory) { _factory = factory; }
 
     [Theory]
-    // П1 — federation provider pages
+    // P1 — federation provider pages
     [InlineData("/admin/federation/new")]
     [InlineData("/admin/federation/some-id")]
-    // П2 — claim definitions
+    // P2 — claim definitions
     [InlineData("/admin/claim-definitions/new")]
     [InlineData("/admin/claim-definitions/123")]
-    // П3 — claim mappers
+    // P3 — claim mappers
     [InlineData("/admin/claim-mappers/new")]
     [InlineData("/admin/claim-mappers/some-id")]
-    // П4 — user creation wizard
+    // P4 — user creation wizard
     [InlineData("/admin/users/new")]
-    // П5 — scopes and claim scopes
+    // P5 — scopes and claim scopes
     [InlineData("/admin/scopes/new")]
     [InlineData("/admin/scopes/some-id")]
     [InlineData("/admin/claim-scopes/new")]
     [InlineData("/admin/claim-scopes/some-id")]
-    // П6 — API resources catalogue
+    // P6 — API resources catalogue
     [InlineData("/admin/api-resources")]
     // review catch — the group wizard left its modal for a page host
     [InlineData("/admin/groups/new")]

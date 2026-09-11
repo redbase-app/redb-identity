@@ -7,7 +7,7 @@ using Xunit;
 namespace redb.Identity.Tests.Grpc;
 
 /// <summary>
-/// Ф4 — the per-IP limiter, over gRPC, for real. Core keys it on <c>redbHttp.RemoteAddress</c>, a header
+/// F4 — the per-IP limiter, over gRPC, for real. Core keys it on <c>redbHttp.RemoteAddress</c>, a header
 /// no gRPC call has of its own: the listener synthesizes it from the connection peer because the facade
 /// asks for <c>EmitHttpCompatHeaders</c>. If that bridge ever breaks, the limiter does not fail loudly —
 /// it silently stops protecting the gRPC port, and every other test in this suite still passes. This is

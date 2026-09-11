@@ -8,7 +8,7 @@ using Xunit;
 namespace redb.Identity.Tests.Routes;
 
 /// <summary>
-/// Ф5 — the granular scope table, now that it lives in Core behind
+/// F5 — the granular scope table, now that it lives in Core behind
 /// <c>direct-vm://identity-authz-check</c> and serves every transport.
 /// <para>
 /// The table was moved verbatim, so these tests are written against the rules rather than against the

@@ -6,7 +6,7 @@ using Xunit;
 namespace redb.Identity.Tests.Soap;
 
 /// <summary>
-/// Ф6 — the per-IP limiter, over SOAP, for real.
+/// F6 — the per-IP limiter, over SOAP, for real.
 /// <para>
 /// This is the test that would notice if the connection bridge silently stopped working. The limiter
 /// reads an address the SOAP consumer has to publish itself; when that publishing is missing the

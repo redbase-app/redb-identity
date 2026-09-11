@@ -13,16 +13,16 @@ using Xunit;
 namespace redb.Identity.Tests.V4Unique;
 
 /// <summary>
-/// Ф1 of the V4-UNIQUE refactoring (doc/v4/01): the four OAuth keys are enforced by the
+/// F1 of the V4-UNIQUE refactoring (doc/v4/01): the four OAuth keys are enforced by the
 /// database via <c>[RedbUnique]</c> on every provider.
 ///
 /// <para>
-/// Red-before protocol: on the pre-Ф1 code every duplicate test here is RED on ALL THREE
+/// Red-before protocol: on the pre-F1 code every duplicate test here is RED on ALL THREE
 /// providers — the keys were <c>[RedbIgnore]</c> phantoms mirrored into
 /// <c>_objects.value_string</c>, so a plain <c>SaveAsync</c> wrote no key and nothing
 /// collided (the old artificial indexes guarded only the mirror column, and on MSSQL the
 /// three <c>value_string</c> indexes did not exist at all). Verified red in a worktree at
-/// the pre-Ф1 commit, full-suite run (see doc/v4/01 §5).
+/// the pre-F1 commit, full-suite run (see doc/v4/01 §5).
 /// </para>
 /// </summary>
 public sealed class V4UniqueKeyTests : IAsyncLifetime
@@ -80,7 +80,7 @@ public sealed class V4UniqueKeyTests : IAsyncLifetime
             new ApplicationProps { ClientId = clientId, ClientType = "public" })
         { name = "loser" });
         await act.Should().ThrowAsync<RedbUniqueViolationException>(
-            "pre-Ф1 the ClientId was a [RedbIgnore] phantom and this save went through "
+            "pre-F1 the ClientId was a [RedbIgnore] phantom and this save went through "
             + "on every provider (on MSSQL even the mirror index never existed)");
 
         var found = await redb.GetByUniqueAsync<ApplicationProps>(p => p.ClientId, clientId);
@@ -118,7 +118,7 @@ public sealed class V4UniqueKeyTests : IAsyncLifetime
             new ClaimScopeProps { ScopeName = name }) { name = name + "-loser" });
         await act.Should().ThrowAsync<RedbUniqueViolationException>(
             "the ClaimScope XML doc used to PROMISE a partial unique index that no code ever "
-            + "created — duplicates were possible on every provider until Ф1");
+            + "created — duplicates were possible on every provider until F1");
     }
 
     [Fact]
@@ -216,7 +216,7 @@ public sealed class V4UniqueKeyTests : IAsyncLifetime
             repaired!.Id.Should().Be(legacyId);
             repaired.Props.ClientId.Should().Be(legacyKey);
 
-            // Р4(а): exactly one of the two duplicate rows won the key; the loser survives
+            // R4(a): exactly one of the two duplicate rows won the key; the loser survives
             // outside the index for manual review, nothing was deleted silently.
             var dupWinner = await redb.GetByUniqueAsync<ApplicationProps>(p => p.ClientId, dupKey);
             dupWinner.Should().NotBeNull();

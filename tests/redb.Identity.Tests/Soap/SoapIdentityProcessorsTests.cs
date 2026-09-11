@@ -11,7 +11,7 @@ using Xunit;
 namespace redb.Identity.Tests.Soap;
 
 /// <summary>
-/// Ф2 and Ф4–Ф5 — the translation itself: a WS-Trust request becomes the parameters the core takes, and
+/// F2 and F4–F5 — the translation itself: a WS-Trust request becomes the parameters the core takes, and
 /// the core's answer becomes an RSTR or a fault. Nothing here talks to a socket; the point is the mapping.
 /// </summary>
 public class SoapIdentityProcessorsTests

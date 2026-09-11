@@ -9,7 +9,7 @@ using Xunit;
 namespace redb.Identity.Tests.Soap;
 
 /// <summary>
-/// Ф1 — the WS-Trust facade module boots: its config binder reads the Tsak-merged section, its module
+/// F1 — the WS-Trust facade module boots: its config binder reads the Tsak-merged section, its module
 /// host builds a child container, and its route builder mounts the STS listener.
 /// <para>
 /// <c>InitRoute.main</c> is called exactly the way the worker calls it, so everything but Tsak's own ALC

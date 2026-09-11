@@ -6,7 +6,7 @@ using Xunit;
 namespace redb.Identity.Tests.Grpc;
 
 /// <summary>
-/// Ф1 — the codec between the published <c>identity.v1</c> contract and the parameter/answer shapes the
+/// F1 — the codec between the published <c>identity.v1</c> contract and the parameter/answer shapes the
 /// <c>direct-vm://identity-*</c> boundary speaks. Mapping is descriptor-driven, so these tests are really
 /// about the rules: what is omitted, what overflows into the Struct, what survives a type it cannot hold.
 /// </summary>

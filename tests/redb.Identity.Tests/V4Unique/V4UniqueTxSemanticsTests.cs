@@ -12,7 +12,7 @@ using Xunit;
 namespace redb.Identity.Tests.V4Unique;
 
 /// <summary>
-/// Probe scheme for the V4-UNIQUE refactoring (doc/v4/00-PLAN.md, Ф0). Deliberately its own
+/// Probe scheme for the V4-UNIQUE refactoring (doc/v4/00-PLAN.md, F0). Deliberately its own
 /// scheme so no production Identity scheme is touched; keys are Guid-unique per run because
 /// the PG/MSSQL test database is shared and never cleaned.
 /// </summary>
@@ -26,7 +26,7 @@ public class V4UniqueProbeProps
 }
 
 /// <summary>
-/// Ф0 probes: the two core-semantics facts EVERY phase of the V4-UNIQUE refactoring leans on,
+/// F0 probes: the two core-semantics facts EVERY phase of the V4-UNIQUE refactoring leans on,
 /// exercised the way Identity actually runs — inside an explicit redb transaction
 /// (<c>WithRedbTx</c> = <c>Transacted(Suppress)</c> + <c>BeginRedbTransaction</c>, which is
 /// <see cref="redb.Core.Data.IRedbContext.BeginTransactionAsync"/> underneath). The core's own
