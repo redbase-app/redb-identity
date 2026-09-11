@@ -13,7 +13,7 @@ using redb.Route.Grpc;
 namespace redb.Identity.Grpc.Processors;
 
 /// <summary>
-/// Ф6 — the management surface over gRPC: authenticate, authorize, then dispatch to the very same
+/// F6 — the management surface over gRPC: authenticate, authorize, then dispatch to the very same
 /// controller the HTTP facade dispatches to.
 /// <para>
 /// Sharing the controllers is the point. They are thin — each action validates its DTO and forwards to a

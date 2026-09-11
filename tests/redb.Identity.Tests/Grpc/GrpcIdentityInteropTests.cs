@@ -8,7 +8,7 @@ using Xunit;
 namespace redb.Identity.Tests.Grpc;
 
 /// <summary>
-/// Ф4 — the published contract, exercised by a stack that shares no code with ours: an
+/// F4 — the published contract, exercised by a stack that shares no code with ours: an
 /// <c>@grpc/grpc-js</c> client generated from <c>identity.v1.proto</c> the way any consumer would generate
 /// it, running in another process inside a container (see <c>C:\Work\yaml\grpc</c>).
 /// <para>

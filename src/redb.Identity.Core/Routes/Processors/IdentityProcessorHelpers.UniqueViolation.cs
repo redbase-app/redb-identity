@@ -16,9 +16,9 @@ internal static partial class IdentityProcessorHelpers
     /// places a raw driver violation can still reach Identity code:
     /// <list type="bullet">
     ///   <item>the <c>UX_users_email</c> index on the core <c>_users</c> table (owner
-    ///   decision Р1 — not a redb scheme key, the core never wraps it), reached through the
+    ///   decision R1 — not a redb scheme key, the core never wraps it), reached through the
     ///   route-level generic 409 mapping in <c>IdentityCoreRouteBuilder</c>;</item>
-    ///   <item><c>UX_route_idempotent_entry_name</c> on redb.Route's scheme (Р2 interim,
+    ///   <item><c>UX_route_idempotent_entry_name</c> on redb.Route's scheme (R2 interim,
     ///   until the Route-side fix ships).</item>
     /// </list>
     /// A typed <c>RedbUniqueViolationException</c> also satisfies this predicate — the

@@ -10,7 +10,7 @@ using Xunit;
 namespace redb.Identity.Tests.Grpc;
 
 /// <summary>
-/// Ф3 — the steps that bridge what Core expects to what gRPC speaks. Tested directly on an exchange:
+/// F3 — the steps that bridge what Core expects to what gRPC speaks. Tested directly on an exchange:
 /// these are decisions about headers and statuses, and a transport round-trip would only obscure them.
 /// </summary>
 public class GrpcIdentityProcessorsTests

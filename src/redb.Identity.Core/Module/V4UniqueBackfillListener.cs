@@ -26,7 +26,7 @@ namespace redb.Identity.Core.Module;
 /// <para>
 /// A duplicate discovered during backfill (possible for the schemes that never actually had
 /// an index — ClaimScope, FederatedIdentity, FederationProvider) surfaces as
-/// <see cref="RedbUniqueViolationException"/>: per owner decision Р4(а) it is logged with both
+/// <see cref="RedbUniqueViolationException"/>: per owner decision R4(a) it is logged with both
 /// ids and the loser keeps a NULL key (outside the index) for manual review. Federated-link
 /// duplicates are logged as errors — two users holding one external identity is a potential
 /// account-takeover and must reach the operator.
@@ -119,7 +119,7 @@ internal sealed class V4UniqueBackfillListener : IRouteLifecycleListener
     {
         var clean = true;
 
-        // Ф1 schemes: key was mirrored in value_string, Props was the [RedbIgnore] phantom.
+        // F1 schemes: key was mirrored in value_string, Props was the [RedbIgnore] phantom.
         clean &= await BackfillMirrorAsync<ApplicationProps>(redb, logger,
             p => p.ClientId, (p, v) => p.ClientId = v, ct).ConfigureAwait(false);
         clean &= await BackfillMirrorAsync<ScopeProps>(redb, logger,
@@ -129,7 +129,7 @@ internal sealed class V4UniqueBackfillListener : IRouteLifecycleListener
         clean &= await BackfillMirrorAsync<TokenProps>(redb, logger,
             p => p.ReferenceId, (p, v) => p.ReferenceId = v, ct).ConfigureAwait(false);
 
-        // Ф2 schemes (doc/v4/02): these two never actually had an index, so this is the
+        // F2 schemes (doc/v4/02): these two never actually had an index, so this is the
         // first time their keys become enforceable — duplicates are EXPECTED to be possible
         // here and every one is a finding for the operator (a duplicated federated link is
         // a potential account-takeover vector, see the class doc).
@@ -139,15 +139,15 @@ internal sealed class V4UniqueBackfillListener : IRouteLifecycleListener
             p => p.ProviderId is { Length: > 0 } pid ? pid : null,
             (p, v) => p.ProviderId = v ?? string.Empty, ct).ConfigureAwait(false);
 
-        // Ф3 key-mirror schemes (doc/v4/03): the key is the numeric _objects._key, copied
+        // F3 key-mirror schemes (doc/v4/03): the key is the numeric _objects._key, copied
         // into the [RedbUnique] UserId prop.
         clean &= await BackfillUserKeyAsync<MfaProps>(redb, logger,
             p => p.UserId, (p, v) => p.UserId = v, ct).ConfigureAwait(false);
         clean &= await BackfillUserKeyAsync<UserProps>(redb, logger,
             p => p.UserId, (p, v) => p.UserId = v, ct).ConfigureAwait(false);
 
-        // Ф3 ValueUnique schemes (doc/v4/03): the key is the root _name (SystemFlag) or its
-        // SHA-256 (IdempotencyRecord, owner decision Р5(в)); Props are not touched.
+        // F3 ValueUnique schemes (doc/v4/03): the key is the root _name (SystemFlag) or its
+        // SHA-256 (IdempotencyRecord, owner decision R5(v)); Props are not touched.
         clean &= await BackfillValueUniqueAsync<IdentitySystemFlagProps>(redb, logger,
             name => name, ct).ConfigureAwait(false);
         clean &= await BackfillValueUniqueAsync<IdempotencyRecordProps>(redb, logger,
@@ -194,7 +194,7 @@ internal sealed class V4UniqueBackfillListener : IRouteLifecycleListener
     }
 
     /// <summary>The pre-V4 indexes replaced by core primitives (doc/v4/04 §2). Only
-    /// UX_users_email stays (owner decision Р1). UX_route_idempotent_entry_name joined the
+    /// UX_users_email stays (owner decision R1). UX_route_idempotent_entry_name joined the
     /// retired set on 2026-09-02, when Route's own fix (816a3d2a) shipped ValueUnique + the
     /// typed catch in RedbIdempotentRepository.</summary>
     private static readonly string[] RetiredIndexes =
@@ -238,7 +238,7 @@ internal sealed class V4UniqueBackfillListener : IRouteLifecycleListener
     }
 
     /// <summary>
-    /// Ф3 variant of <see cref="BackfillMirrorAsync{TProps}"/>: the pre-V4 key lives in the
+    /// F3 variant of <see cref="BackfillMirrorAsync{TProps}"/>: the pre-V4 key lives in the
     /// numeric <c>_objects._key</c> (MfaProps, UserProps ext), copied into the
     /// <c>[RedbUnique]</c> UserId prop. Same idempotence-by-construction: a repaired row
     /// (Props.UserId == key) drops out.
@@ -298,7 +298,7 @@ internal sealed class V4UniqueBackfillListener : IRouteLifecycleListener
     }
 
     /// <summary>
-    /// Ф3 variant for root-only schemes: the pre-V4 key lives in <c>_objects._name</c> and the
+    /// F3 variant for root-only schemes: the pre-V4 key lives in <c>_objects._name</c> and the
     /// enforced key is <c>ValueUnique = transform(_name)</c> (identity for SystemFlag, SHA-256
     /// for IdempotencyRecord). Props are never touched — SystemFlag has none by design.
     /// </summary>
@@ -398,7 +398,7 @@ internal sealed class V4UniqueBackfillListener : IRouteLifecycleListener
                 catch (RedbUniqueViolationException ex)
                 {
                     duplicates++;
-                    // Р4(а): report, leave the loser outside the index, keep going.
+                    // R4(a): report, leave the loser outside the index, keep going.
                     // The prop value at the moment of failure is logged next to the mirror: when the two
                     // agree the value was intact and the rejected key was computed wrongly; when they
                     // differ the object carried another object's value (2026-09-10 MSSQL full-run triage).

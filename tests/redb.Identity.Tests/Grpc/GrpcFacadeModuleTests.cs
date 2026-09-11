@@ -14,12 +14,12 @@ using Xunit;
 namespace redb.Identity.Tests.Grpc;
 
 /// <summary>
-/// Ф0 — the gRPC facade module boots: its config binder reads the Tsak-merged section, its module host
+/// F0 — the gRPC facade module boots: its config binder reads the Tsak-merged section, its module host
 /// builds a child container, its route builder mounts a listener, and the port answers a real gRPC client.
 /// <para>
 /// Everything except Tsak's own ALC loading is exercised here: <c>InitRoute.main</c> is called exactly the
 /// way the worker calls it. What this cannot cover is the packaging path — that is verified by loading the
-/// <c>.tpkg</c> in a worker (see <c>doc/gRPC/CHECKLIST.md</c>, Ф0).
+/// <c>.tpkg</c> in a worker (see <c>doc/gRPC/CHECKLIST.md</c>, F0).
 /// </para>
 /// </summary>
 public class GrpcFacadeModuleTests : IAsyncLifetime

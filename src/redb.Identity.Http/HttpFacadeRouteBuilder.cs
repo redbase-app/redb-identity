@@ -704,7 +704,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         // any reference to Core's internal processor type.
         route.To(IdentityEndpoints.AuthManagement);
 
-        // Ф5: the scope table lives in Core now, behind direct-vm://identity-authz-check, because a
+        // F5: the scope table lives in Core now, behind direct-vm://identity-authz-check, because a
         // second transport needed it and two copies of an authorization table drift in the direction
         // that grants too much. Same call style as the auth step above: synchronous, same exchange.
         route.Process(GranularScopeGuardProcessor.Describe);

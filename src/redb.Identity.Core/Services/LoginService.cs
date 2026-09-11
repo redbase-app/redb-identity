@@ -562,7 +562,7 @@ public sealed class LoginService
     /// Idempotent — safe to call on every successful federated login. The
     /// <c>[RedbUnique]</c> <see cref="FederatedIdentityProps.LinkKey"/> makes concurrent
     /// inserts of one external identity collide at the DB level on every provider
-    /// (V4-UNIQUE; before Ф2 no index actually existed and duplicates were possible);
+    /// (V4-UNIQUE; before F2 no index actually existed and duplicates were possible);
     /// the loser re-reads the winner and runs the same integrity check.
     /// </summary>
     private async Task UpsertFederatedIdentityLinkAsync(

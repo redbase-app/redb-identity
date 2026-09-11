@@ -10,7 +10,7 @@ namespace redb.Identity.Core.Models;
 ///   <item><see cref="LinkKey"/> = <c>"{providerId}:{externalSub}"</c> — unique per scheme
 ///   via <c>[RedbUnique]</c> (V4-UNIQUE), enables the O(1) reverse lookup at federated
 ///   callback time. Historical note: the doc used to claim a partial unique index on
-///   <c>value_string</c> that no code ever created — duplicates were possible until Ф2
+///   <c>value_string</c> that no code ever created — duplicates were possible until F2
 ///   (doc/v4/02); <c>value_string</c> is a transition mirror now.</item>
 /// </list>
 /// <para>

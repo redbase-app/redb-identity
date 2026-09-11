@@ -7,7 +7,7 @@ using redb.Route.Core;
 namespace redb.Identity.Core.Routes.Processors;
 
 /// <summary>
-/// Ф5 — the granular scope check for the management surface, behind
+/// F5 — the granular scope check for the management surface, behind
 /// <c>direct-vm://identity-authz-check</c>. Runs after the authentication step has validated the bearer
 /// token and stashed <c>identity:management-scopes</c>.
 /// <para>

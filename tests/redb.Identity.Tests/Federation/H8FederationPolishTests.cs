@@ -258,7 +258,7 @@ public class H8FederationPolishTests
         links.Select(l => l.ProviderId).Should().BeEquivalentTo(new[] { "h8-prov-a", "h8-prov-b" });
 
         // Both reverse lookups must find the same user via the per-link [RedbUnique] LinkKey
-        // (V4-UNIQUE; was the value_string mirror before Ф2).
+        // (V4-UNIQUE; was the value_string mirror before F2).
         var keyA = FederatedIdentityProps.MakeLinkKey("h8-prov-a", subA);
         var keyB = FederatedIdentityProps.MakeLinkKey("h8-prov-b", subB);
         var rowA = await _fx.Redb.GetByUniqueAsync<FederatedIdentityProps>(p => p.LinkKey, keyA);

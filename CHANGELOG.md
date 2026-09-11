@@ -375,14 +375,14 @@ into Props on every read. It moved to the core's V4 machinery (plan and decision
   inner chain).
 - **Transition backfill** (`V4UniqueBackfillListener`, idempotent by construction, no flag):
   copies the legacy mirrors into Props/`ValueUnique` on the first boot, reports duplicates and
-  leaves the losers outside the index (owner decision Р4а; a duplicated federated link is
+  leaves the losers outside the index (owner decision R4a; a duplicated federated link is
   flagged loudly — it is a potential account-takeover), then drops the seven retired indexes —
   only when every scheme backfilled clean, otherwise the whole pass retries next boot. The
   federated-link lookup keeps a fallback to the old mirror until then: a miss there would
   auto-provision a second local user for an already-linked identity.
-- **What stays, by owner decision**: only `UX_users_email` on `_users(_email)` (Р1 — V4
+- **What stays, by owner decision**: only `UX_users_email` on `_users(_email)` (R1 — V4
   primitives cannot express it; note for shared databases: it imposes email uniqueness on
-  every tenant of `_users`). The Р2 interim index on redb.Route's idempotent-entry scheme
+  every tenant of `_users`). The R2 interim index on redb.Route's idempotent-entry scheme
   was retired the same day: Route shipped its own fix (816a3d2a, `ValueUnique` + the typed
   catch in `RedbIdempotentRepository` — bug report
   `redb.Route/docs/BUG_IDEMPOTENT_REPOSITORY_UNIQUE_RACE.md`), so the index joined the

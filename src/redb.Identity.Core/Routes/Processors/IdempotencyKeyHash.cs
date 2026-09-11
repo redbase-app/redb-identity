@@ -4,7 +4,7 @@ using System.Text;
 namespace redb.Identity.Core.Routes.Processors;
 
 /// <summary>
-/// V4-UNIQUE, owner decision Р5(в) (doc/v4/00-PLAN.md §6): the idempotency-record unique key
+/// V4-UNIQUE, owner decision R5(v) (doc/v4/00-PLAN.md §6): the idempotency-record unique key
 /// is <c>_objects._value_unique</c> = SHA-256 of the composite name, hex-lowercase (64 chars,
 /// always under the 440-char ValueUnique limit — the raw composite
 /// <c>idem:{scope}:{operation}:{caller}:{key}</c> is unbounded because caller subject and the

@@ -7,7 +7,7 @@ using Xunit;
 namespace redb.Identity.Tests.Grpc;
 
 /// <summary>
-/// Ф6 — the operation table against the controllers it claims to expose.
+/// F6 — the operation table against the controllers it claims to expose.
 /// <para>
 /// The table is hand-written, and the two ways it can be wrong are both silent. A missing row means an
 /// operation simply is not on this transport, and nobody notices until a caller asks for it. A row whose

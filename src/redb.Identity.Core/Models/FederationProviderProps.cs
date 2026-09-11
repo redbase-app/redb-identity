@@ -13,7 +13,7 @@ namespace redb.Identity.Core.Models;
 /// <list type="bullet">
 ///   <item><see cref="ProviderId"/> — lowercase, unique per scheme via <c>[RedbUnique]</c>
 ///   (V4-UNIQUE). Historical note: the doc used to claim a partial unique index on
-///   <c>value_string</c> that no code ever created — duplicates were possible until Ф2
+///   <c>value_string</c> that no code ever created — duplicates were possible until F2
 ///   (doc/v4/02); <c>value_string</c> is a transition mirror now.</item>
 ///   <item><see cref="ClientSecret"/> is stored encrypted via DataProtection
 ///   (<c>identity.federation-provider-secret</c> purpose) — admin API never returns the

@@ -860,7 +860,7 @@ public class IdentityCoreRouteBuilder : RouteBuilder
                 .RouteId(IdentityEndpoints.RouteIds.AuthScim)
                 .Process(_scimAuth);
 
-        // Ф5 — granular scope check, transport-neutral. Always registered: unlike the auth processors
+        // F5 — granular scope check, transport-neutral. Always registered: unlike the auth processors
         // above it needs nothing injected, and a facade calling an address that is not there would fail
         // open at the route layer, which is the one direction an authorization gate must never fail.
         From(IdentityEndpoints.AuthzCheck)

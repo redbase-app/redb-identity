@@ -90,7 +90,7 @@ internal sealed class IdempotencyProcessor : IProcessor
             var redb = _context.GetRedbService(_redbName, exchange);
             var now = _timeProvider.GetUtcNow();
 
-            // V4-UNIQUE (owner decision Р5(в), doc/v4/00 §6): the enforced key is
+            // V4-UNIQUE (owner decision R5(v), doc/v4/00 §6): the enforced key is
             // ValueUnique = SHA-256(name) — a probe of the core unique index; the Name
             // lookup covers legacy rows written before the upgrade (they fade with the TTL).
             var keyHash = IdempotencyKeyHash.Sha256Hex(name);
@@ -252,7 +252,7 @@ internal sealed class IdempotencyCaptureProcessor : IProcessor
             var record = new RedbObject<IdempotencyRecordProps>
             {
                 name = name,                // readable composite, exactly as before
-                ValueUnique = keyHash,      // V4-UNIQUE Р5(в): the DB-enforced key
+                ValueUnique = keyHash,      // V4-UNIQUE R5(v): the DB-enforced key
                 date_complete = now.Add(_options.Ttl),
                 Props = new IdempotencyRecordProps
                 {
@@ -271,7 +271,7 @@ internal sealed class IdempotencyCaptureProcessor : IProcessor
         catch (redb.Core.Exceptions.RedbUniqueViolationException)
         {
             // Concurrent capture won the race — the core ValueUnique index rejected this
-            // insert (V4-UNIQUE, Р5(в): the key is the SHA-256 of the composite name).
+            // insert (V4-UNIQUE, R5(v): the key is the SHA-256 of the composite name).
             // The other writer already persisted the authoritative response, so silently
             // drop this attempt: the client still gets its 2xx from the business step,
             // and future retries will hit the cached copy.

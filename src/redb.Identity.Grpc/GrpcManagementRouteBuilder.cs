@@ -10,7 +10,7 @@ using redb.Route.Grpc;
 namespace redb.Identity.Grpc;
 
 /// <summary>
-/// Ф6 — the management surface over gRPC. One method address per controller action, on the management
+/// F6 — the management surface over gRPC. One method address per controller action, on the management
 /// port, behind bearer authentication and the granular scope table in Core.
 /// <para>
 /// Separate from <see cref="GrpcFacadeRouteBuilder"/> because the two surfaces are separate in every way

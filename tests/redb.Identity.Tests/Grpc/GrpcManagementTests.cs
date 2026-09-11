@@ -12,7 +12,7 @@ using Xunit;
 namespace redb.Identity.Tests.Grpc;
 
 /// <summary>
-/// Ф6 — the management surface over gRPC. The tests that matter here are not the happy path: an admin API
+/// F6 — the management surface over gRPC. The tests that matter here are not the happy path: an admin API
 /// that works is easy, an admin API that refuses correctly is the whole job. So the shape of this file is
 /// three refusals and one verdict-parity check, with the happy path present only to prove the refusals
 /// are refusing something that would otherwise have worked.
@@ -173,7 +173,7 @@ public class GrpcManagementTests : IClassFixture<GrpcIdentityFixture>
     [Fact]
     public async Task The_scope_gate_decides_by_scope_and_nothing_else()
     {
-        // Both transports consult one table in Core (Ф5), so the property to assert here is that this
+        // Both transports consult one table in Core (F5), so the property to assert here is that this
         // transport actually consults it: the same operation is refused for a narrow token and waved
         // through for an admin one, and the refusal comes from the gate rather than from the controller.
         var narrow = await NarrowTokenAsync();

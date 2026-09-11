@@ -10,7 +10,7 @@ namespace redb.Identity.Core.Module;
 /// V4-UNIQUE remainder of the pre-V4 artificial-index bootstrap (doc/v4/04 §2). The eight
 /// per-scheme partial indexes on <c>_objects</c> moved to the core's <c>[RedbUnique]</c> /
 /// <c>ValueUnique</c> machinery and are DROPPED by <see cref="V4UniqueBackfillListener"/>
-/// once the transition backfill has run clean. ONE index stays, by owner decision Р1
+/// once the transition backfill has run clean. ONE index stays, by owner decision R1
 /// (doc/v4/00-PLAN.md §6):
 ///
 /// <para>
@@ -21,7 +21,7 @@ namespace redb.Identity.Core.Module;
 /// application sharing <c>_users</c> (accepted by the owner).
 /// </para>
 ///
-/// The Р2 interim index on redb.Route's <c>IdempotentEntryProps</c> was retired on
+/// The R2 interim index on redb.Route's <c>IdempotentEntryProps</c> was retired on
 /// 2026-09-02: Route's own fix (commit 816a3d2a, `RedbIdempotentRepository` writes
 /// <c>ValueUnique</c> and catches the typed violation) made it redundant, and
 /// <see cref="V4UniqueBackfillListener"/> now drops it with the other retired indexes.
@@ -58,7 +58,7 @@ internal sealed class IdentityUniqueIndexesInitListener : IRouteLifecycleListene
             return;
         }
 
-        // ── UX_users_email (Р1 — stays by owner decision) ────────────────────────────────
+        // ── UX_users_email (R1 — stays by owner decision) ────────────────────────────────
         // Partial (WHERE _email IS NOT NULL) so the many null-email users don't collide —
         // also what lets it work on SQL Server, whose plain UNIQUE allows a single NULL.
         // Case-folding is the processors' job (lower-invariant before insert).

@@ -8,7 +8,7 @@ namespace redb.Identity.Http.Processors;
 /// <c>identity:management-scopes</c>, and BEFORE <c>StripManagementPrefix</c> so the
 /// raw <c>/api/v1/identity/{...}</c> path is still visible.
 /// <para>
-/// Ф5: the decision itself moved to Core, behind <c>direct-vm://identity-authz-check</c>, when a second
+/// F5: the decision itself moved to Core, behind <c>direct-vm://identity-authz-check</c>, when a second
 /// transport was about to need the same table. What is left here is the part that is genuinely about
 /// HTTP — naming the resource and the action — and even that is a fallback: Core reads
 /// <c>redbHttp.Path</c> and <c>redbHttp.Method</c> directly when nothing states them, so the path is not
