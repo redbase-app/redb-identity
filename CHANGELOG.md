@@ -184,7 +184,7 @@ concurrency the lookup protected nothing — and the expired path left two rows 
 
 ### Changed — the deletion helper's dead `batchSize` is gone
 
-`IdentityDeletionHelper.DeleteAsync` kept an `int batchSize` on all four overloads after В5
+`IdentityDeletionHelper.DeleteAsync` kept an `int batchSize` on all four overloads after V5
 (`9ad40eb2`) stopped handing the batch to the background service; it was accepted and ignored.
 Removed, together with the seven call sites that passed one. Purge batching is the background
 service's own concern; the cleanup processors keep their page sizes for the `Take(...)` that selects

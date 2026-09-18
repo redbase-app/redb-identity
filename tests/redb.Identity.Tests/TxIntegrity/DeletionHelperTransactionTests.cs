@@ -29,7 +29,7 @@ namespace redb.Identity.Tests.TxIntegrity;
 /// on the same <see cref="IRedbService"/> is the same ambient transaction <c>WithRedbTx</c>
 /// opens. Before the fix the rollback test failed on PostgreSQL / MSSQL (the row stayed in
 /// the trash) and hung, then failed, on SQLite (writer-lock timeout) — the two faces of the
-/// same defect. Handed over from the core side as В5 of the trash-lock incident.
+/// same defect. Handed over from the core side as V5 of the trash-lock incident.
 /// </para>
 /// </summary>
 [Collection("Postgres")]
