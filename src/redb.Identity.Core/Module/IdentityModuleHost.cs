@@ -190,8 +190,8 @@ internal sealed class ChildHostDisposeListener : IRouteLifecycleListener
 /// </para>
 /// <para>
 /// <b>The bug this fixes.</b> It used to open its own host scope in the constructor —
-/// unconditionally, eagerly. That is a <b>second</b> connection. A route-level transaction
-/// (<c>BeginRedbTransaction</c>) runs on the connection redb.Route caches on the exchange, so the
+/// unconditionally, eagerly. That is a <b>second</b> connection. A route-level transaction (the
+/// ambient scope <c>.Transacted()</c> opens) runs on the connection redb.Route caches on the exchange, so the
 /// OpenIddict stores were writing on a different one: no atomicity at all, and worse — the second
 /// connection blocks on row locks the first one holds, while the first is awaiting the very call
 /// that opened the second. Deadlock, cleared only by the 30s transaction timeout. That is exactly
@@ -202,8 +202,8 @@ internal sealed class ChildHostDisposeListener : IRouteLifecycleListener
 /// </para>
 /// <para>
 /// <b>The fix.</b> When the scope belongs to an exchange, ask redb.Route for the exchange's
-/// <see cref="IRedbService"/> — the very instance it caches in <c>IExchange.Properties</c> and hands
-/// to <c>BeginRedbTransaction</c>. One connection, one transaction, everybody enlisted. Only when
+/// <see cref="IRedbService"/> — the very instance it caches in <c>IExchange.Properties</c>, which
+/// enlists into the route's ambient transaction. One connection, one transaction, everybody enlisted. Only when
 /// there is no exchange (hosted services, cleanup timers, schema init) do we fall back to opening a
 /// host scope of our own, which is correct: there is no ambient transaction to join.
 /// </para>
@@ -240,7 +240,7 @@ internal sealed class HostRedbScope : IDisposable, IAsyncDisposable
     private IRedbService ResolveService()
     {
         // In-route: take the exchange's instance. This is the whole point — it is the connection
-        // BeginRedbTransaction opened the transaction on, so our writes land inside it.
+        // enlisted into the route's ambient transaction, so our writes land inside it.
         if (_accessor.Exchange is { } exchange)
             return _routeContext.GetRedbService(_redbName ?? string.Empty, exchange);
 

@@ -43,7 +43,24 @@ public class AuditIbmMqIntegrationTests : IAsyncLifetime
     private const string WmqQueueManager = "QM1";
     private const string WmqUser = "app";
     private const string WmqPassword = "admin";
-    private const string WmqQueue = "DEV.QUEUE.3";
+    /// <summary>
+    /// A queue of this run's own, picked by the provider under test.
+    /// </summary>
+    /// <remarks>
+    /// The provider matrix runs sqlite / postgres / mssql as three separate processes against one
+    /// broker, started with only a small stagger, so their MQ suites overlap. On a single shared
+    /// queue a sibling process either consumes this run's audit message (this run then waits out its
+    /// 15-second timeout) or hands this run the sibling's message (wrong eventType) - both shapes
+    /// appear in the full-run logs. eventType cannot separate the processes, because all three
+    /// publish the same types; a queue per provider can. DEV.QUEUE.1-5 are pre-created by the IBM MQ
+    /// developer image.
+    /// </remarks>
+    private static string WmqQueue => TestRedbSetup.SelectedProvider switch
+    {
+        TestRedbSetup.Provider.Postgres => "DEV.QUEUE.2",
+        TestRedbSetup.Provider.MsSql => "DEV.QUEUE.3",
+        _ => "DEV.QUEUE.1"
+    };
 
     private string WmqUri =>
         "wmq:" + WmqQueue + "?host=" + WmqHost + "&port=" + WmqPort
@@ -153,7 +170,17 @@ public class AuditIbmMqIntegrationTests : IAsyncLifetime
         }
     }
 
-    private async Task<List<string>> ReceiveMessages(int expected, int timeoutMs = 15000)
+    /// <summary>
+    /// Collects <paramref name="expected"/> audit messages whose eventType is <paramref name="eventType"/>.
+    /// </summary>
+    /// <remarks>
+    /// Every test in this class publishes to the same queue (<see cref="WmqQueue"/>), and the
+    /// per-test drain is best-effort, so a sibling test's leftover can still be sitting there.
+    /// Taking "the first message that arrives" therefore proves nothing about the event this test
+    /// published: messages carrying a foreign eventType are consumed and skipped, and the wait ends
+    /// only when this test's own events have arrived (or the timeout expires and the caller fails).
+    /// </remarks>
+    private async Task<List<string>> ReceiveMessages(string eventType, int expected, int timeoutMs = 15000)
     {
         var uri = EndpointUriParser.Parse(WmqUri + "&waitInterval=5000");
         var component = new IbmMqComponent();
@@ -162,7 +189,7 @@ public class AuditIbmMqIntegrationTests : IAsyncLifetime
         var results = new System.Collections.Concurrent.ConcurrentBag<string>();
         var allReceived = new TaskCompletionSource();
 
-        var processor = new DelegateProcessor(async (exchange, _) =>
+        var processor = new DelegateProcessor((exchange, _) =>
         {
             var body = exchange.In.Body switch
             {
@@ -170,9 +197,21 @@ public class AuditIbmMqIntegrationTests : IAsyncLifetime
                 string s => s,
                 _ => exchange.In.Body?.ToString() ?? ""
             };
-            results.Add(body);
-            if (results.Count >= expected)
-                allReceived.TrySetResult();
+
+            var received = EventTypeOf(body);
+            if (received == eventType)
+            {
+                results.Add(body);
+                if (results.Count >= expected)
+                    allReceived.TrySetResult();
+            }
+            else
+            {
+                Console.Error.WriteLine(
+                    $"ReceiveMessages({eventType}): skipped a foreign message from the shared queue, eventType={received ?? "<unparsable>"}");
+            }
+
+            return Task.CompletedTask;
         });
 
         var consumer = endpoint.CreateConsumer(processor);
@@ -184,6 +223,25 @@ public class AuditIbmMqIntegrationTests : IAsyncLifetime
         await endpoint.Stop();
 
         return results.ToList();
+    }
+
+    /// <summary>
+    /// eventType of an audit message, or null when the payload is not the expected JSON envelope.
+    /// </summary>
+    private static string? EventTypeOf(string body)
+    {
+        try
+        {
+            var doc = JsonSerializer.Deserialize<JsonElement>(body);
+            return doc.TryGetProperty("eventType", out var et) ? et.GetString() : null;
+        }
+        catch (JsonException ex)
+        {
+            // Not silently ignored: an unparsable payload on the audit queue is reported and then
+            // treated as foreign, so it cannot be mistaken for this test's event.
+            Console.Error.WriteLine($"EventTypeOf: audit payload is not JSON: {ex.Message}");
+            return null;
+        }
     }
 
     [Fact]
@@ -205,8 +263,9 @@ public class AuditIbmMqIntegrationTests : IAsyncLifetime
 
         await Task.Delay(500);
 
-        var messages = await ReceiveMessages(1);
-        messages.Should().HaveCountGreaterOrEqualTo(1);
+        var messages = await ReceiveMessages("TestWmqDirect", 1);
+        messages.Should().HaveCountGreaterOrEqualTo(1,
+            "the Events route must publish TestWmqDirect to the audit queue");
 
         var evt = JsonSerializer.Deserialize<JsonElement>(messages[0]);
         evt.GetProperty("eventType").GetString().Should().Be("TestWmqDirect");
@@ -234,8 +293,9 @@ public class AuditIbmMqIntegrationTests : IAsyncLifetime
 
         await Task.Delay(500);
 
-        var messages = await ReceiveMessages(3);
-        messages.Should().HaveCount(3);
+        var messages = await ReceiveMessages("TestWmqMulti", 3);
+        messages.Should().HaveCount(3,
+            "all three TestWmqMulti events must reach the audit queue");
     }
 
     [Fact]
@@ -260,8 +320,9 @@ public class AuditIbmMqIntegrationTests : IAsyncLifetime
 
         await Task.Delay(500);
 
-        var messages = await ReceiveMessages(1);
-        messages.Should().HaveCountGreaterOrEqualTo(1);
+        var messages = await ReceiveMessages("TestWmqFields", 1);
+        messages.Should().HaveCountGreaterOrEqualTo(1,
+            "the Events route must publish TestWmqFields to the audit queue");
 
         var evt = JsonSerializer.Deserialize<JsonElement>(messages[0]);
         evt.GetProperty("eventType").GetString().Should().Be("TestWmqFields");

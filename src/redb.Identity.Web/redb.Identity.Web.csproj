@@ -22,9 +22,18 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="9.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" Version="9.0.0" />
+    <!-- ASP.NET packages follow the TFM (net10.0): a 9.0.x package on a 10.0 app is a stray, and it was
+         the only reason this project resolved Microsoft.IdentityModel 8.0.1 while the rest of Identity
+         and the Tsak worker run 8.16.0. 10.0.9 on purpose, not the newest patch: from 10.0.10 these
+         packages require IdentityModel >= 8.19.2, which would split the ecosystem again (NU1605 on a
+         8.16.0 pin). Raise together with the ecosystem-wide IdentityModel move, not alone. -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.9" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.9" />
+    <!-- Direct override of transitive dependencies, same as redb.Identity.Http: the OpenIdConnect and
+         JwtBearer handlers validate the OP tokens with these, and one IdentityModel version across
+         Identity is the rule. The two roots below pull the rest of Microsoft.IdentityModel.* at 8.16.0. -->
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.16.0" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.16.0" />
     <PackageReference Include="QRCoder" Version="1.6.0" />
     <PackageReference Include="Serilog.AspNetCore" Version="8.0.3" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />

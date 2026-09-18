@@ -13,7 +13,7 @@ using Xunit;
 namespace redb.Identity.Tests.FullStack;
 
 /// <summary>
-/// G10 DoD — HTTP-level pins on session lifecycle & logout semantics (C7 + C8):
+/// G10 DoD — HTTP-level pins on session lifecycle &amp; logout semantics (C7 + C8):
 /// <list type="number">
 /// <item>Successful MFA verify creates a brand-new <see cref="SessionProps"/> row with
 ///       <see cref="SessionProps.MfaVerified"/>=<c>true</c> — there is no prior session to

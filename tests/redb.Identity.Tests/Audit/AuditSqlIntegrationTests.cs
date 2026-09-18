@@ -40,7 +40,7 @@ public class AuditSqlIntegrationTests : IAsyncLifetime
 
     private const string SqlInsertUri =
         "sql:INSERT INTO identity_audit_log(event_id, event_type, \"timestamp\", user_id, client_id, ip_address, user_agent, details) "
-        + "VALUES(@event_id, @event_type, @timestamp, @user_id, @client_id, @ip_address, @user_agent, @details::jsonb)"
+        + "VALUES(:#event_id, :#event_type, :#timestamp, :#user_id, :#client_id, :#ip_address, :#user_agent, :#details::jsonb)"
         + "?dataSource=identity-audit-pg&outputType=None"
         + "&param.event_id=${header.event_id}"
         + "&param.event_type=${header.event_type}"
@@ -175,6 +175,7 @@ DELETE FROM identity_audit_log;";
         message.Headers["operation"] = operation;
 
         var exchange = new Exchange(message) { Pattern = ExchangePattern.InOut };
+        ManagementCallerContext.Apply(exchange, ManagementCaller.Admin); // playing the facade, see ManagementCaller
         var endpoint = _ctx.GetEndpoint(IdentityEndpoints.ManageScopes);
         var producer = endpoint.CreateProducer();
         await producer.Process(exchange);

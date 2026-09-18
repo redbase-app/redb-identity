@@ -123,18 +123,21 @@ public sealed class MfaIdorTests
     }
 
     [Fact]
-    public async Task NoAuthContext_InternalDirectVm_BypassesCheck()
+    public async Task NoAuthContext_IsForbidden_DirectVmIsATransportNotATrustLevel()
     {
-        // Calls coming via direct-vm without going through ManagementBearerAuthProcessor
-        // (e.g. internal service-to-service / tests) carry no scopes property and must be
-        // allowed through — direct-vm is not network-reachable.
+        // An exchange without identity:management-scopes is one nobody authenticated. This test used
+        // to pin the opposite ("internal direct-vm callers bypass the check - direct-vm is not
+        // network-reachable"): in a Tsak worker the direct-vm registry is shared by every module in
+        // the process, so that bypass handed any module admin rights over users' MFA. The route gate
+        // (RequireManagementContextProcessor) refuses first; this processor refuses on its own too.
         var sut = CreateSut();
         var ex = BuildExchange(bodyUserId: 42, callerUserId: null, scopes: null);
 
         await sut.Process(ex);
 
-        ex.HasOut.Should().BeFalse();
-        ex.IsStopped.Should().BeFalse();
+        ex.HasOut.Should().BeTrue();
+        ex.Out!.Headers["redbHttp.ResponseCode"].Should().Be(403);
+        ex.IsStopped.Should().BeTrue();
     }
 
     [Fact]

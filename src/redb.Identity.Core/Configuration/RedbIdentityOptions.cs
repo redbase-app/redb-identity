@@ -590,7 +590,7 @@ public class RedbIdentityOptions
     public RateLimitOptions RateLimit { get; set; } = new();
 
     /// <summary>
-    /// Length / size limits applied by management & registration processors when validating
+    /// Length / size limits applied by management &amp; registration processors when validating
     /// inbound payloads. Defaults match historical hardcoded values; tune per deployment.
     /// </summary>
     public IdentityValidationOptions Validation { get; set; } = new();
@@ -838,6 +838,8 @@ public sealed class SeedBackchannelClientOptions
     public List<string> Scopes { get; set; } = new() { "identity:manage" };
 }
 
+/// <summary>
+/// B1 — emergency local-admin bootstrap: a one-shot internal endpoint
 /// (<c>POST /internal/bootstrap-admin</c>). The secret MUST come from environment
 /// (e.g. <c>IDENTITY__BOOTSTRAP__SECRET</c>) and never from <c>context.json</c>
 /// (which is checked into source control).
@@ -983,9 +985,6 @@ public sealed class FederationStateOptions
     public string RedisKeyPrefix { get; set; } = "redb:identity:fed:nonce:";
 }
 
-
-/// <summary>
-/// SameSite cookie modes per RFC 6265bis. <c>None</c> requires <c>Secure</c>.
 
 /// <summary>
 /// C10 — DataProtection at-rest hardening.

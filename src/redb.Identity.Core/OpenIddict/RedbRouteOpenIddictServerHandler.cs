@@ -93,7 +93,7 @@ public sealed class RedbRouteOpenIddictServerHandler
         // and it is why WithRedbTx had to be stripped from the token route.
         //
         // With the exchange in hand, HostRedbScope binds IRedbService to the exchange's instance —
-        // the one BeginRedbTransaction opened the transaction on. One connection, one transaction,
+        // the one enlisted into the route's ambient transaction. One connection, one transaction,
         // the stores enlisted in it.
         //
         // Best-effort: the in-process single-SP path has no HostRedbScope (IRedbService comes

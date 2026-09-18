@@ -1,5 +1,6 @@
 using Bunit;
 using FluentAssertions;
+using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
@@ -23,7 +24,7 @@ namespace redb.Identity.Web.Tests;
 /// Every element is re-queried right before each interaction: bUnit's render tree is
 /// replaced on every re-render, so cached FindAll results go stale.
 /// </summary>
-public sealed class Phase3ComponentTests : TestContext
+public sealed class Phase3ComponentTests : BunitContext
 {
     private readonly IIdentityClient _client = Substitute.For<IIdentityClient>();
 
@@ -42,7 +43,7 @@ public sealed class Phase3ComponentTests : TestContext
         _client.CreateUserAsync(Arg.Any<CreateUserRequest>())
             .ThrowsAsync(new InvalidOperationException("login already taken"));
 
-        var cut = RenderComponent<UserNew>();
+        var cut = Render<UserNew>();
 
         SetInput(cut, 0, "alice");          // login
         SetInput(cut, 1, "Sup3r-secret!");  // password
@@ -64,7 +65,7 @@ public sealed class Phase3ComponentTests : TestContext
         _client.CreateUserAsync(Arg.Do<CreateUserRequest>(r => sent = r))
             .Returns(new UserResponse { Id = 7, Login = "alice" });
 
-        var cut = RenderComponent<UserNew>();
+        var cut = Render<UserNew>();
         SetInput(cut, 0, "alice");
         SetInput(cut, 1, "Sup3r-secret!");
         ClickButton(cut, "Next: profile");
@@ -86,7 +87,7 @@ public sealed class Phase3ComponentTests : TestContext
         _client.CreateClaimMapperAsync(Arg.Do<CreateClaimMapperRequest>(r => sent = r))
             .Returns(new ClaimMapperResponse { Id = "m1", Name = "n" });
 
-        var cut = RenderComponent<ClaimMapperNew>();
+        var cut = Render<ClaimMapperNew>();
 
         SetInput(cut, 0, "employee-id");   // Name
         SetInput(cut, 1, "emp_id");        // Claim type
@@ -108,7 +109,7 @@ public sealed class Phase3ComponentTests : TestContext
         _client.CreateClaimMapperAsync(Arg.Do<CreateClaimMapperRequest>(r => sent = r))
             .Returns(new ClaimMapperResponse { Id = "m1", Name = "n" });
 
-        var cut = RenderComponent<ClaimMapperNew>();
+        var cut = Render<ClaimMapperNew>();
         SetInput(cut, 0, "employee-id");
         SetInput(cut, 1, "emp_id");
         SetSourceConstant(cut, "ACME");
@@ -126,7 +127,7 @@ public sealed class Phase3ComponentTests : TestContext
     {
         _client.GetFederationProviderAsync("p1").Returns(Provider());
 
-        var cut = RenderComponent<FederationDetail>(p => p.Add(x => x.Id, "p1"));
+        var cut = Render<FederationDetail>(p => p.Add(x => x.Id, "p1"));
 
         ClickButton(cut, "Claim mappings");
         ClickButton(cut, "Add mapping");
@@ -152,7 +153,7 @@ public sealed class Phase3ComponentTests : TestContext
         _client.UpdateFederationProviderAsync("p1", Arg.Do<UpdateFederationProviderRequest>(r => sent = r))
             .Returns(Provider());
 
-        var cut = RenderComponent<FederationDetail>(p => p.Add(x => x.Id, "p1"));
+        var cut = Render<FederationDetail>(p => p.Add(x => x.Id, "p1"));
         ClickButton(cut, "Save");
 
         sent.Should().NotBeNull();
@@ -176,7 +177,7 @@ public sealed class Phase3ComponentTests : TestContext
             Total = 3,
         });
 
-        var cut = RenderComponent<ApiResources>();
+        var cut = Render<ApiResources>();
 
         cut.Markup.Should().Contain("seeded");
         cut.Markup.Should().Contain("photos", "operator scopes outside the model must be listed");
@@ -200,20 +201,25 @@ public sealed class Phase3ComponentTests : TestContext
         Priority = 100,
     };
 
-    private static void SetInput(IRenderedFragment cut, int index, string value)
+    private static void SetInput<TComponent>(IRenderedComponent<TComponent> cut, int index, string value)
+        where TComponent : IComponent
         => cut.FindAll("input")[index].Change(value);
 
-    private static void SetNumber(IRenderedFragment cut, int index, string value)
+    private static void SetNumber<TComponent>(IRenderedComponent<TComponent> cut, int index, string value)
+        where TComponent : IComponent
         => cut.FindAll("input[type=number]")[index].Input(value); // owner-id field binds @oninput
 
-    private static void SetSelect(IRenderedFragment cut, int index, string value)
+    private static void SetSelect<TComponent>(IRenderedComponent<TComponent> cut, int index, string value)
+        where TComponent : IComponent
         => cut.FindAll("select")[index].Change(value);
 
-    private static void SetTableInput(IRenderedFragment cut, int index, string value)
+    private static void SetTableInput<TComponent>(IRenderedComponent<TComponent> cut, int index, string value)
+        where TComponent : IComponent
         => cut.FindAll("table input")[index].Change(value);
 
     /// <summary>The Constant-value input lives inside the "Source" section (mono style).</summary>
-    private static void SetSourceConstant(IRenderedFragment cut, string value)
+    private static void SetSourceConstant<TComponent>(IRenderedComponent<TComponent> cut, string value)
+        where TComponent : IComponent
     {
         var section = cut.FindAll("section")
             .First(s => s.TextContent.Contains("Source kind"));
@@ -222,7 +228,8 @@ public sealed class Phase3ComponentTests : TestContext
         input!.Change(value);
     }
 
-    private static void ClickButton(IRenderedFragment cut, string textPart)
+    private static void ClickButton<TComponent>(IRenderedComponent<TComponent> cut, string textPart)
+        where TComponent : IComponent
     {
         var button = cut.FindAll("button")
             .FirstOrDefault(b => b.TextContent.Contains(textPart, StringComparison.OrdinalIgnoreCase));

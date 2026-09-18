@@ -61,7 +61,7 @@ internal sealed class RevokedSidsCleanupProcessor : IProcessor
 
         if (expiredIds.Count > 0)
         {
-            await IdentityDeletionHelper.DeleteAsync(redb, _backgroundDeletion, expiredIds, BatchSize)
+            await IdentityDeletionHelper.DeleteAsync(redb, _backgroundDeletion, expiredIds)
                 .ConfigureAwait(false);
         }
 

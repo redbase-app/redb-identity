@@ -395,6 +395,7 @@ public class ClaimMappersIntegrationTests : IAsyncLifetime
         var createMsg = new Message { Body = createReq };
         createMsg.Headers["operation"] = "create";
         var ex = new Exchange(createMsg) { Pattern = ExchangePattern.InOut };
+        ManagementCallerContext.Apply(ex, ManagementCaller.Admin);
         await endpoint.CreateProducer().Process(ex);
         ex.Exception.Should().BeNull();
 
@@ -410,6 +411,7 @@ public class ClaimMappersIntegrationTests : IAsyncLifetime
         var listMsg = new Message { Body = new ListRequest { Count = 50 } };
         listMsg.Headers["operation"] = "list";
         var lex = new Exchange(listMsg) { Pattern = ExchangePattern.InOut };
+        ManagementCallerContext.Apply(lex, ManagementCaller.Admin);
         await endpoint.CreateProducer().Process(lex);
         lex.Exception.Should().BeNull();
         var page = (lex.Out ?? lex.In).Body as PagedResult<ClaimMapperResponse>;
@@ -433,6 +435,7 @@ public class ClaimMappersIntegrationTests : IAsyncLifetime
         var c = new Message { Body = new CreateClaimScopeRequest { Name = "route-scope-" + Guid.NewGuid().ToString("N")[..6], Enabled = true } };
         c.Headers["operation"] = "create";
         var cex = new Exchange(c) { Pattern = ExchangePattern.InOut };
+        ManagementCallerContext.Apply(cex, ManagementCaller.Admin);
         await endpoint.CreateProducer().Process(cex);
         cex.Exception.Should().BeNull();
         var scope = (cex.Out ?? cex.In).Body as ClaimScopeResponse;
@@ -444,6 +447,7 @@ public class ClaimMappersIntegrationTests : IAsyncLifetime
             var m = new Message { Body = new AssignClaimScopeRequest { ApplicationId = appId.ToString(), ScopeId = scope!.Id } };
             m.Headers["operation"] = "assign";
             var e = new Exchange(m) { Pattern = ExchangePattern.InOut };
+            ManagementCallerContext.Apply(e, ManagementCaller.Admin);
             await endpoint.CreateProducer().Process(e);
             e.Exception.Should().BeNull();
             return (e.Out ?? e.In).Body as ClaimScopeAssignmentResponse;
@@ -466,6 +470,7 @@ public class ClaimMappersIntegrationTests : IAsyncLifetime
         };
         u.Headers["operation"] = "unassign";
         var uex = new Exchange(u) { Pattern = ExchangePattern.InOut };
+        ManagementCallerContext.Apply(uex, ManagementCaller.Admin);
         await endpoint.CreateProducer().Process(uex);
         uex.Exception.Should().BeNull();
     }

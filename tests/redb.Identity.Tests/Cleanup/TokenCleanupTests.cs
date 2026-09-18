@@ -62,9 +62,14 @@ public class TokenCleanupTests
         var body = (dynamic)exchange.Out!.Body!;
         ((int)body.prunedTokens).Should().Be(2);
         exchange.Properties["identity-event-type"].Should().Be("TokensPruned");
-        await _bgDeletion.Received(1).DeleteAsync(
+        // Marked through the CALLER's service so the mark joins the caller's transaction.
+        // IBackgroundDeletionService.DeleteAsync would mark on a second connection of its
+        // own; it is left to purge, which it does by polling for the trash container.
+        await _redb.Received(1).SoftDeleteAsync(
             Arg.Is<IEnumerable<long>>(ids => ids.Count() == 2),
-            Arg.Any<IRedbUser>(), Arg.Any<int>(), Arg.Any<long?>());
+            Arg.Any<IRedbUser>(), Arg.Any<long?>(), Arg.Any<CancellationToken>());
+        await _bgDeletion.DidNotReceive().DeleteAsync(
+            Arg.Any<IEnumerable<long>>(), Arg.Any<IRedbUser>(), Arg.Any<int>(), Arg.Any<long?>());
     }
 
     [Fact]
@@ -83,8 +88,10 @@ public class TokenCleanupTests
 
         var body = (dynamic)exchange.Out!.Body!;
         ((int)body.prunedTokens).Should().Be(0);
-        await _bgDeletion.DidNotReceive().DeleteAsync(
-            Arg.Any<IEnumerable<long>>(), Arg.Any<IRedbUser>(), Arg.Any<int>(), Arg.Any<long?>());
+        // Assert on the path that actually marks. The background service is no longer called
+        // at all, so an assertion only on it would hold even if a token HAD been deleted.
+        await _redb.DidNotReceive().SoftDeleteAsync(
+            Arg.Any<IEnumerable<long>>(), Arg.Any<IRedbUser>(), Arg.Any<long?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -139,9 +146,9 @@ public class TokenCleanupTests
 
         var body = (dynamic)exchange.Out!.Body!;
         ((int)body.prunedAuthorizations).Should().Be(1);
-        await _bgDeletion.Received().DeleteAsync(
+        await _redb.Received().SoftDeleteAsync(
             Arg.Is<IEnumerable<long>>(ids => ids.Contains(100L)),
-            Arg.Any<IRedbUser>(), Arg.Any<int>(), Arg.Any<long?>());
+            Arg.Any<IRedbUser>(), Arg.Any<long?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

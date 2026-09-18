@@ -55,9 +55,16 @@ public class AuditTarget
 
     /// <summary>
     /// redb.Route URI for the target endpoint.
+    /// <para>
+    /// SQL parameters are written <c>:#name</c> (the Camel form). <c>@name</c> is NOT a parameter —
+    /// it reaches the database as-is, because it collides with T-SQL and MySQL variables. A target
+    /// still carrying the old <c>@name</c> form stops writing rows and fails with a database error.
+    /// Each parameter is bound by <c>param.name=...</c>, then a header of that name, then a key of
+    /// the body dictionary; casts work (<c>:#details::jsonb</c>).
+    /// </para>
     /// Examples:
     /// <list type="bullet">
-    ///   <item><c>sql:INSERT INTO identity_audit_log(...) VALUES(...)?dataSource=#pg-audit</c></item>
+    ///   <item><c>sql:INSERT INTO identity_audit_log(event_id, details) VALUES(:#event_id, :#details::jsonb)?dataSource=#pg-audit&amp;param.event_id=${header.event_id}&amp;param.details=${header.details}</c></item>
     ///   <item><c>kafka:identity-audit?brokers=localhost:29092</c></item>
     ///   <item><c>es:identity-audit?server=localhost&amp;port=9200</c></item>
     ///   <item><c>rabbitmq:identity-audit?host=localhost</c></item>

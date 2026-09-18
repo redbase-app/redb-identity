@@ -12,7 +12,7 @@ using Xunit;
 namespace redb.Identity.Tests.FullStack;
 
 /// <summary>
-/// G5 DoD — HTTP-level checks pinning the B3/B5/B7 transport & single-use contracts:
+/// G5 DoD — HTTP-level checks pinning the B3/B5/B7 transport &amp; single-use contracts:
 /// <list type="number">
 /// <item>POST /mfa without the <c>__Host-redb.identity.mfa</c> cookie never issues a session.</item>
 /// <item>Same <c>jti</c>+<c>code</c> replayed → second submission does not create a second session

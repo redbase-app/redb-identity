@@ -44,7 +44,7 @@ public class SessionCleanupTests
     }
 
     [Fact]
-    public async Task Prune_WithBackgroundDeletion_UsesClusterSafePath()
+    public async Task Prune_MarksThroughTheCallerService_NotTheBackgroundConnection()
     {
         var sessions = new List<RedbObject<SessionProps>>
         {
@@ -61,14 +61,21 @@ public class SessionCleanupTests
         var body = (dynamic)exchange.Out!.Body!;
         ((int)body.prunedSessions).Should().Be(2);
         exchange.Properties["identity-event-type"].Should().Be("SessionsPruned");
-        await _bgDeletion.Received(1).DeleteAsync(
+        // The mark is written by the CALLER's service so it joins whatever transaction the
+        // caller is in. IBackgroundDeletionService.DeleteAsync would mark on a second
+        // connection of its own — which deadlocks against a route transaction on SQLite and
+        // commits outside it on PostgreSQL / MSSQL. The service still purges: it finds the
+        // trash container by polling, nothing is handed to it.
+        await _redb.Received(1).SoftDeleteAsync(
             Arg.Is<IEnumerable<long>>(ids => ids.Count() == 2 && ids.Contains(1L) && ids.Contains(2L)),
-            Arg.Any<IRedbUser>(), Arg.Any<int>(), Arg.Any<long?>());
+            Arg.Any<IRedbUser>(), Arg.Any<long?>(), Arg.Any<CancellationToken>());
+        await _bgDeletion.DidNotReceive().DeleteAsync(
+            Arg.Any<IEnumerable<long>>(), Arg.Any<IRedbUser>(), Arg.Any<int>(), Arg.Any<long?>());
         await _redb.DidNotReceive().DeleteAsync(Arg.Any<IEnumerable<long>>());
     }
 
     [Fact]
-    public async Task Prune_WithoutBackgroundDeletion_FallsBackToSoftDelete()
+    public async Task Prune_WithoutBackgroundDeletion_StillMarks_ButNothingWillPurge()
     {
         var sessions = new List<RedbObject<SessionProps>>
         {
@@ -76,7 +83,8 @@ public class SessionCleanupTests
             CreateSession(11, "revoked", daysOld: 45)
         };
         MockRedbQuery.Setup(_redb, sessions);
-        _redb.SoftDeleteAsync(Arg.Any<IEnumerable<long>>(), Arg.Any<long?>())
+        _redb.SoftDeleteAsync(Arg.Any<IEnumerable<long>>(), Arg.Any<IRedbUser>(),
+                Arg.Any<long?>(), Arg.Any<CancellationToken>())
             .Returns(new DeletionMark(0, 2));
 
         var processor = CreateProcessor(bgDeletion: null);
@@ -87,7 +95,7 @@ public class SessionCleanupTests
         ((int)body.prunedSessions).Should().Be(2);
         await _redb.Received(1).SoftDeleteAsync(
             Arg.Is<IEnumerable<long>>(ids => ids.Count() == 2 && ids.Contains(10L) && ids.Contains(11L)),
-            Arg.Any<long?>());
+            Arg.Any<IRedbUser>(), Arg.Any<long?>(), Arg.Any<CancellationToken>());
         await _redb.DidNotReceive().DeleteAsync(Arg.Any<IEnumerable<long>>());
         await _bgDeletion.DidNotReceive().DeleteAsync(
             Arg.Any<IEnumerable<long>>(), Arg.Any<IRedbUser>(), Arg.Any<int>(), Arg.Any<long?>());
@@ -109,8 +117,10 @@ public class SessionCleanupTests
 
         var body = (dynamic)exchange.Out!.Body!;
         ((int)body.prunedSessions).Should().Be(0);
-        await _bgDeletion.DidNotReceive().DeleteAsync(
-            Arg.Any<IEnumerable<long>>(), Arg.Any<IRedbUser>(), Arg.Any<int>(), Arg.Any<long?>());
+        // Assert on the path that actually marks. The background service is no longer called
+        // at all, so an assertion only on it would hold even if a session HAD been deleted.
+        await _redb.DidNotReceive().SoftDeleteAsync(
+            Arg.Any<IEnumerable<long>>(), Arg.Any<IRedbUser>(), Arg.Any<long?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

@@ -181,7 +181,7 @@ public sealed class IdentityModuleHostTests
 
         var exchange = new Exchange();
 
-        // The instance a route-level BeginRedbTransaction opens its transaction on. redb.Route
+        // The instance the route-level ambient transaction (.Transacted()) enlists. redb.Route
         // caches its scope on the exchange, so every later ask for the same name returns this one.
         var transactionService = ctx.GetRedbService("identity-pg", exchange);
 

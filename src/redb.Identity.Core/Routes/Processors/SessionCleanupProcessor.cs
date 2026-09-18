@@ -91,7 +91,7 @@ internal sealed class SessionCleanupProcessor : IProcessor
 
         if (revokedIds.Count > 0)
         {
-            await SoftDeleteAsync(redb, revokedIds, batchSize);
+            await SoftDeleteAsync(redb, revokedIds);
         }
 
         exchange.Out ??= new Message();
@@ -106,6 +106,6 @@ internal sealed class SessionCleanupProcessor : IProcessor
         };
     }
 
-    private Task SoftDeleteAsync(IRedbService redb, List<long> ids, int batchSize)
-        => IdentityDeletionHelper.DeleteAsync(redb, _backgroundDeletion, ids, batchSize);
+    private Task SoftDeleteAsync(IRedbService redb, List<long> ids)
+        => IdentityDeletionHelper.DeleteAsync(redb, _backgroundDeletion, ids);
 }

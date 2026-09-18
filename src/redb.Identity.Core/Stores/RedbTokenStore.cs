@@ -533,12 +533,12 @@ internal sealed class RedbTokenStore : IOpenIddictTokenStore<RedbObject<TokenPro
     }
 
     /// <summary>
-    /// Identity-wide deletion helper indirection. Uses <see cref="IBackgroundDeletionService"/>
-    /// when available; otherwise falls back to <c>SoftDeleteAsync</c> so the trash is still
-    /// hidden from queries and picked up by the next BackgroundDeletionService orphan-recovery.
+    /// Identity-wide deletion helper indirection: marks through this store-owned
+    /// <see cref="IRedbService"/> so the mark joins the transaction of the caller; the background
+    /// service purges the trash container it finds by polling.
     /// </summary>
     private Task SoftDeleteIdsAsync(IEnumerable<long> ids)
-        => IdentityDeletionHelper.DeleteAsync(_redb, _backgroundDeletion, ids, PruneBatchSize);
+        => IdentityDeletionHelper.DeleteAsync(_redb, _backgroundDeletion, ids);
 
     public ValueTask SetApplicationIdAsync(
         RedbObject<TokenProps> token, string? identifier, CancellationToken cancellationToken)

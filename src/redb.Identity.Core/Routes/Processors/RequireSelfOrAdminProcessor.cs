@@ -1,9 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using redb.Identity.Core.Serialization;
 using redb.Route.Abstractions;
-using redb.Route.Core;
 
 namespace redb.Identity.Core.Routes.Processors;
 
@@ -19,18 +17,19 @@ namespace redb.Identity.Core.Routes.Processors;
 ///   <c>identity:account</c>) AND the body <c>userId</c> equals the token's
 ///   <c>sub</c> claim — may target only the calling user.</description></item>
 /// </list>
-/// On any other combination (missing scope, mismatched subject, missing userId in body)
-/// the request is rejected with HTTP 403 and a single generic error message — never
-/// distinguishing «user does not exist» from «not authorized», to avoid information
-/// leakage.
+/// On any other combination (missing scope, mismatched subject, missing userId in body,
+/// no management context at all) the request is rejected with HTTP 403 and a single
+/// generic error message — never distinguishing «user does not exist» from «not
+/// authorized», to avoid information leakage.
 /// </para>
 /// <para>
-/// <b>Internal callers (direct-vm without HTTP).</b> When the upstream
-/// <see cref="ManagementBearerAuthProcessor"/> has not run (no
-/// <c>identity:management-scopes</c> property on the exchange), this processor treats the
-/// call as <i>internal trusted</i> and bypasses the check. direct-vm endpoints are
-/// in-process only and not network-reachable; this preserves backwards compatibility
-/// with internal service-to-service flows and tests.
+/// <b>No management context is a refusal, not a bypass.</b> This processor used to admit an
+/// exchange without <c>identity:management-scopes</c> as an "internal trusted" caller, on the
+/// reasoning that <c>direct-vm</c> is not network-reachable. In a Tsak worker the <c>direct-vm</c>
+/// registry is shared by every module in the process, so that reasoning granted any module
+/// admin rights over users' MFA. The gate at the route entrance
+/// (<see cref="RequireManagementContextProcessor"/>) refuses such exchanges first; this processor
+/// refuses them too, so the rule holds even if it is ever placed on a route without the gate.
 /// </para>
 /// </summary>
 internal sealed class RequireSelfOrAdminProcessor : IProcessor
@@ -51,10 +50,14 @@ internal sealed class RequireSelfOrAdminProcessor : IProcessor
 
     public Task Process(IExchange exchange, CancellationToken ct = default)
     {
-        // Bypass for internal direct-vm callers (no auth context attached). See class docs.
-        if (!exchange.Properties.TryGetValue("identity:management-scopes", out var scopesObj)
+        if (!exchange.Properties.TryGetValue(RequireManagementContextProcessor.ScopesProperty, out var scopesObj)
             || scopesObj is not string[] scopes)
         {
+            // Nobody authenticated this caller. Not a trusted internal one — see the class docs.
+            _logger.LogWarning(
+                "Self-or-admin authorization denied: no management context on the exchange (route={RouteId})",
+                exchange.RouteId);
+            Reject(exchange);
             return Task.CompletedTask;
         }
 
@@ -122,43 +125,8 @@ internal sealed class RequireSelfOrAdminProcessor : IProcessor
         };
     }
 
+    // B8: one generic message for every denial reason (no «existed/not existed» leakage);
+    // the shape itself lives in ManagementProblem so every gate on the surface answers alike.
     private static void Reject(IExchange exchange)
-    {
-        // B8: single generic message for all denial reasons (no «existed/not existed» leakage).
-        //
-        // This is an APPLICATION-level authorization rule (IDOR guard), NOT an RFC 6750
-        // OAuth scope check — the 6750 challenge has already been issued upstream by
-        // ManagementBearerAuthProcessor. Per current industry practice (RFC 9457,
-        // published 2023 to supersede RFC 7807), application-level error responses
-        // should use the Problem Details media type `application/problem+json`.
-        //
-        // OAuth/OIDC endpoints retain the `application/json` envelope mandated by
-        // RFC 6749 §5.2 / RFC 6750 §3.1; only generic authz-rule rejections migrate.
-        //
-        // The `code` extension member preserves the stable machine-readable token
-        // ("not_authorized") that existing consumers grep for.
-        var problem = new Dictionary<string, object?>
-        {
-            ["type"] = "https://redb.local/problems/authorization-denied",
-            ["title"] = "Forbidden",
-            ["status"] = 403,
-            ["detail"] = "The access token does not authorize the requested operation.",
-            ["code"] = "not_authorized"
-        };
-
-        // Serialize through the locked Problem profile facade. This produces the same
-        // wire format a registry lookup for "application/problem+json" would return
-        // (see IdentityCodecProfilesConfigurator); we skip the registry round-trip
-        // here because this processor has no reference to the route context and the
-        // Problem profile is an Identity-owned, RFC-locked artifact.
-        var body = IdentityCodecProfiles.Problem.Serialize(problem);
-        exchange.Out = new Message(body);
-        // Core-level content type keeps the value transport-agnostic for Rabbit/Kafka façades.
-        exchange.Out.ContentType = IdentityCodecProfiles.ProblemMediaType;
-        exchange.Out.Headers["redbHttp.ResponseCode"] = 403;
-        exchange.Out.Headers["redbHttp.ResponseContentType"] = IdentityCodecProfiles.ProblemMediaType;
-        exchange.Exception = new UnauthorizedAccessException("Self-or-admin authorization denied.");
-        exchange.ExceptionHandled = true;
-        exchange.Stop();
-    }
+        => ManagementProblem.Forbidden(exchange, "The access token does not authorize the requested operation.");
 }

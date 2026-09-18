@@ -27,9 +27,9 @@ public class V4UniqueProbeProps
 
 /// <summary>
 /// F0 probes: the two core-semantics facts EVERY phase of the V4-UNIQUE refactoring leans on,
-/// exercised the way Identity actually runs — inside an explicit redb transaction
-/// (<c>WithRedbTx</c> = <c>Transacted(Suppress)</c> + <c>BeginRedbTransaction</c>, which is
-/// <see cref="redb.Core.Data.IRedbContext.BeginTransactionAsync"/> underneath). The core's own
+/// exercised the way Identity actually runs — inside a redb transaction
+/// (<c>WithRedbTx</c> is an ambient <c>.Transacted()</c> scope today; here it is opened explicitly as
+/// <see cref="redb.Core.Data.IRedbContext.BeginTransactionAsync"/>, the same transaction). The core's own
 /// <c>UniqueKeyTestsBase</c>/<c>ValueUniqueTestsBase</c> cover the untransacted surface; these two
 /// pin the transacted one and stay as permanent regression tests.
 /// </summary>

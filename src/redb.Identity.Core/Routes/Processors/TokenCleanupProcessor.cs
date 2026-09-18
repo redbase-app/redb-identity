@@ -150,7 +150,7 @@ internal sealed class TokenCleanupProcessor : IProcessor
     }
 
     private Task SoftDeleteAsync(IRedbService redb, List<long> ids)
-        => IdentityDeletionHelper.DeleteAsync(redb, _backgroundDeletion, ids, _options.TokenCleanupBatchSize);
+        => IdentityDeletionHelper.DeleteAsync(redb, _backgroundDeletion, ids);
 
     private async Task<int> PruneOrphanedAuthorizations(IRedbService redb, DateTimeOffset threshold)
     {

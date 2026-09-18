@@ -99,7 +99,7 @@ public static class IdentityRouteContextExtensions
     /// Tells a freshly opened Identity child scope which exchange it belongs to.
     /// <para>
     /// <c>HostRedbScope</c> reads this to bind <c>IRedbService</c> to the exchange's connection —
-    /// the one a route-level <c>BeginRedbTransaction</c> opened its transaction on — instead of
+    /// the one enlisted into the route-level ambient transaction (<c>.Transacted()</c>) — instead of
     /// opening a second connection of its own. Without the seed, everything inside the child
     /// container (including every OpenIddict store) writes outside the route transaction, and, worse,
     /// deadlocks against it. See <c>doc/PERF_RULES.md</c> rule 1.

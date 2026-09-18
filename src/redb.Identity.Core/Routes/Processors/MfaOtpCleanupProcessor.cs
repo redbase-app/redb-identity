@@ -56,7 +56,7 @@ internal sealed class MfaOtpCleanupProcessor : IProcessor
 
         if (expiredIds.Count > 0)
         {
-            await SoftDeleteAsync(redb, expiredIds, batchSize);
+            await SoftDeleteAsync(redb, expiredIds);
         }
 
         exchange.Out ??= new Message();
@@ -70,6 +70,6 @@ internal sealed class MfaOtpCleanupProcessor : IProcessor
         };
     }
 
-    private Task SoftDeleteAsync(IRedbService redb, List<long> ids, int batchSize)
-        => IdentityDeletionHelper.DeleteAsync(redb, _backgroundDeletion, ids, batchSize);
+    private Task SoftDeleteAsync(IRedbService redb, List<long> ids)
+        => IdentityDeletionHelper.DeleteAsync(redb, _backgroundDeletion, ids);
 }

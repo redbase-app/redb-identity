@@ -52,7 +52,7 @@ internal sealed class WebAuthnConsumedChallengeCleanupProcessor : IProcessor
 
         if (expiredIds.Count > 0)
         {
-            await IdentityDeletionHelper.DeleteAsync(redb, _backgroundDeletion, expiredIds, batchSize);
+            await IdentityDeletionHelper.DeleteAsync(redb, _backgroundDeletion, expiredIds);
         }
 
         exchange.Out ??= new Message();

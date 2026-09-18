@@ -37,6 +37,9 @@ public sealed class IdentityRouteFixture : IAsyncLifetime
     public IRedbService Redb { get; private set; } = null!;
     public IServiceProvider ServiceProvider => _sp;
 
+    /// <summary>The From URIs of every route the fixture registered — lets a test check coverage instead of guessing.</summary>
+    public IEnumerable<string> RegisteredFromUris => _ctx.Routes.Select(r => r.FromUri);
+
     public async Task InitializeAsync()
     {
         var services = new ServiceCollection();
@@ -180,13 +183,17 @@ public sealed class IdentityRouteFixture : IAsyncLifetime
     /// Returns the full exchange for inspection.
     /// </summary>
     public async Task<Exchange> RequestWithHeaders(
-        string endpointUri, object? body, IDictionary<string, object?> headers)
+        string endpointUri, object? body, IDictionary<string, object?> headers,
+        ManagementCaller caller = ManagementCaller.Admin)
     {
         var message = new Message { Body = body };
         foreach (var (key, value) in headers)
             message.Headers[key] = value;
 
         var exchange = new Exchange(message) { Pattern = ExchangePattern.InOut };
+        // This fixture plays the facade: the core management routes refuse an exchange without a
+        // management context, so say which caller we are. Admin unless the test probes the gate.
+        ManagementCallerContext.Apply(exchange, caller);
 
         var endpoint = _ctx.GetEndpoint(endpointUri);
         var producer = endpoint.CreateProducer();

@@ -26,9 +26,9 @@
       shares the cluster-wide key-ring with Core without referencing it.
     -->
     <ProjectReference Include="..\redb.Identity.DataProtection\redb.Identity.DataProtection.csproj" />
-    <PackageReference Include="redb.Core" Version="4.0.0" />
-    <PackageReference Include="redb.Route.Http" Version="4.0.0" />
-    <PackageReference Include="redb.Route.Controllers" Version="4.0.0" />
+    <PackageReference Include="redb.Core" Version="4.0.1" />
+    <PackageReference Include="redb.Route.Http" Version="4.0.1" />
+    <PackageReference Include="redb.Route.Controllers" Version="4.0.1" />
   </ItemGroup>
 
   <ItemGroup>
@@ -43,6 +43,13 @@
          patched 9.x release; kept on 9.x rather than 10.x because this library multi-targets down
          to net8.0. Do not remove — without it resolution falls back to the flagged version. -->
     <PackageReference Include="Microsoft.Bcl.Memory" Version="9.0.19" />
+    <!-- Direct override of a transitive dependency: OpenIddict.Abstractions 6.3.0 pulls
+         Microsoft.IdentityModel.* 8.4.0, while the Tsak worker and redb.Identity.Core.Module run on 8.16.0
+         (the floor Microsoft.Data.SqlClient 7.0.3 requires). Without these references this module's .tpkg
+         ships 8.4.0 companions next to a host on 8.16.0. Keep them on the worker's version. -->
+    <PackageReference Include="Microsoft.IdentityModel.Abstractions" Version="8.16.0" />
+    <PackageReference Include="Microsoft.IdentityModel.Logging" Version="8.16.0" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.16.0" />
     <!-- Phase 9b: AddDataProtection() lives in this package; needed by IdentityHttpModuleHost. -->
     <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="9.0.4" />
   </ItemGroup>

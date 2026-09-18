@@ -200,13 +200,17 @@ public sealed class MockOidcE2EFixture : IAsyncLifetime
     /// dispatch on the <c>operation</c> header).
     /// </summary>
     public async Task<Exchange> RequestWithHeaders(
-        string endpointUri, object? body, IDictionary<string, object?> headers)
+        string endpointUri, object? body, IDictionary<string, object?> headers,
+        ManagementCaller caller = ManagementCaller.Admin)
     {
         var message = new Message { Body = body };
         foreach (var (key, value) in headers)
             message.Headers[key] = value;
 
         var exchange = new Exchange(message) { Pattern = ExchangePattern.InOut };
+        // This fixture plays the facade: the core management routes refuse an exchange without a
+        // management context, so say which caller we are. Admin unless the test probes the gate.
+        ManagementCallerContext.Apply(exchange, caller);
 
         var endpoint = _ctx.GetEndpoint(endpointUri);
         var producer = endpoint.CreateProducer();

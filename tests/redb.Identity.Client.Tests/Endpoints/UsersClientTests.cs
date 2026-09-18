@@ -72,9 +72,17 @@ public sealed class UsersClientTests
     [Fact]
     public async Task SearchUsers_GETs_with_query()
     {
-        var fx = new IdentityClientFixture(HttpStatusCode.OK, "[{\"id\":1,\"login\":\"alice\"}]");
+        // The non-paginated overload rides the paginated endpoint with the server-side cap (200) as
+        // its page size, so the wire shape is PagedResult and the URL carries offset/count (a2d555dc).
+        var paged = new PagedResult<UserResponse>
+        {
+            Items = new List<UserResponse> { new() { Id = 1, Login = "alice" } },
+            Total = 1, Offset = 0, Count = 200,
+        };
+        var fx = new IdentityClientFixture(HttpStatusCode.OK, IdentityClientFixture.Json(paged));
         var result = await fx.Client.SearchUsersAsync("ali");
-        fx.Handler.Requests.Single().RequestUri!.PathAndQuery.Should().Be("/api/v1/identity/users/search?query=ali");
+        fx.Handler.Requests.Single().RequestUri!.PathAndQuery.Should().Be(
+            "/api/v1/identity/users/search?query=ali&offset=0&count=200");
         result.Should().ContainSingle().Which.Login.Should().Be("alice");
     }
 }

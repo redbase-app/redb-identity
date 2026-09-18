@@ -46,7 +46,8 @@ public class AuditCompletenessFullCycleTests
             "RFC 7662 §2.2: introspection must answer 200 — got {0}: {1}",
             resp.StatusCode, await resp.Content.ReadAsStringAsync());
 
-        await Task.Delay(2000);
+        // No fixed sleep: QueryAuditAsync polls until the row appears (the WireTap audit branch
+        // finishes after the HTTP response).
         var rows = await QueryAuditAsync("TokenIntrospected");
         rows.Should().NotBeEmpty(
             "core processor must emit audit catalog event TokenIntrospected after a well-formed introspection");
@@ -73,7 +74,8 @@ public class AuditCompletenessFullCycleTests
             "RFC 7009 §2.2: revocation must answer 200 — got {0}: {1}",
             resp.StatusCode, await resp.Content.ReadAsStringAsync());
 
-        await Task.Delay(2000);
+        // No fixed sleep: QueryAuditAsync polls until the row appears (the WireTap audit branch
+        // finishes after the HTTP response).
         var rows = await QueryAuditAsync("TokenRevoked");
         rows.Should().NotBeEmpty(
             "core processor must emit audit catalog event TokenRevoked after a well-formed revocation");
@@ -95,7 +97,8 @@ public class AuditCompletenessFullCycleTests
             "RFC 8628 §3.2: device authorization must answer 200 — got {0}: {1}",
             resp.StatusCode, await resp.Content.ReadAsStringAsync());
 
-        await Task.Delay(2000);
+        // No fixed sleep: QueryAuditAsync polls until the row appears (the WireTap audit branch
+        // finishes after the HTTP response).
         var rows = await QueryAuditAsync("DeviceCodeIssued");
         rows.Should().NotBeEmpty(
             "core processor must emit audit catalog event DeviceCodeIssued after issuing a device_code");
@@ -151,6 +154,7 @@ public class AuditCompletenessFullCycleTests
         // request → fresh per-request DI scope → fresh connection from the pool.
         HttpResponseMessage? lastResp = null;
         string lastBody = string.Empty;
+        var started = System.Diagnostics.Stopwatch.StartNew();
         for (var attempt = 0; attempt < 10; attempt++)
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/identity/audit?eventType={eventType}&count=50");
@@ -160,12 +164,30 @@ public class AuditCompletenessFullCycleTests
             if (lastResp.IsSuccessStatusCode)
             {
                 var doc = JsonDocument.Parse(lastBody);
-                return doc.RootElement.GetProperty("items").EnumerateArray().ToList();
+                var items = doc.RootElement.GetProperty("items").EnumerateArray().ToList();
+
+                // Keep polling while the answer is an EMPTY success, not only while it is a 503.
+                // The audit row is written by a WireTap branch that finishes after the response the
+                // caller already got, so "200 with no rows yet" is the normal first answer under load
+                // — and returning it immediately is what made these tests depend on a fixed sleep.
+                if (items.Count > 0)
+                {
+                    if (attempt > 0)
+                        Console.Error.WriteLine(
+                            $"QueryAuditAsync({eventType}): row appeared on attempt {attempt + 1} after {started.ElapsedMilliseconds} ms");
+                    return items;
+                }
             }
             await Task.Delay(300);
         }
         lastResp!.IsSuccessStatusCode.Should().BeTrue(
             "GET /audit failed after 10 attempts: {0} {1}", lastResp.StatusCode, lastBody);
+
+        // Ten successful-but-empty answers: the event genuinely never arrived. Report how long we
+        // waited — that is what separates "audit is slow" from "audit never fired" if this fails —
+        // and let the caller's assertion name the missing event type.
+        Console.Error.WriteLine(
+            $"QueryAuditAsync({eventType}): no row after 10 attempts / {started.ElapsedMilliseconds} ms");
         return new List<JsonElement>();
     }
 }

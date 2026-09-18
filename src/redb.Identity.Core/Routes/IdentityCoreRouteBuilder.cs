@@ -35,6 +35,24 @@ public class IdentityCoreRouteBuilder : RouteBuilder
     private readonly IProcessor? _managementAuth;
     private readonly IProcessor? _scimAuth;
 
+    /// <summary>
+    /// How many times a transient <see cref="DbException"/> is redelivered. Two places must agree on
+    /// it — <c>MaximumRedeliveries</c> and the <c>RetryWhile</c> predicate that replaces it — so they
+    /// read the same constant instead of each carrying its own literal. See the handler below.
+    /// </summary>
+    private const int MaxDbRedeliveries = 3;
+
+    /// <summary>
+    /// The gate at the entrance of the management, self-service and SCIM surface. Created once per
+    /// Configure() with the security logger; every route on that surface takes it as its first processor
+    /// through <see cref="WithIdempotentTx"/> or explicitly. See <see cref="RequireManagementContextProcessor"/>.
+    /// </summary>
+    private RequireManagementContextProcessor? _requireManagementContext;
+
+    private RequireManagementContextProcessor RequireManagementContext
+        => _requireManagementContext
+           ?? throw new InvalidOperationException("The management-context gate is created at the start of Configure(); a management route was wired before it.");
+
     public IdentityCoreRouteBuilder(
         IServiceProvider sp,
         IOptions<RedbIdentityOptions> options,
@@ -70,15 +88,19 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         // the database was unavailable. A SCIM demo reusing one e-mail address was reported that way, and
         // the hunt started there instead of ending there.
         OnException<DbException>()
-            .MaximumRedeliveries(3)
+            .MaximumRedeliveries(MaxDbRedeliveries)
             .RedeliveryDelay(TimeSpan.FromMilliseconds(200))
             .UseExponentialBackOff()
             .BackOffMultiplier(2.0)
-            // The redelivery count is repeated here on purpose. RetryWhile does not narrow
-            // MaximumRedeliveries — it REPLACES it: OnExceptionProcessor takes the predicate instead of
-            // the count check, inside a `while (true)` with no outer bound. A predicate that only asked
-            // "is this not a unique violation?" would therefore retry an ordinary outage forever.
-            .RetryWhile(e => !IdentityProcessorHelpers.IsUniqueViolation(e.Exception))
+            // The bound is carried INSIDE the predicate, and that is not a duplicate of the line above.
+            // RetryWhile does not narrow MaximumRedeliveries — it REPLACES it: OnExceptionProcessor
+            // takes the predicate instead of the count check, inside a `while (true)` with no outer
+            // bound. A predicate asking only "is this not a unique violation?" retries an ordinary
+            // outage forever, and since the delay doubles every round the route stops answering
+            // altogether. MaximumRedeliveries stays above as the documented policy and as the bound
+            // that applies the day this predicate goes away.
+            .RetryWhile(e => !IdentityProcessorHelpers.IsUniqueViolation(e.Exception)
+                             && e.In.GetHeader<int>("CamelRedeliveryCounter") < MaxDbRedeliveries)
             .Handled()
             .LogStackTrace()
             .Process(e =>
@@ -131,6 +153,9 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         var securityLogger = _sp.GetService<ILoggerFactory>() is { } lf
             ? Security.IdentitySecurityLog.CreateLogger(lf)
             : null;
+        // The management surface refuses exchanges without a management context; the gate is one
+        // instance shared by every route on that surface, created before the first of them is wired.
+        _requireManagementContext = new RequireManagementContextProcessor(securityLogger);
         var rlLogger = securityLogger;
         var perIpThrottle = rlEnabled
             ? new RateLimitProcessor(
@@ -445,9 +470,9 @@ public class IdentityCoreRouteBuilder : RouteBuilder
 
         // 13. MFA management (setup, confirm, disable, status)
         // B8: RequireSelfOrAdminProcessor enforces self-vs-admin so a token with the
-        // self-service scope (identity:account) cannot mutate another user's MFA. When
-        // called via direct-vm without an HTTP auth context the processor bypasses (see
-        // its docs) — keeps internal flows / tests working.
+        // self-service scope (identity:account) cannot mutate another user's MFA. An exchange
+        // without a management context is refused twice over: by RequireManagementContext at the
+        // route entrance and by this processor itself — direct-vm is a transport, not a trust level.
         // E2: Idempotency-Key cache placed AFTER mfaSelfOrAdmin so authorization is always
         // re-checked on replays (a revoked token must not unlock cached responses).
         var mfaSelfOrAdmin = new RequireSelfOrAdminProcessor(
@@ -461,6 +486,7 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         // independent of any DB transaction (they cache the response), so they stay.
         var mfaManageRoute = From(IdentityEndpoints.MfaManage)
             .RouteId(IdentityEndpoints.RouteIds.MfaManage)
+            .Process(RequireManagementContext)
             .Process(mfaSelfOrAdmin);
         var mfaManagePre = BuildIdempotencyPre("mfa-manage");
         if (mfaManagePre is not null) mfaManageRoute = mfaManageRoute.Process(mfaManagePre);
@@ -526,6 +552,7 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         // 13b. H9 — Audit query (read-only, no tx/idempotency/WireTap).
         From(IdentityEndpoints.ManageAudit)
             .RouteId(IdentityEndpoints.RouteIds.ManageAudit)
+            .Process(RequireManagementContext)
             .Process(new AuditQueryProcessor(Context!, _redbName));
 
         // 13b-iv. Signing-key lifecycle (list / rotate / retire). Mounted unconditionally
@@ -538,6 +565,7 @@ public class IdentityCoreRouteBuilder : RouteBuilder
             {
                 From(IdentityEndpoints.ManageSigningKeys)
                     .RouteId(IdentityEndpoints.RouteIds.ManageSigningKeys)
+                    .Process(RequireManagementContext)
                     .Process(new SigningKeysManagementProcessor(signingKeyStore))
                     .WireTap(IdentityEndpoints.Events);
             }
@@ -547,6 +575,7 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         // emits audit events only. No tx / no idempotency cache (purely an audit beacon).
         From(IdentityEndpoints.ManageImpersonation)
             .RouteId(IdentityEndpoints.RouteIds.ManageImpersonation)
+            .Process(RequireManagementContext)
             .Process(new ImpersonationManagementProcessor(Context!, _redbName))
             .WireTap(IdentityEndpoints.Events);
 
@@ -626,6 +655,7 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         // remains on the admin route above.
         WithRedbTx(
             From(IdentityEndpoints.MeSessions).RouteId(IdentityEndpoints.RouteIds.MeSessions))
+            .Process(RequireManagementContext)
             .Process(new MeSessionsProcessor(Context!, _redbName))
             .WireTap(IdentityEndpoints.Events);
 
@@ -647,10 +677,12 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         // (each redb.SaveAsync still uses one short tx) — only the cross-store atomicity goes,
         // which was never enforceable anyway because the store ran on a separate connection.
         From(IdentityEndpoints.MeProfile).RouteId(IdentityEndpoints.RouteIds.MeProfile)
+            .Process(RequireManagementContext)
             .Process(new MeProfileProcessor(Context!, _redbName))
             .WireTap(IdentityEndpoints.Events);
 
         From(IdentityEndpoints.MePassword).RouteId(IdentityEndpoints.RouteIds.MePassword)
+            .Process(RequireManagementContext)
             .Process(new MePasswordProcessor(Context!, _redbName))
             .WireTap(IdentityEndpoints.Events);
 
@@ -682,6 +714,7 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         if (_options.EmailVerification.Enabled)
         {
             From(IdentityEndpoints.MeEmailVerifySend).RouteId(IdentityEndpoints.RouteIds.MeEmailVerifySend)
+                .Process(RequireManagementContext)
                 .Process(new EmailVerifySendProcessor(Context!, _sp, _redbName))
                 .WireTap(IdentityEndpoints.Events);
 
@@ -702,6 +735,7 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         if (_options.ChangeEmail.Enabled)
         {
             From(IdentityEndpoints.MeChangeEmailRequest).RouteId(IdentityEndpoints.RouteIds.MeChangeEmailRequest)
+                .Process(RequireManagementContext)
                 .Process(new ChangeEmailRequestProcessor(Context!, _sp, _redbName))
                 .WireTap(IdentityEndpoints.Events);
 
@@ -750,6 +784,7 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         // through _sp (DI scope), so a route-level redb-tx wrap on the per-exchange
         // connection covered nothing. Removed (see Token note).
         From(IdentityEndpoints.MeMfa).RouteId(IdentityEndpoints.RouteIds.MeMfa)
+            .Process(RequireManagementContext)
             .Process(new MeMfaProcessor(_sp))
             .WireTap(IdentityEndpoints.Events);
 
@@ -758,6 +793,7 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         if (_options.WebAuthn.Enabled)
         {
             From(IdentityEndpoints.MeWebAuthn).RouteId(IdentityEndpoints.RouteIds.MeWebAuthn)
+                .Process(RequireManagementContext)
                 .Process(new MeWebAuthnProcessor(_sp))
                 .WireTap(IdentityEndpoints.Events);
 
@@ -768,12 +804,14 @@ public class IdentityCoreRouteBuilder : RouteBuilder
 
         WithRedbTx(
             From(IdentityEndpoints.MeConsents).RouteId(IdentityEndpoints.RouteIds.MeConsents))
+            .Process(RequireManagementContext)
             .Process(new MeConsentsProcessor(Context!, _redbName))
             .WireTap(IdentityEndpoints.Events);
 
         // H8 (DoD §4 gap (b)/(d)): self-service federated identity link/unlink/list.
         WithRedbTx(
             From(IdentityEndpoints.MeFederatedIdentities).RouteId(IdentityEndpoints.RouteIds.MeFederatedIdentities))
+            .Process(RequireManagementContext)
             .Process(new MeFederatedIdentitiesProcessor(Context!, _sp, _redbName))
             .WireTap(IdentityEndpoints.Events);
 
@@ -810,6 +848,7 @@ public class IdentityCoreRouteBuilder : RouteBuilder
             if (_options.Features.EnableScimBulk)
             {
                 From(IdentityEndpoints.ScimBulk).RouteId(IdentityEndpoints.RouteIds.ScimBulk)
+                    .Process(RequireManagementContext)
                     .Process(new ScimBulkProcessor(Context!,
                         _options.ScimBulkMaxOperations,
                         _options.ScimBulkMaxPayloadSize))
@@ -1110,19 +1149,23 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         if (string.IsNullOrEmpty(_redbName))
             return route; // No named per-exchange scope → cannot safely open a route-level tx.
 
-        // IMPORTANT: use TransactionPolicy.Suppress (not the default Required).
+        // The ambient TransactionScope IS the transaction now: redb enlists into it through the
+        // core's AmbientConnectionRegistry, so one connection per database serves the whole
+        // exchange and the scope owns commit and rollback. The former pairing —
+        // Transacted(Suppress) + BeginRedbTransaction — existed only because the core used to
+        // reject an explicit redb transaction while Transaction.Current was non-null; that
+        // reason is gone and BeginRedbTransaction is obsolete.
         //
-        // We still need the surrounding TransactedProcessor — it is what calls Commit/Rollback
-        // on the RedbTransactedAction registered by BeginRedbTransaction(). But we do NOT want
-        // it to create an ambient System.Transactions.TransactionScope, because Npgsql auto-
-        // enlists the connection in any ambient scope and NpgsqlRedbConnection.BeginTransactionAsync()
-        // explicitly rejects opening an explicit Npgsql tx while Transaction.Current is non-null.
+        // Consequence for processors: nothing inside a transacted route may call
+        // redb.Context.BeginTransactionAsync() — the core throws there and points at
+        // ExecuteAtomicAsync, which joins the ambient transaction instead.
         //
-        // Suppress gives us: TransactedProcessor wrapper (commit/rollback boundary) +
-        // Transaction.Current == null inside (so explicit redb tx works). Identity endpoints
-        // are single-DB so we don't need distributed-tx semantics anyway.
-        return route.Transacted(TransactionPolicy.Suppress)
-                    .BeginRedbTransaction(_redbName);
+        // The timeout is stated rather than inherited. This scope covers Argon2id plus the whole
+        // OpenIddict pipeline on the token route, which sits uncomfortably close to the
+        // framework default of 30 s under load; and a default that belongs to another component
+        // should not silently decide when an Identity request dies. Identity is single-database,
+        // so a longer window brings no distributed-transaction escalation with it.
+        return route.Transacted(new TransactionPolicy { Timeout = TimeSpan.FromMinutes(2) });
     }
 
     /// <summary>
@@ -1190,6 +1233,8 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         // observed). Idempotency pre/post still apply (their cache hits/writes go through
         // the per-exchange redb), they just no longer share a transaction with the body.
         var withTx = wrapInRedbTx ? WithRedbTx(route) : route;
+        // First on the route: no management context, no idempotency lookup, no business processor.
+        withTx = withTx.Process(RequireManagementContext);
         var pre = BuildIdempotencyPre(scope);
         if (pre is not null) withTx = withTx.Process(pre);
         withTx = withTx.Process(business);

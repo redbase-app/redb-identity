@@ -34,6 +34,301 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > NuGet publication follows the source cut.
 
 
+## [4.0.1] — 2026-09-18
+### Security — the management surface no longer trusts a transport
+
+The core management routes — `direct-vm://identity-manage-*`, `identity-manage-mfa`, `identity-me-*`,
+`identity-scim-*`, `identity-revoked-sids` — never see a bearer token themselves. Each facade (HTTP,
+gRPC, SOAP) validates it on the `identity-auth-management` hop, which leaves `identity:management-scopes`
+and its siblings on the exchange, and forwards. The core routes carried no gate of their own: the
+design assumed that whoever reaches `direct-vm` is one of our facades. `RequireSelfOrAdminProcessor`
+(the B8 IDOR rule on `identity-manage-mfa`) wrote that assumption down and acted on it — an exchange
+without a management context was admitted as an "internal trusted caller", on the reasoning that
+`direct-vm` is not network-reachable.
+
+That reasoning does not hold in a Tsak worker: the `direct-vm` registry is one per process and shared
+by every module loaded into it. Any module could send to `identity-manage-users` and administer users,
+or to `identity-manage-mfa` and reset anyone's MFA, with no token and no context — the routes ran the
+business processor and answered. Nothing in the route DSL said so; the trust was inferred from the
+absence of a property. (Reported by the owner.)
+
+Every route on that surface now starts with `RequireManagementContextProcessor`: no
+`identity:management-scopes` on the exchange, no idempotency lookup, no transaction, no business
+processor — a generic 403 `not_authorized` (the same Problem Details every gate on the surface answers
+with, so nothing about the target leaks) and a warning on the security log naming the route and the
+operation. `RequireSelfOrAdminProcessor` refuses the same exchange too, so the rule holds even on a
+route without the gate. There is deliberately no in-process bypass and no option to declare one: an
+in-process module that needs the management surface obtains a context the way the facades do — a token
+with the scopes it needs, validated on `identity-auth-management`. Trust is a property of the exchange,
+established by that hop, never of the transport. `direct-vm` is a transport like the others.
+
+The facades are unaffected: their exchanges already carry the context, and `Exchange.CreateChild`
+copies it into the child exchanges the management controllers and SCIM bulk create. Tests that send to
+the core routes directly now say which caller they play (`ManagementCaller.Admin` by default on the
+fixtures — the fixture stands in for a facade that validated a bearer — and `ManagementCaller.None` to
+probe the gate). `ManagementSurfaceGateTests` sends to every constant of the guarded surface without a
+context and expects the 403; run against the previous code, the management routes answered 500 (the
+business processor had already run and choked on the empty body), the self-service routes 401 from
+their own caller check, `identity-manage-roles` and `identity-revoked-sids` answered as if nothing were
+wrong, and `RequireSelfOrAdminProcessor` let the exchange through. All of that is now the one 403.
+
+### Changed — the test gate runs all three test projects
+
+The Identity gate used to be `redb.Identity.Tests` alone. The solution carries two more test projects,
+`redb.Identity.Client.Tests` (the SDK) and `redb.Identity.Web.Tests` (the BFF), and nothing ran them:
+that is how `RevokedSidsPollHostedServiceTests` stayed red from July, `DevTlsContractTests` from May,
+and `UsersClientTests.SearchUsers_GETs_with_query` from June — the last one stale since `a2d555dc`
+moved the non-paginated search onto the paginated endpoint (page size 200, `PagedResult` on the wire);
+the test still stubbed a bare array and the old URL. Brought to the current contract.
+
+`scripts/test-gate.ps1 -Provider sqlite|postgres|mssql` now runs the three projects and prints one
+summary; the matrix is the three invocations in parallel, as before. Client and Web tests touch no
+storage and add about three seconds. Documented commands updated; the owner's decision to include the
+BFF tests in the gate.
+
+### Changed — Web component tests on bUnit 2
+
+`redb.Identity.Web.Tests` pulled `AngleSharp` 1.2.0 through `bunit` 1.40.0, and every build flagged it
+with `NU1902` for CVE-2026-54570 (mXSS in the HTML5 parser, patched in 1.5.0). Pinning a patched
+AngleSharp directly does not work — 1.5.0 and 1.8.1 were both tried — because bunit 1.40 is compiled
+against the 1.2 API and fails at runtime with `MissingMethodException` (`IHtmlCollection.get_Item`).
+
+The test project now uses bunit 2.11.3, which depends on AngleSharp 1.8.1; the warning is gone without
+any pin. The migration touched one file, `Phase3ComponentTests` (seven tests): the base class is
+`BunitContext`, components render through `Render<T>()`, and the interaction helpers take
+`IRenderedComponent<TComponent>` in place of the removed `IRenderedFragment`. Queries and event
+dispatch (`FindAll`, `Change`, `Input`, `Click`, `Markup`) carried over unchanged, and every assertion
+is the same — the tests that check the exact request a form sends (`Owner == "application:5"`,
+blank optionals as `null`) pass only if the events really reach the components. Test-only change;
+`redb.Identity.Web.Tests` 54/54.
+
+### Changed — Identity.Web on the ASP.NET packages of its own framework
+
+`redb.Identity.Web` targets `net10.0` but pinned `Microsoft.AspNetCore.Authentication.OpenIdConnect`,
+`…Authentication.JwtBearer` and `…Components.Authorization` at 9.0.0 — packages of the previous major
+on a 10.0 application. Nothing failed, but those three were the whole reason the BFF resolved
+`Microsoft.IdentityModel` 8.0.1 while the rest of Identity and the Tsak worker run 8.16.0
+(`fcfafa48`). The two authentication packages now follow the TFM (`Microsoft.AspNetCore.Mvc.Testing`
+in `redb.Identity.Web.Tests` likewise); `Components.Authorization` is not raised but dropped — the SDK
+reports it framework-provided (`NU1510`), so the reference only ever added a version to argue about.
+The two IdentityModel roots the handlers actually use —
+`Microsoft.IdentityModel.Protocols.OpenIdConnect` and `System.IdentityModel.Tokens.Jwt` — are pinned
+at 8.16.0 the way `redb.Identity.Http` pins its own. One IdentityModel version across Identity. The BFF
+is a separate process, so this is hygiene rather than a runtime fix — but the code that validates the
+OP's tokens in the BFF now runs on the same library revision as the OP that issues them.
+
+The patch is 10.0.9, not the current 10.0.12, and that is a choice: from 10.0.10 the authentication
+packages require `Microsoft.IdentityModel` ≥ 8.19.2, so on 10.0.12 a pin at 8.16.0 is a downgrade
+(`NU1605`) and the ecosystem would split again — Web on 8.19.2, everything else on 8.16.0. 10.0.9 is
+the newest patch that still ships against 8.0.1, where 8.16.0 is an upgrade. Checked before choosing:
+the IdentityModel notes for 8.17–8.19.2 and the ASP.NET Core 10.0.10–10.0.12 releases carry no CVE for
+the authentication handlers; Microsoft's bump was a routine dependency refresh. The pin has a shelf
+life — the next ASP.NET patch Web takes will demand ≥ 8.19.2 — and moving the whole ecosystem to
+8.19.2 is the planned follow-up, host first, then Identity.
+
+`Microsoft.AspNetCore.DataProtection` 9.0.4 in Core, Http and DataProtection stays: on `net10.0` it
+resolves to the shared framework's assembly — nothing of that version is copied into the module bin or
+the `.tpkg` — so the pin only steers the `net8.0` / `net9.0` targets of the libraries and no
+9.0.4 assembly reaches the worker.
+
+Running `redb.Identity.Web.Tests` for this change found `RevokedSidsPollHostedServiceTests` red since
+`99f2d11b` (2026-07-12). That commit made the poll exit before its bootstrap call when no
+`Identity:BackchannelClient:ClientSecret` is configured — intentional: the poll is a cluster feature
+behind a service-account secret — but the tests built their options without one, so the service never
+called and the first test has failed on every run since. The second test could not fail at all: with
+no poll there was no exception to swallow, and every assertion still held. Nobody noticed because
+these tests are not part of the gate. The tests now configure the secret, wait for the poll to have
+been attempted (bounded at five seconds, in place of a fixed 50 ms that only ever worked by timing),
+and the swallow test asserts the poll actually ran. A third test pins the intentional behaviour:
+without the secret the service makes no call at all.
+
+The same run showed `DevTlsContractTests` red: `appsettings.Development.json` carried
+`"RequireHttpsMetadata": false`, which the contract test forbids in committed configuration because it
+switches off the https requirement for the OIDC discovery document. The flag was a leftover of the
+`http://localhost:5002` dev loop; `be2bdcb7` moved the dev authority to `https://host.docker.internal`
+and made the `false` unnecessary — the certificate side of that loop is handled by
+`AcceptAnyBackchannelCert`, a separate and explicitly dev-only switch, not by this flag. The
+development config now says `true`; the dev loop is unchanged.
+
+The shipped `appsettings.json` had the same `false` (since `386e45b3`), and that one is not a dev
+convenience — it is the default of every deployment, overriding the code default of `true` for anyone
+who does not set the key themselves. It now says `true`, and `DevTlsContractTests` gained a test on the
+shipped file so the two configs cannot drift apart again (owner decision). A deployment that really
+talks to an `http://` authority sets `false` explicitly for itself; the default no longer does it for
+everyone.
+
+### Security — a DPoP proof can no longer be consumed twice at once
+
+`RedbDpopReplayStore` decided replays by lookup-then-insert, and nothing on the row was unique.
+Two presentations of the same proof racing past the lookup both inserted and both were told
+"reserved" — RFC 9449 §11.1 asks for at most once, and the store delivered it only when the
+presentations were far enough apart. The move to `ExecuteAtomicAsync` (`952ffc86`) changed nothing
+here, and the class comment promising that "the database row uniqueness constraint prevents both
+inserts" described a constraint that did not exist.
+
+The reservation now carries `ValueUnique = SHA-256(jkt|jti)` — the derivation the idempotency record
+already uses (owner decision R5(v)), because `jti` is client-chosen and unbounded while `ValueUnique`
+is capped at 440 characters. The index decides: the loser of a race gets
+`RedbUniqueViolationException` and is refused as a replay. The lookup stays as the fast path, so an
+already-consumed proof is refused without a failing statement, and an expired reservation is
+refreshed in place rather than inserted a second time — a second insert would hit the key and
+misreport a stale row as a replay. The core runs the insert under a savepoint, so a violation inside
+the transacted token route leaves the route's transaction intact. Rows written before the key existed
+carry none; the lookup still finds them and the cleanup timer removes them within one TTL.
+
+Pinned by `DpopReplayStoreAtomicityTests` on all three providers: sixteen simultaneous presentations
+reserve exactly once and leave exactly one row, the plain second presentation is refused, and an
+expired reservation is taken again without a duplicate row. Run first against the old store, the same
+tests showed how wide the gap was: all sixteen presentations were accepted, not one or two — under
+concurrency the lookup protected nothing — and the expired path left two rows behind.
+
+### Changed — the deletion helper's dead `batchSize` is gone
+
+`IdentityDeletionHelper.DeleteAsync` kept an `int batchSize` on all four overloads after В5
+(`9ad40eb2`) stopped handing the batch to the background service; it was accepted and ignored.
+Removed, together with the seven call sites that passed one. Purge batching is the background
+service's own concern; the cleanup processors keep their page sizes for the `Take(...)` that selects
+what to delete.
+
+Comments in two stores and two other places that still described the route transaction as
+`BeginRedbTransaction` were brought up to date. The `CS0618` warnings about that method in the
+Identity solution build come from `redb.Route.Core/Xml/RedbXmlContributions.cs`, which is compiled
+as a project reference — Identity itself no longer refers to it.
+
+### Fixed — audit tests no longer race the provider matrix
+
+The full gate starts the sqlite, postgres and mssql suites as three processes against one machine
+and one set of brokers, staggered by seconds rather than isolated. Two audit suites were written as
+if they owned the box, and they only stayed green while the timing held.
+
+`AuditIbmMqIntegrationTests` published to the same `DEV.QUEUE.3` from all three processes and then
+took whichever message arrived first. Both halves of that race show up in the full-run logs: a run
+receives a sibling's message (`Expected eventType to be "TestWmqFields", but "TestWmqDirect"`), and
+the sibling, whose message was eaten, waits out its 15-second timeout. The per-test drain cannot help
+— it runs before the sibling publishes — and the eventType cannot tell the processes apart, because
+all three publish the same types. Each provider now gets a queue of its own (`DEV.QUEUE.1/2/3`,
+pre-created by the developer image), and within a process the receive accepts only its own eventType,
+so a late message from the previous test is skipped rather than mistaken for this test's event.
+Skipped messages are reported on stderr instead of vanishing quietly.
+
+`AuditCompletenessFullCycleTests` waited a flat two seconds and then queried the audit catalog once.
+The query helper looked like a retry loop but was not one for this purpose: it polled only while the
+response was unsuccessful and returned an empty list the moment the endpoint answered 200 with no
+rows — which is the normal first answer, since the row is written by a WireTap branch that finishes
+after the response the caller already has. Under three concurrent suites two seconds stopped being
+enough. The helper now polls until the row appears, on the same ceiling, and reports how long it
+waited: on success, the attempt and elapsed time when the row was late; on failure, that nothing
+arrived after ten attempts. A future failure therefore says whether audit is slow or absent instead
+of leaving that to be guessed.
+
+Neither change touches the product, and neither weakens an assertion: with the emission broken, both
+suites still fail. That was checked the other way round as well — with the eventType filter removed
+and foreign messages arriving during the receive window, the MQ test fails exactly as the gate logs
+show it failing.
+
+### Fixed — a database outage no longer retries forever
+
+The `DbException` handler declared `MaximumRedeliveries(3)` next to
+`RetryWhile(e => !IsUniqueViolation(...))`, and those two do not add up the way the pairing suggests:
+`RetryWhile` does not narrow the ceiling, it **replaces** it. `OnExceptionProcessor` evaluates the
+predicate *instead of* the attempt count, inside a loop with no outer bound. A predicate that only asks
+"is this not a unique violation?" answers yes to every ordinary connection error, so a real outage was
+retried without end — and because the delay doubles each round (200 ms, 400, 800…), the route stopped
+answering altogether rather than returning the 503 it was supposed to return.
+
+The predicate now carries the bound itself: it retries while the error is not a unique violation **and**
+`CamelRedeliveryCounter` is below the limit. Both the ceiling and the predicate read one constant, so
+they cannot drift apart. `MaximumRedeliveries` stays as the documented policy and as the bound that
+applies if the predicate is ever removed.
+
+The defect was invisible until redb.Route started passing the full handler configuration through
+(`04bc274c`, `[Unreleased]` there): before it, `RetryWhile` never reached the processor and the count
+check ran. So Route did not break this — it stopped hiding it. Pinned all along by
+`ErrorHandlingPipelineTests.TransientDbErrors_AreRetried_ButABoundedNumberOfTimes`, which is exactly the
+test that hung on all three providers.
+
+### Changed — SQL audit targets take `:#name` parameters
+
+The `sql:` connector now writes parameters the Camel way, `:#name`, and no longer reads `@name` as one:
+`@` reaches the database untouched, because it collides with T-SQL and MySQL variables (redb.Route wave
+17.6, `ea5d5eab`). There is no transition period — an audit target still carrying the old syntax stops
+writing rows and fails with a database error instead.
+
+Operators with a `sql:` audit target must update its `Uri`: `VALUES(@event_id, …)` becomes
+`VALUES(:#event_id, …)`. The `param.*` bindings are untouched and casts still work (`:#details::jsonb`).
+Identity's own relational audit sink does not go through the connector, so only operator-configured
+`sql:` targets are affected; the suite's target and the sample in the test `appsettings.json` were
+updated here.
+
+### Changed — route transactions now ride the ambient scope
+
+`WithRedbTx` used to pair `.Transacted(TransactionPolicy.Suppress)` with `BeginRedbTransaction(name)`:
+the wrapper supplied the commit/rollback boundary while the redb transaction was opened explicitly,
+because the core rejected an explicit transaction whenever an ambient scope was active. Core
+`5dc3741e` inverted that — redb enlists into the ambient `TransactionScope` through its
+`AmbientConnectionRegistry` — and `BeginRedbTransaction` is now `[Obsolete]`. Identity's wrapper is
+plain `.Transacted(...)`, and the scope owns commit and rollback.
+
+This changes what a processor may do inside a transacted route: `redb.Context.BeginTransactionAsync()`
+throws there, and the core points at `ExecuteAtomicAsync`, which joins the ambient transaction instead.
+`RedbDpopReplayStore` is the one place where that actually bit — DPoP replay reservation runs on the
+token route, which is transacted — and it now uses `ExecuteAtomicAsync`. Its old mid-logic
+`RollbackAsync` was wrong under an ambient scope for a second reason: a replayed proof must fail the
+request, not undo everything the route did before it.
+
+The scope timeout is stated explicitly (2 minutes) rather than inherited: this scope spans Argon2id
+plus the whole OpenIddict pipeline on the token route, and the framework default of 30 seconds sits
+uncomfortably close to that under load.
+
+Eleven other call sites still open their own transaction (`MfaVerifyProcessor`, `MfaRecoveryProcessor`,
+both WebAuthn processors and six token stores). None of them sits on a transacted route today, so none
+of them breaks — but any route that gains `WithRedbTx` later will break them at runtime with a green
+build. They are listed here rather than migrated silently.
+
+Worth knowing about the test suite: no fixture configures `RedbInstanceName`, and without it
+`WithRedbTx` returns the route unwrapped. Route transactions are therefore inert under test and live
+only in a real deployment, where `context.json` sets the name — so this change was verified against a
+running instance, not by the suite.
+
+### Fixed — a deletion inside a route transaction no longer runs on a second connection
+
+Every Identity deletion goes through `IdentityDeletionHelper`, and it handed the mark to
+`IBackgroundDeletionService.DeleteAsync`. That method opens a DI scope of its own — a second
+connection — and marks there. Under a route-level transaction (`WithRedbTx`, live whenever
+`RedbInstanceName` is configured, which is every Tsak-hosted deployment) the two connections fight
+over the same rows: on SQLite the mark waits on the writer lock the route holds and dies on the busy
+timeout, about 35 seconds later; on PostgreSQL and MSSQL it either blocks on rows the route has
+already written, or commits on its own — so a route that failed after the delete rolled back
+everything **except** the deletion. Reached through manage-scopes, manage-users, manage-tokens,
+manage-groups, manage-claim-mappers, manage-claim-scopes, manage-federation-providers, scim-users
+and scim-groups.
+
+The mark now runs on the caller's `IRedbService` and joins whatever transaction it is in
+(`SoftDeleteAsync` goes through the core's `ExecuteAtomicAsync`). Nothing is handed to the
+background service and nothing needs to be: it polls for trash containers and finds the one written
+above by itself — its `EnqueuePurge` has been a no-op ever since the polling loop replaced the
+channel, and the `batchSize` it was passed never reached the mark either. When no background service
+is registered the warning stays: objects are marked and hidden from queries, but no physical purge
+will run.
+
+Pinned by `DeletionHelperTransactionTests` on all three providers: the mark rolls back with the
+caller's transaction, commits with it, and still works with no ambient transaction at all. Proven
+red on the unfixed code — 35 s per test on SQLite (the writer-lock timeout), a surviving trash row on
+PostgreSQL. The cleanup tests that asserted the old path were rewritten rather than deleted, and
+their `DidNotReceive` assertions moved onto `SoftDeleteAsync`: the background service is now never
+called, so an assertion on it would have passed even if an object had been deleted.
+
+Requires redb with the trash-lock fix (`526a10cc`); the PostgreSQL and MSSQL modules it carries are
+applied at startup.
+
+### Changed — Microsoft.IdentityModel 8.16.0
+
+`redb.Identity.Core` pins `Microsoft.IdentityModel.Protocols.OpenIdConnect` 8.16.0 (was 8.4.0), and
+`redb.Identity.Http` references `Microsoft.IdentityModel.Abstractions`, `Logging` and `Tokens` 8.16.0 directly
+(OpenIddict.Abstractions 6.3.0 alone resolves 8.4.0). `Microsoft.Data.SqlClient` 7.0.3, which `redb.MSSql`
+ships, needs 8.16.0, and the Tsak worker pins it, so the Identity packages and the host they run in ship one
+version. No code change.
+
 ## [4.0.0] — 2026-09-12
 
 ### Security — reserved header strip extended to the gRPC and SOAP facades

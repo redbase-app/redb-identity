@@ -72,4 +72,27 @@ public class DevTlsContractTests
             "Setting RequireHttpsMetadata=false in committed dev config silently disables " +
             "metadata signature validation; require the developer to opt-in per-machine if needed.");
     }
+
+    [Fact]
+    public void ShippedAppSettings_RequiresHttpsMetadata()
+    {
+        // appsettings.json ships with the application: it is the default of every deployment, not a
+        // developer's convenience. The Development test above guards the dev loop; this one guards
+        // what a deployment gets when nobody overrides anything.
+        var path = Path.GetFullPath(Path.Combine(
+            Path.GetDirectoryName(LaunchSettingsPath())!, "..", "appsettings.json"));
+
+        File.Exists(path).Should().BeTrue($"appsettings.json missing at {path}");
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        var identity = doc.RootElement.GetProperty("Identity");
+
+        identity.GetProperty("Authority").GetString().Should().StartWith("https://",
+            "the shipped default authority must be https; an http authority is a per-deployment decision.");
+
+        identity.GetProperty("RequireHttpsMetadata").GetBoolean().Should().BeTrue(
+            "RequireHttpsMetadata=false in the shipped defaults turns off the https requirement for OIDC " +
+            "discovery in every deployment at once. The code default is true; a deployment that really " +
+            "talks to an http authority sets false explicitly for itself.");
+    }
 }
