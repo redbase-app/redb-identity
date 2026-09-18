@@ -69,12 +69,14 @@
         "identity-pg": {
           "Provider": "postgres",
           "UsePro": true,
+          "PropsSaveStrategy": "ChangeTracking",
           "ConnectionString": "Host=localhost;Port=5432;Username=postgres;Password=<PASSWORD>;Database=redb;Pooling=true;Include Error Detail=true;Options=-c jit=off",
           "EnsureCreated": true
         },
         "identity-mssql": {
           "Provider": "mssql",
           "UsePro": true,
+          "PropsSaveStrategy": "ChangeTracking",
           "ConnectionString": "Server=127.0.0.1,1433;Database=redb;User Id=sa;Password=<PASSWORD>;TrustServerCertificate=true;Command Timeout=600;",
           "EnsureCreated": true
         },
@@ -82,6 +84,7 @@
           "//": "SQLite mirror — toggle 'RedbInstanceName' below to switch the whole Identity stack to SQLite. EnsureCreated bootstraps the schema on first run. Pro tier so PropsSaveStrategy=ChangeTracking works.",
           "Provider": "sqlite",
           "UsePro": true,
+          "PropsSaveStrategy": "ChangeTracking",
           "ConnectionString": "Data Source=identity-redb.db;Mode=ReadWriteCreate",
           "EnsureCreated": true
         }

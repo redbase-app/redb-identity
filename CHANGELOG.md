@@ -50,7 +50,7 @@ That reasoning does not hold in a Tsak worker: the `direct-vm` registry is one p
 by every module loaded into it. Any module could send to `identity-manage-users` and administer users,
 or to `identity-manage-mfa` and reset anyone's MFA, with no token and no context — the routes ran the
 business processor and answered. Nothing in the route DSL said so; the trust was inferred from the
-absence of a property. (Reported by the owner.)
+absence of a property.
 
 Every route on that surface now starts with `RequireManagementContextProcessor`: no
 `identity:management-scopes` on the exchange, no idempotency lookup, no transaction, no business
@@ -77,14 +77,14 @@ wrong, and `RequireSelfOrAdminProcessor` let the exchange through. All of that i
 The Identity gate used to be `redb.Identity.Tests` alone. The solution carries two more test projects,
 `redb.Identity.Client.Tests` (the SDK) and `redb.Identity.Web.Tests` (the BFF), and nothing ran them:
 that is how `RevokedSidsPollHostedServiceTests` stayed red from July, `DevTlsContractTests` from May,
-and `UsersClientTests.SearchUsers_GETs_with_query` from June — the last one stale since `a2d555dc`
-moved the non-paginated search onto the paginated endpoint (page size 200, `PagedResult` on the wire);
+and `UsersClientTests.SearchUsers_GETs_with_query` from June — the last one stale since the
+non-paginated search moved onto the paginated endpoint (page size 200, `PagedResult` on the wire);
 the test still stubbed a bare array and the old URL. Brought to the current contract.
 
 `scripts/test-gate.ps1 -Provider sqlite|postgres|mssql` now runs the three projects and prints one
 summary; the matrix is the three invocations in parallel, as before. Client and Web tests touch no
-storage and add about three seconds. Documented commands updated; the owner's decision to include the
-BFF tests in the gate.
+storage and add about three seconds. Documented commands updated; the BFF tests are now part of the
+gate.
 
 ### Changed — Web component tests on bUnit 2
 
@@ -107,8 +107,8 @@ blank optionals as `null`) pass only if the events really reach the components. 
 `redb.Identity.Web` targets `net10.0` but pinned `Microsoft.AspNetCore.Authentication.OpenIdConnect`,
 `…Authentication.JwtBearer` and `…Components.Authorization` at 9.0.0 — packages of the previous major
 on a 10.0 application. Nothing failed, but those three were the whole reason the BFF resolved
-`Microsoft.IdentityModel` 8.0.1 while the rest of Identity and the Tsak worker run 8.16.0
-(`fcfafa48`). The two authentication packages now follow the TFM (`Microsoft.AspNetCore.Mvc.Testing`
+`Microsoft.IdentityModel` 8.0.1 while the rest of Identity and the Tsak worker run 8.16.0.
+The two authentication packages now follow the TFM (`Microsoft.AspNetCore.Mvc.Testing`
 in `redb.Identity.Web.Tests` likewise); `Components.Authorization` is not raised but dropped — the SDK
 reports it framework-provided (`NU1510`), so the reference only ever added a version to argue about.
 The two IdentityModel roots the handlers actually use —
@@ -132,7 +132,7 @@ the `.tpkg` — so the pin only steers the `net8.0` / `net9.0` targets of the li
 9.0.4 assembly reaches the worker.
 
 Running `redb.Identity.Web.Tests` for this change found `RevokedSidsPollHostedServiceTests` red since
-`99f2d11b` (2026-07-12). That commit made the poll exit before its bootstrap call when no
+2026-07-12, when a change made the poll exit before its bootstrap call when no
 `Identity:BackchannelClient:ClientSecret` is configured — intentional: the poll is a cluster feature
 behind a service-account secret — but the tests built their options without one, so the service never
 called and the first test has failed on every run since. The second test could not fail at all: with
@@ -145,15 +145,15 @@ without the secret the service makes no call at all.
 The same run showed `DevTlsContractTests` red: `appsettings.Development.json` carried
 `"RequireHttpsMetadata": false`, which the contract test forbids in committed configuration because it
 switches off the https requirement for the OIDC discovery document. The flag was a leftover of the
-`http://localhost:5002` dev loop; `be2bdcb7` moved the dev authority to `https://host.docker.internal`
+`http://localhost:5002` dev loop; a later change moved the dev authority to `https://host.docker.internal`
 and made the `false` unnecessary — the certificate side of that loop is handled by
 `AcceptAnyBackchannelCert`, a separate and explicitly dev-only switch, not by this flag. The
 development config now says `true`; the dev loop is unchanged.
 
-The shipped `appsettings.json` had the same `false` (since `386e45b3`), and that one is not a dev
+The shipped `appsettings.json` had the same `false`, and that one is not a dev
 convenience — it is the default of every deployment, overriding the code default of `true` for anyone
 who does not set the key themselves. It now says `true`, and `DevTlsContractTests` gained a test on the
-shipped file so the two configs cannot drift apart again (owner decision). A deployment that really
+shipped file so the two configs cannot drift apart again. A deployment that really
 talks to an `http://` authority sets `false` explicitly for itself; the default no longer does it for
 everyone.
 
@@ -162,12 +162,12 @@ everyone.
 `RedbDpopReplayStore` decided replays by lookup-then-insert, and nothing on the row was unique.
 Two presentations of the same proof racing past the lookup both inserted and both were told
 "reserved" — RFC 9449 §11.1 asks for at most once, and the store delivered it only when the
-presentations were far enough apart. The move to `ExecuteAtomicAsync` (`952ffc86`) changed nothing
+presentations were far enough apart. The move to `ExecuteAtomicAsync` changed nothing
 here, and the class comment promising that "the database row uniqueness constraint prevents both
 inserts" described a constraint that did not exist.
 
 The reservation now carries `ValueUnique = SHA-256(jkt|jti)` — the derivation the idempotency record
-already uses (owner decision R5(v)), because `jti` is client-chosen and unbounded while `ValueUnique`
+already uses, because `jti` is client-chosen and unbounded while `ValueUnique`
 is capped at 440 characters. The index decides: the loser of a race gets
 `RedbUniqueViolationException` and is refused as a replay. The lookup stays as the fast path, so an
 already-consumed proof is refused without a failing statement, and an expired reservation is
@@ -184,8 +184,8 @@ concurrency the lookup protected nothing — and the expired path left two rows 
 
 ### Changed — the deletion helper's dead `batchSize` is gone
 
-`IdentityDeletionHelper.DeleteAsync` kept an `int batchSize` on all four overloads after V5
-(`9ad40eb2`) stopped handing the batch to the background service; it was accepted and ignored.
+`IdentityDeletionHelper.DeleteAsync` kept an `int batchSize` on all four overloads after the helper
+stopped handing the batch to the background service; it was accepted and ignored.
 Removed, together with the seven call sites that passed one. Purge batching is the background
 service's own concern; the cleanup processors keep their page sizes for the `Take(...)` that selects
 what to delete.
@@ -241,8 +241,8 @@ The predicate now carries the bound itself: it retries while the error is not a 
 they cannot drift apart. `MaximumRedeliveries` stays as the documented policy and as the bound that
 applies if the predicate is ever removed.
 
-The defect was invisible until redb.Route started passing the full handler configuration through
-(`04bc274c`, `[Unreleased]` there): before it, `RetryWhile` never reached the processor and the count
+The defect was invisible until redb.Route started passing the full handler configuration through (redb.Route
+4.0.1): before it, `RetryWhile` never reached the processor and the count
 check ran. So Route did not break this — it stopped hiding it. Pinned all along by
 `ErrorHandlingPipelineTests.TransientDbErrors_AreRetried_ButABoundedNumberOfTimes`, which is exactly the
 test that hung on all three providers.
@@ -250,8 +250,8 @@ test that hung on all three providers.
 ### Changed — SQL audit targets take `:#name` parameters
 
 The `sql:` connector now writes parameters the Camel way, `:#name`, and no longer reads `@name` as one:
-`@` reaches the database untouched, because it collides with T-SQL and MySQL variables (redb.Route wave
-17.6, `ea5d5eab`). There is no transition period — an audit target still carrying the old syntax stops
+`@` reaches the database untouched, because it collides with T-SQL and MySQL variables (redb.Route
+4.0.1). There is no transition period — an audit target still carrying the old syntax stops
 writing rows and fails with a database error instead.
 
 Operators with a `sql:` audit target must update its `Uri`: `VALUES(@event_id, …)` becomes
@@ -264,8 +264,8 @@ updated here.
 
 `WithRedbTx` used to pair `.Transacted(TransactionPolicy.Suppress)` with `BeginRedbTransaction(name)`:
 the wrapper supplied the commit/rollback boundary while the redb transaction was opened explicitly,
-because the core rejected an explicit transaction whenever an ambient scope was active. Core
-`5dc3741e` inverted that — redb enlists into the ambient `TransactionScope` through its
+because the core rejected an explicit transaction whenever an ambient scope was active. redb
+4.0.1 inverted that — redb enlists into the ambient `TransactionScope` through its
 `AmbientConnectionRegistry` — and `BeginRedbTransaction` is now `[Obsolete]`. Identity's wrapper is
 plain `.Transacted(...)`, and the scope owns commit and rollback.
 
@@ -318,7 +318,7 @@ PostgreSQL. The cleanup tests that asserted the old path were rewritten rather t
 their `DidNotReceive` assertions moved onto `SoftDeleteAsync`: the background service is now never
 called, so an assertion on it would have passed even if an object had been deleted.
 
-Requires redb with the trash-lock fix (`526a10cc`); the PostgreSQL and MSSQL modules it carries are
+Requires redb 4.0.1 or later (the trash-lock fix); the PostgreSQL and MSSQL modules it carries are
 applied at startup.
 
 ### Changed — Microsoft.IdentityModel 8.16.0
