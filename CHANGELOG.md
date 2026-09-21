@@ -34,8 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > NuGet publication follows the source cut.
 
 
-## [Unreleased]
-
 ## [4.1.0] — 2026-09-21
 
 > **This release carries security fixes.** An administrative scope is no longer granted without a role
