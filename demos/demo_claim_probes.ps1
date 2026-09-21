@@ -27,6 +27,8 @@
 #requires -Version 7
 
 $BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$DCR_IAT = if ($env:IDENTITY_DCR_TOKEN) { $env:IDENTITY_DCR_TOKEN } else { "dev-only-initial-access-token-not-for-production" }
+$DCR_AUTH = @{ Authorization = "Bearer $DCR_IAT" }
 $PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
 $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $REDIRECT_CB = if ($BASE -like 'https:*') { 'https://localhost:9999/cb' } else { 'http://localhost:9999/cb' }
@@ -78,7 +80,7 @@ $total = [System.Diagnostics.Stopwatch]::StartNew()
 
 # 1) DCR — authorization_code + PKCE client requesting all user-info scopes.
 $reg = Measure-Step "1. DCR (auth_code + scopes openid profile email phone address)" {
-    $r = Invoke-RestMethod -Method Post "$BASE/connect/register" `
+    $r = Invoke-RestMethod -Method Post "$BASE/connect/register" -Headers $DCR_AUTH `
         -ContentType "application/json" `
         -Body (@{
             client_name   = "claim-probes-demo"
@@ -127,7 +129,7 @@ Measure-Step "3. POST /login (cookie session)" {
 # 3b) Register a separate password-grant client (the auth_code client doesn't carry the
 #     "password" grant) and use it for ROPC to fetch a /me access token.
 $ropcReg = Measure-Step "3b. DCR (password client for /me)" {
-    $r = Invoke-RestMethod -Method Post "$BASE/connect/register" `
+    $r = Invoke-RestMethod -Method Post "$BASE/connect/register" -Headers $DCR_AUTH `
         -ContentType "application/json" `
         -Body (@{
             client_name = "claim-probes-ropc"

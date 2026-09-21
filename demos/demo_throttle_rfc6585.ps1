@@ -29,6 +29,8 @@
 #requires -Version 7
 
 $BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$DCR_IAT = if ($env:IDENTITY_DCR_TOKEN) { $env:IDENTITY_DCR_TOKEN } else { "dev-only-initial-access-token-not-for-production" }
+$DCR_AUTH = @{ Authorization = "Bearer $DCR_IAT" }
 $PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
 $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $timings = [System.Collections.Generic.List[object]]::new()
@@ -92,7 +94,7 @@ $total = [System.Diagnostics.Stopwatch]::StartNew()
 
 # 1) DCR a client_credentials client. We'll burst /connect/token with this one.
 $reg = Measure-Step "1. DCR (cc + identity:read)" {
-    $r = Invoke-RestMethod -Method Post "$BASE/connect/register" `
+    $r = Invoke-RestMethod -Method Post "$BASE/connect/register" -Headers $DCR_AUTH `
         -ContentType "application/json" `
         -Body (@{
             client_name = "throttle-rfc6585"
@@ -211,7 +213,7 @@ Measure-Step "6. sleep $($script:retryAfterSecs)s + grace, retry → expect 200 
 
 # 7) Different client_id is NOT affected — KeyedThrottle isolation.
 $reg2 = Measure-Step "7a. DCR a second client (isolation probe)" {
-    Invoke-RestMethod -Method Post "$BASE/connect/register" `
+    Invoke-RestMethod -Method Post "$BASE/connect/register" -Headers $DCR_AUTH `
         -ContentType "application/json" `
         -Body (@{
             client_name = "throttle-rfc6585-iso"

@@ -114,6 +114,14 @@ public static class InitRoute
         context.AddLifecycleListener(new SeedAdminRoleAssignmentListener(identitySp,
             identitySp.GetRequiredService<IOptions<RedbIdentityOptions>>()));
 
+        // Administrative scopes are issued only to users whose roles carry them
+        // (RestrictAdminScopesByRoleHandler). Installs that predate that gate have an admin role
+        // with no scopes attached, which would refuse the only administrator. Attach the management
+        // scope when — and only when — the role carries none at all. Runs after the scope catalogue
+        // and the role seeders so both sides exist. Idempotent.
+        context.AddLifecycleListener(new SeedAdminRoleScopesListener(identitySp,
+            identitySp.GetRequiredService<IOptions<RedbIdentityOptions>>()));
+
         // Seed the DataProtection key-ring snapshot BEFORE the HTTP facade serves the first
         // request — prevents Protect/Unprotect from racing against an empty in-memory ring.
         context.AddLifecycleListener(new RedbXmlRepositoryInitListener(identitySp));

@@ -119,6 +119,14 @@ public static class InitRoute
         // so it can look up scheme ids against an already-bootstrapped database.
         context.AddLifecycleListener(new IdentityUniqueIndexesInitListener(identitySp));
 
+        // V4-UNIQUE transition backfill (doc/v4/04 §3): copy the value_string mirrors of pre-V4
+        // rows into Props so [RedbUnique] keys exist for them and GetByUniqueAsync sees legacy
+        // data. Idempotent, with a convergence flag. MUST run before the seed listeners - they
+        // look up by unique key and would otherwise recreate legacy-seeded rows. It had been
+        // registered only in the embeddable entry point, so no Tsak deployment ever ran it;
+        // ModuleListenerParityTests now fails when the two chains drift.
+        context.AddLifecycleListener(new V4UniqueBackfillListener(identitySp));
+
         // R1: audit log relational table — flat schema for the
         // `identity_audit_log` table that backs /api/v1/identity/audit and
         // the user-detail Audit tab. Idempotent CREATE IF NOT EXISTS per
@@ -144,6 +152,16 @@ public static class InitRoute
         // admin system role directly. Without this, installs that never
         // call /internal/bootstrap-admin leave the admin role empty.
         context.AddLifecycleListener(new SeedAdminRoleAssignmentListener(identitySp,
+            identitySp.GetRequiredService<IOptions<RedbIdentityOptions>>()));
+
+        // Administrative scopes reach a user only through a role that carries them
+        // (RestrictAdminScopesByRoleHandler). Installs that predate that gate have an admin role
+        // with no scopes attached, which would refuse the only administrator. Attach the management
+        // scope when - and only when - the role carries none. Runs after the role and scope
+        // seeders so both sides exist. Idempotent. Mirrored in the embeddable entry point
+        // (redb.Identity.Core/Module/InitRoute.cs); ModuleListenerParityTests keeps the two chains
+        // from drifting, because this one is the chain that ships.
+        context.AddLifecycleListener(new SeedAdminRoleScopesListener(identitySp,
             identitySp.GetRequiredService<IOptions<RedbIdentityOptions>>()));
 
         // Seed the DataProtection key-ring snapshot BEFORE the HTTP facade serves the

@@ -10,7 +10,9 @@ namespace redb.Identity.Management.Controllers;
 ///   <item><c>POST /api/v1/identity/account/register</c> \u2014 create a new account
 ///     using a supplied login + e-mail + password. Returns the new user id on success;
 ///     <c>409 duplicate</c> on collision; <c>400 weak_password</c> / <c>validation_error</c>
-///     on input violations; <c>403 registration_disabled</c> when the feature gate is off.
+///     on input violations; <c>404 not_found</c> when the feature gate is off, because the
+///     route is then not bound at all and this deployment has no such endpoint
+///     (<c>IdentityClient</c> reads that back as <c>registration_disabled</c>).
 ///   </item>
 /// </list>
 /// Requires NO bearer token \u2014 the route lives on the anonymous prefix

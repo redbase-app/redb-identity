@@ -15,6 +15,8 @@
 #requires -Version 7
 
 $BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$DCR_IAT = if ($env:IDENTITY_DCR_TOKEN) { $env:IDENTITY_DCR_TOKEN } else { "dev-only-initial-access-token-not-for-production" }
+$DCR_AUTH = @{ Authorization = "Bearer $DCR_IAT" }
 $PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
 $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $timings = [System.Collections.Generic.List[object]]::new()
@@ -39,7 +41,7 @@ function Measure-Step {
 
 # Admin
 $adminReg = Measure-Step "1. admin DCR" {
-    Invoke-RestMethod -Method Post "$BASE/connect/register" -ContentType "application/json" `
+    Invoke-RestMethod -Method Post "$BASE/connect/register" -Headers $DCR_AUTH -ContentType "application/json" `
       -Body (@{ client_name = "rolperm-admin"; grant_types = @("client_credentials"); scope = "identity:users:write identity:groups:write identity:consents:write identity:mfa:write identity:applications:write identity:scopes:write identity:claims:write identity:roles:write identity:webhooks:write identity:federation:write identity:signing-keys:write" } | ConvertTo-Json)
 }
 $adminTok = Measure-Step "2. admin cc token" {

@@ -21,6 +21,8 @@
 #requires -Version 7
 
 $BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$DCR_IAT = if ($env:IDENTITY_DCR_TOKEN) { $env:IDENTITY_DCR_TOKEN } else { "dev-only-initial-access-token-not-for-production" }
+$DCR_AUTH = @{ Authorization = "Bearer $DCR_IAT" }
 $PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
 $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $SCIM   = "$BASE/scim/v2"
@@ -77,7 +79,7 @@ $total = [System.Diagnostics.Stopwatch]::StartNew()
 
 # 1) DCR.
 $reg = Measure-Step "1. DCR (cc + scim)" {
-    $r = Invoke-RestMethod -Method Post "$BASE/connect/register" `
+    $r = Invoke-RestMethod -Method Post "$BASE/connect/register" -Headers $DCR_AUTH `
         -ContentType "application/json" `
         -Body (@{ client_name = "scim-etag-demo"; grant_types = @("client_credentials"); scope = "scim" } | ConvertTo-Json)
     if (-not $r.client_id) { throw "no client_id" }

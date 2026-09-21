@@ -1,7 +1,9 @@
+using Microsoft.Extensions.DependencyInjection;
 using redb.Identity.Contracts.Routes;
 using redb.Identity.Contracts.Validation;
 using redb.Route.Abstractions;
 using redb.Route.Controllers;
+using redb.Route.Components;
 using redb.Route.Core;
 
 namespace redb.Identity.Management.Controllers;
@@ -45,6 +47,15 @@ public abstract class IdentityControllerBase : RedbController
     protected async Task<object?> Forward(string endpointUri, string operation, object? body = null)
     {
         var endpoint = Context.GetEndpoint(endpointUri);
+
+        if (IsUnbound(endpointUri))
+        {
+            return new
+            {
+                error = "not_found",
+                error_description = "This deployment does not expose the requested endpoint."
+            };
+        }
 
         var msg = new Message();
         msg.Headers["operation"] = operation;
@@ -122,6 +133,43 @@ public abstract class IdentityControllerBase : RedbController
             // and subsequent calls 503 with NpgsqlException("connection pool exhausted").
             await exchange.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// True when the operation's route is not bound in this deployment.
+    /// <para>
+    /// Several Identity features bind their <c>direct-vm://</c> routes only when enabled —
+    /// self-service registration, e-mail verification, e-mail change, WebAuthn. The facades mount
+    /// their controllers unconditionally, so a caller reaching a disabled feature used to arrive at
+    /// a producer with nothing to call, and the resulting <c>InvalidOperationException</c> surfaced
+    /// as a generic failure with an unhandled-exception stack trace in the log. What the caller
+    /// asked for simply does not exist here, and that is what they are told: the standard
+    /// <c>not_found</c> error document, which
+    /// <see cref="ManagementErrorCodes"/> turns into 404 on every transport — the answer the client
+    /// SDK already reads as "this feature is off"
+    /// (<c>IdentityClient.RegisterAccountAsync</c> maps 404/403 to <c>registration_disabled</c>).
+    /// </para>
+    /// <para>
+    /// The question is asked of the registry rather than of a feature flag on purpose. The flag
+    /// lives in Core's options; the facade binds its own. Copying it across the boundary would put
+    /// the answer in two places and let them disagree, whereas what is actually bound cannot
+    /// disagree with itself. Non-<c>direct-vm</c> endpoints are left alone — their components
+    /// decide reachability themselves.
+    /// </para>
+    /// </summary>
+    private bool IsUnbound(string endpointUri)
+    {
+        // Route's own parser, not a hand-rolled split: BaseKey has to be the exact string the
+        // component keyed the registry with, and that is the parser's business, not this one's.
+        var uri = EndpointUriParser.Parse(endpointUri);
+        if (!string.Equals(uri.Scheme, "direct-vm", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var registry = Context.GetServiceProvider()?.GetService<SharedVmRegistry>();
+        if (registry is null) return false;
+
+        // The same lookup DirectVmProducer is about to perform.
+        return registry.GetProcessor(uri.BaseKey) is null;
     }
 
     /// <summary>

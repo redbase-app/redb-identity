@@ -21,6 +21,8 @@
 # Usage: pwsh -File demo_loopback_redirect.ps1
 
 $BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$DCR_IAT = if ($env:IDENTITY_DCR_TOKEN) { $env:IDENTITY_DCR_TOKEN } else { "dev-only-initial-access-token-not-for-production" }
+$DCR_AUTH = @{ Authorization = "Bearer $DCR_IAT" }
 $PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
 $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 
@@ -41,7 +43,7 @@ function New-Pkce {
     [pscustomobject]@{ Verifier = $v; Challenge = $c }
 }
 function New-Client([string[]]$RedirectUris) {
-    Invoke-RestMethod -Method Post "$BASE/connect/register" -ContentType "application/json" -Body (@{
+    Invoke-RestMethod -Method Post "$BASE/connect/register" -Headers $DCR_AUTH -ContentType "application/json" -Body (@{
         client_name                = "loopback-demo"
         redirect_uris              = $RedirectUris
         grant_types                = @("authorization_code")

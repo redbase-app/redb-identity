@@ -12,6 +12,8 @@
 # Usage: pwsh -File demo_par_per_client.ps1
 
 $BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$DCR_IAT = if ($env:IDENTITY_DCR_TOKEN) { $env:IDENTITY_DCR_TOKEN } else { "dev-only-initial-access-token-not-for-production" }
+$DCR_AUTH = @{ Authorization = "Bearer $DCR_IAT" }
 $PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
 $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $REDIRECT_CB = if ($BASE -like 'https:*') { 'https://localhost:9999/cb' } else { 'http://localhost:9999/cb' }
@@ -89,7 +91,7 @@ $REDIRECT = $REDIRECT_CB
 
 # 2) DCR with require_pushed_authorization_requests=true
 $reg = Measure-Step "2. DCR /connect/register (require_pushed_authorization_requests=true)" {
-    $r = Invoke-RestMethod -Method Post "$BASE/connect/register" `
+    $r = Invoke-RestMethod -Method Post "$BASE/connect/register" -Headers $DCR_AUTH `
         -ContentType "application/json" `
         -Body (@{
             client_name                            = "par-per-client-demo"

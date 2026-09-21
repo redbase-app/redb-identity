@@ -14,6 +14,8 @@
 # Usage: pwsh -File demo_private_key_jwt.ps1
 
 $BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$DCR_IAT = if ($env:IDENTITY_DCR_TOKEN) { $env:IDENTITY_DCR_TOKEN } else { "dev-only-initial-access-token-not-for-production" }
+$DCR_AUTH = @{ Authorization = "Bearer $DCR_IAT" }
 $PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
 $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $timings = [System.Collections.Generic.List[object]]::new()
@@ -73,7 +75,7 @@ $registrationResponse = Measure-Step "1. DCR /connect/register (private_key_jwt 
         jwks                       = $jwks
     } | ConvertTo-Json -Depth 8
 
-    $r = Invoke-RestMethod -Uri "$BASE/connect/register" -Method Post `
+    $r = Invoke-RestMethod -Uri "$BASE/connect/register" -Method Post -Headers $DCR_AUTH `
         -ContentType "application/json" -Body $body
     if (-not $r.client_id) { throw "DCR did not return client_id" }
     if ($r.token_endpoint_auth_method -ne "private_key_jwt") {

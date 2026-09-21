@@ -18,6 +18,8 @@
 # Usage: pwsh -File demo_claims_parameter.ps1
 
 $BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$DCR_IAT = if ($env:IDENTITY_DCR_TOKEN) { $env:IDENTITY_DCR_TOKEN } else { "dev-only-initial-access-token-not-for-production" }
+$DCR_AUTH = @{ Authorization = "Bearer $DCR_IAT" }
 $PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
 $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $REDIRECT = if ($BASE -like 'https:*') { 'https://localhost:9999/cb' } else { 'http://localhost:9999/cb' }
@@ -41,7 +43,7 @@ Assert "claims_parameter_supported = true (OIDC Discovery §3)" ($disc.claims_pa
 
 # ── 1. A client and a user with real profile data ─────────────────────────────────────────────
 Write-Host "`n=== [1] DCR + user ===" -ForegroundColor Cyan
-$reg = Invoke-RestMethod -Method Post "$BASE/connect/register" -ContentType "application/json" -Body (@{
+$reg = Invoke-RestMethod -Method Post "$BASE/connect/register" -Headers $DCR_AUTH -ContentType "application/json" -Body (@{
     client_name   = "claims-param-demo"
     redirect_uris = @($REDIRECT)
     grant_types   = @("authorization_code")

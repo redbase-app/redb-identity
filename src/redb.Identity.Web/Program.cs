@@ -230,6 +230,35 @@ builder.Services.AddAuthentication(options =>
             return Task.CompletedTask;
         };
 
+        // The OP keeps `preferred_username`, `name` and `email` out of the id_token on purpose —
+        // their destination is the access token, so a relying party cannot forward the user's PII
+        // inside a token it passes on. They arrive with userinfo instead, and the handler only lets
+        // through what a claim action maps, so without this the cookie principal has no name claim
+        // at all and the UI falls back to the opaque subject. Same rule as the backchannel login
+        // path in BackchannelOidcClient.MergeUserinfo.
+        options.Events.OnUserInformationReceived = ctx =>
+        {
+            if (ctx.Principal?.Identity is not System.Security.Claims.ClaimsIdentity identity)
+                return Task.CompletedTask;
+
+            foreach (var key in new[] { "preferred_username", "name", "email" })
+            {
+                if (identity.HasClaim(c => string.Equals(c.Type, key, StringComparison.Ordinal)))
+                    continue;
+                if (ctx.User.RootElement.TryGetProperty(key, out var value)
+                    && value.ValueKind == System.Text.Json.JsonValueKind.String
+                    && value.GetString() is { Length: > 0 } text)
+                {
+                    identity.AddClaim(new System.Security.Claims.Claim(key, text));
+                }
+            }
+
+            // NameClaimType is fixed when the identity is built, so re-picking means rebuilding it.
+            ctx.Principal = new System.Security.Claims.ClaimsPrincipal(
+                redb.Identity.Web.Auth.PrincipalNaming.WithPickedNameClaimType(identity));
+            return Task.CompletedTask;
+        };
+
         // N-3: federation — when the challenge originated from a federation button on
         // the BFF's /login page, the calling endpoint stashes `external_provider` in
         // AuthenticationProperties.Items. Intercept the standard /connect/authorize

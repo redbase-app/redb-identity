@@ -101,6 +101,11 @@ if (-not $NoBuild) {
 # ── Build EXCLUDE set (host-provided assemblies) ───────────────────────
 $ExcludeSet = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
 
+# name -> the copy the HOST will actually load. First source wins, and the scan order below is the
+# runtime's own order (worker bin, then the shared layer, then the frameworks), so the recorded path
+# is the assembly a module really binds to. Read by the version gate in Pack-Module.
+$HostProvided = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([System.StringComparer]::OrdinalIgnoreCase)
+
 function Add-Excludes-FromDir([string]$Dir) {
     if (-not (Test-Path $Dir)) {
         Write-Host "Exclude source skipped (missing): $Dir" -ForegroundColor DarkGray
@@ -108,7 +113,10 @@ function Add-Excludes-FromDir([string]$Dir) {
     }
     $before = $ExcludeSet.Count
     Get-ChildItem -Path $Dir -Filter *.dll -File -ErrorAction SilentlyContinue |
-        ForEach-Object { [void]$ExcludeSet.Add($_.Name) }
+        ForEach-Object {
+            [void]$ExcludeSet.Add($_.Name)
+            if (-not $HostProvided.ContainsKey($_.Name)) { $HostProvided[$_.Name] = $_.FullName }
+        }
     $added = $ExcludeSet.Count - $before
     Write-Host "Exclude source: $Dir (+$added)" -ForegroundColor DarkGray
 }
@@ -122,20 +130,68 @@ Add-Excludes-FromDir $TsakWorkerBinDebug
 Add-Excludes-FromDir $TsakLibsRoot
 Add-Excludes-FromDir $TsakSharedLibs
 
+# Shared frameworks: the runtime resolves these by name for the host, and ModuleAssemblyLoadContext
+# asks the Default ALC before probing the package - so a copy inside a .tpkg can never win a resolve.
+# It is dead weight, and until the Tsak fix (ca994106) LoadedAssemblyTracker byte-loaded it a second
+# time into the non-collectible Default context. BOTH frameworks must be scanned: Microsoft.Extensions
+# .Configuration / .Options / .Logging / .Diagnostics.HealthChecks ship in the ASP.NET framework, not
+# in the runtime one. These names were excluded by accident until 2026-09-18, when build-shared stopped
+# copying framework assemblies into Libs\shared; stating the rule here makes the package independent of
+# whatever that layer happens to contain.
+$WorkerTfm = Split-Path $TsakWorkerBinRelease -Leaf   # net10.0 - the same constant the bin paths use
+if ($WorkerTfm -notmatch '^net(?<major>\d+)\.') {
+    throw "Cannot read the framework major from '$WorkerTfm' (expected netN.M). Fix `$TsakWorkerBinRelease."
+}
+$TfmMajor   = [int]$Matches['major']
+$DotnetRoot = if ($env:DOTNET_ROOT) { $env:DOTNET_ROOT } else { Split-Path (Get-Command dotnet -ErrorAction Stop).Source }
+
+foreach ($fwName in @("Microsoft.NETCore.App", "Microsoft.AspNetCore.App")) {
+    $fwRoot = Join-Path $DotnetRoot "shared\$fwName"
+    if (-not (Test-Path $fwRoot)) {
+        throw "Shared framework $fwName is not installed under $DotnetRoot. Without it the exclude set is wrong and the packages would carry framework assemblies."
+    }
+    # Highest installed version of the worker's major. Sort as [version], never as text:
+    # a string sort puts 9.0.20 above 10.0.8 and would pick the wrong framework.
+    $fwDir = Get-ChildItem $fwRoot -Directory |
+        Where-Object { ($_.Name -as [version]) -and ($_.Name -as [version]).Major -eq $TfmMajor } |
+        Sort-Object { [version]$_.Name } -Descending |
+        Select-Object -First 1
+    if (-not $fwDir) {
+        throw "No $fwName $TfmMajor.x found under $fwRoot, but the worker targets $WorkerTfm. Install the matching runtime."
+    }
+    Add-Excludes-FromDir $fwDir.FullName
+}
+
 # Always-exclude (cosmetic / not transferred)
 @(
     "redb.Identity.Tests.dll"
 ) | ForEach-Object { [void]$ExcludeSet.Add($_) }
 
-# Force-INCLUDE patterns: DLLs that match these wildcard patterns are ALWAYS
-# packaged with the .tpkg even if a same-named DLL exists in the host bin.
-# Reason: host ships an OLDER major version (e.g. Microsoft.IdentityModel.Protocols
-# 6.35.0.0) that is binary-incompatible with what OpenIddict.Validation 7.x demands
-# (Microsoft.IdentityModel.Protocols 8.4.0.0). Without override the module ALC
-# resolves the host's old DLL → FileNotFoundException at runtime.
-$ForceIncludePatterns = @(
-    'Microsoft.IdentityModel.*.dll'
-)
+# ── Version gate ───────────────────────────────────────────────────────
+# There used to be a force-include list here (Microsoft.IdentityModel.*): those DLLs were packaged
+# even though the host had them, on the reasoning that the host shipped an older, incompatible major
+# and the module needed its own. That never worked and cannot work: ModuleAssemblyLoadContext asks
+# the Default ALC before probing the package - it must, or contract types would split - and since
+# Tsak's ca994106 LoadedAssemblyTracker prefers the host copy too. The packaged copies were 1.26 MB
+# the loader never looked at, plus a Troubleshooting entry advising a cure that cures nothing.
+#
+# The real hazard is not "the host has it" but "the host has a DIFFERENT major", and that used to be
+# silent: the module compiled against one version, the host loaded another, and the failure surfaced
+# far away as a FileNotFoundException inside OpenIddict. The gate below turns that divergence into a
+# packaging error naming both sides, so it is fixed by moving a pin rather than by shipping a copy
+# that will be ignored.
+function Get-AssemblyVersionOrNull([string]$Path) {
+    try {
+        return [System.Reflection.AssemblyName]::GetAssemblyName($Path).Version
+    }
+    catch [System.BadImageFormatException] {
+        return $null   # native or mixed-mode file - there is no managed identity to compare
+    }
+    catch {
+        Write-Host ("  version unreadable ({0}): {1}" -f $_.Exception.GetType().Name, $Path) -ForegroundColor DarkGray
+        return $null
+    }
+}
 
 Write-Host "Exclude set built: $($ExcludeSet.Count) host-provided DLLs" -ForegroundColor DarkGray
 
@@ -170,23 +226,43 @@ function Pack-Module {
         foreach ($n in $ExcludeSet)     { [void]$localExcludes.Add($n) }
         foreach ($n in $ExtraExcludes)  { [void]$localExcludes.Add($n) }
 
-        $included = @()
-        $skipped  = @()
+        $included      = @()
+        $skipped       = @()
+        $divergedMajor = @()
+        $divergedMinor = @()
         Get-ChildItem -Path $bin -Filter *.dll -File | ForEach-Object {
             $name = $_.Name
             $isExcluded = $localExcludes.Contains($name)
             if ($isExcluded) {
-                # Override exclusion when the DLL matches a force-include pattern
-                foreach ($pattern in $ForceIncludePatterns) {
-                    if ($name -like $pattern) { $isExcluded = $false; break }
-                }
-            }
-            if ($isExcluded) {
                 $skipped += $name
+
+                # Version gate. Only for names the HOST provides: ExtraExcludes are the sibling
+                # package's assemblies (a facade skips what Core.Module ships), and those two DO
+                # share one context by design, so there is nothing to diverge.
+                if ($HostProvided.ContainsKey($name)) {
+                    $ourVer  = Get-AssemblyVersionOrNull $_.FullName
+                    $hostVer = Get-AssemblyVersionOrNull $HostProvided[$name]
+                    if ($ourVer -and $hostVer -and $ourVer -ne $hostVer) {
+                        $line = "  {0}: module {1}, host {2}  [host copy: {3}]" -f $name, $ourVer, $hostVer, $HostProvided[$name]
+                        if ($ourVer.Major -ne $hostVer.Major) { $divergedMajor += $line } else { $divergedMinor += $line }
+                    }
+                }
             } else {
                 Copy-Item $_.FullName -Destination $staging
                 $included += $name
             }
+        }
+
+        if ($divergedMajor.Count -gt 0) {
+            $msg = "{0}: major version divergence with the host on {1} assembly(ies):" -f $ModuleName, $divergedMajor.Count
+            $msg += [Environment]::NewLine + ($divergedMajor -join [Environment]::NewLine) + [Environment]::NewLine
+            $msg += "The host wins at runtime - the module's load context asks the Default one first - so packaging our own copy cannot fix this. "
+            $msg += "Move a pin instead: the module project under redb.Identity\src, and redb.Tsak\src\redb.Tsak.Worker\redb.Tsak.Worker.csproj "
+            $msg += "(System.IdentityModel.Tokens.Jwt also comes from redb.Licensing)."
+            throw $msg
+        }
+        foreach ($w in $divergedMinor) {
+            Write-Warning ("{0}: minor version divergence with the host, the host copy is what loads.{1}{2}" -f $ModuleName, [Environment]::NewLine, $w)
         }
 
         Write-Host ("  Included : {0} DLLs" -f $included.Count) -ForegroundColor Green

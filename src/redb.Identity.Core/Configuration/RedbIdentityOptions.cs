@@ -269,6 +269,16 @@ public class RedbIdentityOptions
     public Dictionary<string, string> ScopeRequiredGroups { get; set; }
         = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Role-driven entitlement for administrative scopes — the user-side half of the scope check that
+    /// OAuth only performs against the client. See <see cref="AdminScopeEntitlementOptions"/>.
+    /// <para>
+    /// Complements <see cref="ScopeRequiredGroups"/> rather than replacing it: that one gates by group
+    /// membership and stays available for deployments modelling access with groups.
+    /// </para>
+    /// </summary>
+    public AdminScopeEntitlementOptions AdminScopeEntitlement { get; set; } = new();
+
     // ── Dynamic Client Registration (RFC 7591) ──
     // Note: the on/off toggle moved to <see cref="Features"/>.EnableDynamicRegistration.
 

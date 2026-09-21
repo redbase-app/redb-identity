@@ -5,6 +5,8 @@
 # Usage: pwsh -File demo_nonce_state_roundtrip.ps1
 
 $BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$DCR_IAT = if ($env:IDENTITY_DCR_TOKEN) { $env:IDENTITY_DCR_TOKEN } else { "dev-only-initial-access-token-not-for-production" }
+$DCR_AUTH = @{ Authorization = "Bearer $DCR_IAT" }
 $PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
 $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $REDIRECT_CB = if ($BASE -like 'https:*') { 'https://localhost:9999/cb' } else { 'http://localhost:9999/cb' }
@@ -57,7 +59,7 @@ function Invoke-Authorize {
 $total = [System.Diagnostics.Stopwatch]::StartNew()
 
 $reg = Measure-Step "1. DCR (authorization_code)" {
-    Invoke-RestMethod -Method Post "$BASE/connect/register" -ContentType "application/json" -Body (@{
+    Invoke-RestMethod -Method Post "$BASE/connect/register" -Headers $DCR_AUTH -ContentType "application/json" -Body (@{
         client_name="nonce-state-demo"; redirect_uris=@($REDIRECT)
         grant_types=@("authorization_code","refresh_token"); scope="openid profile offline_access"
     } | ConvertTo-Json)

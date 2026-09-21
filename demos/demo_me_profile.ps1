@@ -3,6 +3,8 @@
 # Usage: pwsh -File demo_me_profile.ps1
 
 $BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$DCR_IAT = if ($env:IDENTITY_DCR_TOKEN) { $env:IDENTITY_DCR_TOKEN } else { "dev-only-initial-access-token-not-for-production" }
+$DCR_AUTH = @{ Authorization = "Bearer $DCR_IAT" }
 $PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
 $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $REDIRECT_CB = if ($BASE -like 'https:*') { 'https://localhost:9999/cb' } else { 'http://localhost:9999/cb' }
@@ -34,7 +36,7 @@ $newPwd = "NewPass9876@@"
 
 # 1) DCR — password grant, with identity:account scope so /me endpoints are authorized.
 $reg = Measure-Step "1. DCR /connect/register (password + identity:account)" {
-    Invoke-RestMethod -Method Post "$BASE/connect/register" `
+    Invoke-RestMethod -Method Post "$BASE/connect/register" -Headers $DCR_AUTH `
       -ContentType "application/json" `
       -Body (@{
         client_name   = "me-demo"

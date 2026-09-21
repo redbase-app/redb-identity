@@ -25,6 +25,8 @@
 #requires -Version 7
 
 $BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$DCR_IAT = if ($env:IDENTITY_DCR_TOKEN) { $env:IDENTITY_DCR_TOKEN } else { "dev-only-initial-access-token-not-for-production" }
+$DCR_AUTH = @{ Authorization = "Bearer $DCR_IAT" }
 $PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
 $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $timings = [System.Collections.Generic.List[object]]::new()
@@ -54,7 +56,7 @@ $total = [System.Diagnostics.Stopwatch]::StartNew()
 
 # 1) DCR admin client.
 $adminReg = Measure-Step "1. DCR (cc + identity:applications:write identity:scopes:write identity:claims:write identity:roles:write identity:webhooks:write identity:federation:write identity:signing-keys:write)" {
-    $r = Invoke-RestMethod -Method Post "$BASE/connect/register" `
+    $r = Invoke-RestMethod -Method Post "$BASE/connect/register" -Headers $DCR_AUTH `
         -ContentType "application/json" `
         -Body (@{
             client_name = "jwks-rotation"
@@ -188,7 +190,7 @@ Measure-Step "7. admin list: new kid is sole isActive signing, previous demoted+
 $liveRefreshUser = "rot_$([Guid]::NewGuid().ToString('N').Substring(0,8))"
 $liveRefreshPwd  = "Test1234Pass!"
 $liveRefreshReg  = Measure-Step "8a. DCR ROPC + register user (for kid-after-rotate probe)" {
-    $r = Invoke-RestMethod -Method Post "$BASE/connect/register" `
+    $r = Invoke-RestMethod -Method Post "$BASE/connect/register" -Headers $DCR_AUTH `
         -ContentType "application/json" `
         -Body (@{
             client_name = "jwks-rotation-live-refresh"

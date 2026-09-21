@@ -16,6 +16,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The BFF is an application, not a library: its auth plumbing is internal on purpose, and the
+         test project is the only consumer that needs to see it (PrincipalNaming). -->
+    <InternalsVisibleTo Include="redb.Identity.Web.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- BFF isolation: only Contracts + Client SDK, no server-side Identity refs -->
     <ProjectReference Include="..\redb.Identity.Contracts\redb.Identity.Contracts.csproj" />
     <ProjectReference Include="..\redb.Identity.Client\redb.Identity.Client.csproj" />

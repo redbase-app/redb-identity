@@ -17,6 +17,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$DCR_IAT = if ($env:IDENTITY_DCR_TOKEN) { $env:IDENTITY_DCR_TOKEN } else { "dev-only-initial-access-token-not-for-production" }
+$DCR_AUTH = @{ Authorization = "Bearer $DCR_IAT" }
 $PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
 
 $here      = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -144,7 +146,7 @@ $scope = "identity:users:read identity:users:write"
 Step "POST /connect/register" "HTTP, not gRPC - register a throwaway client"
 Write-Host "     -> " -NoNewline -ForegroundColor DarkGray
 Say (@{ client_name = "grpc-demo"; grant_types = @("client_credentials"); scope = $scope } | ConvertTo-Json -Compress)
-$reg = Invoke-RestMethod -Method Post "$Http/connect/register" -ContentType "application/json" -Body (@{
+$reg = Invoke-RestMethod -Method Post "$Http/connect/register" -Headers $DCR_AUTH -ContentType "application/json" -Body (@{
     client_name = "grpc-demo"
     grant_types = @("client_credentials")
     scope       = $scope
@@ -214,7 +216,7 @@ Write-Host "     <- " -NoNewline -ForegroundColor Green
 Say ("HTTP GET /api/v1/identity/users  ->  " + $(if ($httpOk) { "admitted" } else { "REFUSED" }))
 Expect $httpOk "the same token was admitted over gRPC and refused over HTTP"
 
-$narrow = Invoke-RestMethod -Method Post "$Http/connect/register" -ContentType "application/json" -Body (@{
+$narrow = Invoke-RestMethod -Method Post "$Http/connect/register" -Headers $DCR_AUTH -ContentType "application/json" -Body (@{
     client_name = "grpc-demo-narrow"
     grant_types = @("client_credentials")
     scope       = "identity:users:read"

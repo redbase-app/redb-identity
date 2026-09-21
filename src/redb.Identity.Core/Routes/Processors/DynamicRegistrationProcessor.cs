@@ -124,6 +124,40 @@ internal sealed class DynamicRegistrationProcessor : IProcessor
             return;
         }
 
+        // An anonymous caller cannot register a client that administers this server.
+        //
+        // RFC 7591 §1.2 offers two modes: open registration and protected registration behind an
+        // initial access token. Under open registration the only limit above is
+        // DynamicRegistrationAllowedScopes, and a deployment whose list contains administrative
+        // scopes hands full administration to anyone who can reach the endpoint: register a
+        // client_credentials client asking for identity:users:write, take a token, delete users.
+        // No role, no password, no operator involved. The scope gate on user-bound grants cannot
+        // help here - this grant has no user to entitle, so the client's own permissions are the
+        // whole of it, and those permissions are precisely what is being handed out.
+        //
+        // So the floor is below policy: while registration is open, a scope this deployment counts
+        // as administrative is refused no matter what the allow-list says. An operator who wants
+        // administrative clients registered dynamically sets DynamicRegistrationInitialAccessToken
+        // - then every registration carries a credential the deployment issued, and the allow-list
+        // governs as before. Which scopes count is Identity:AdminScopeEntitlement, the same
+        // definition the issuance gate uses, including any the operator added; its Enabled switch
+        // is not consulted, because that switch exists to recover a locked-out administrator and
+        // must not quietly reopen anonymous registration of administrative clients.
+        if (_options.DynamicRegistrationInitialAccessToken is null)
+        {
+            var administrative = requestedScopes.Where(_options.AdminScopeEntitlement.IsGated).ToArray();
+            if (administrative.Length > 0)
+            {
+                _logger?.LogWarning(
+                    "DynamicRegistration: refused anonymous registration of '{ClientName}' requesting administrative scope(s) {Scopes}; "
+                    + "set Identity:DynamicRegistrationInitialAccessToken to allow registering administrative clients",
+                    request.ClientName ?? "<unnamed>", string.Join(",", administrative));
+                SetError(exchange, "invalid_client_metadata",
+                    $"Scope(s) require an authenticated registration: {string.Join(", ", administrative)}");
+                return;
+            }
+        }
+
         // Validate redirect URIs (required for authorization_code / implicit)
         if (grantTypes.Contains("authorization_code") || grantTypes.Contains("implicit"))
         {

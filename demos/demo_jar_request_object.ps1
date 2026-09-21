@@ -16,6 +16,8 @@
 # Usage: pwsh -File demo_jar_request_object.ps1
 
 $BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$DCR_IAT = if ($env:IDENTITY_DCR_TOKEN) { $env:IDENTITY_DCR_TOKEN } else { "dev-only-initial-access-token-not-for-production" }
+$DCR_AUTH = @{ Authorization = "Bearer $DCR_IAT" }
 $PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
 $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $REDIRECT = if ($BASE -like 'https:*') { 'https://localhost:9999/cb' } else { 'http://localhost:9999/cb' }
@@ -85,7 +87,7 @@ $kid = [Guid]::NewGuid().ToString('N').Substring(0, 8)
 $jwk = [ordered]@{ kty='RSA'; use='sig'; alg='RS256'; kid=$kid; n=(B64U $p.Modulus); e=(B64U $p.Exponent) }
 $jwks = @{ keys = @($jwk) }
 
-$reg = Invoke-RestMethod -Method Post "$BASE/connect/register" -ContentType 'application/json' -Body (@{
+$reg = Invoke-RestMethod -Method Post "$BASE/connect/register" -Headers $DCR_AUTH -ContentType 'application/json' -Body (@{
     client_name                = "jar-demo"
     redirect_uris              = @($REDIRECT)
     grant_types                = @('authorization_code')

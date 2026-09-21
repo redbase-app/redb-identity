@@ -17,6 +17,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$DCR_IAT = if ($env:IDENTITY_DCR_TOKEN) { $env:IDENTITY_DCR_TOKEN } else { "dev-only-initial-access-token-not-for-production" }
+$DCR_AUTH = @{ Authorization = "Bearer $DCR_IAT" }
 $PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
 $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 
@@ -206,7 +208,7 @@ $scope = "identity:users:read"
 Step "POST /connect/register" "HTTP, not SOAP - register a throwaway client"
 Write-Host "     -> " -NoNewline -ForegroundColor DarkGray
 Say (@{ client_name = "soap-demo"; grant_types = @("client_credentials"); scope = $scope } | ConvertTo-Json -Compress)
-$reg = Invoke-RestMethod -Method Post "$Http/connect/register" -ContentType "application/json" -Body (@{
+$reg = Invoke-RestMethod -Method Post "$Http/connect/register" -Headers $DCR_AUTH -ContentType "application/json" -Body (@{
     client_name = "soap-demo"
     grant_types = @("client_credentials")
     scope       = $scope

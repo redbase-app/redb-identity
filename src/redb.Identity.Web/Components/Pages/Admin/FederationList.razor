@@ -25,9 +25,12 @@
     else if (_error is not null) { <p class="text-error">@_error</p> }
     else if (_items.Count == 0)
     {
-        <UiEmptyState Icon="cluster"
-                      Title="No federation providers"
-                      Description="Register an external OIDC / OAuth provider to enable federated login." />
+        <UiEmptyState Title="No federation providers"
+                      Description="Register an external OIDC / OAuth provider to enable federated login.">
+            <Illustration>
+                <RdbIcon Name="cluster" Size="48" />
+            </Illustration>
+        </UiEmptyState>
     }
     else
     {

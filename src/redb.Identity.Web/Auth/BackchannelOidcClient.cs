@@ -397,12 +397,10 @@ public sealed class BackchannelOidcClient
 
             // Rebuild ClaimsIdentity explicitly so AuthenticationType is set (required for
             // ClaimsIdentity.IsAuthenticated == true under the cookie scheme) and NameClaimType
-            // resolves Identity.Name. Fall back to "name", "preferred_username", or "sub".
+            // resolves Identity.Name. At this point only the id_token's claims are on hand, so the
+            // choice usually lands on "sub"; MergeUserinfo picks again once the login has arrived.
             var src = result.ClaimsIdentity;
-            string nameClaim = src.HasClaim(c => c.Type == "preferred_username") ? "preferred_username"
-                             : src.HasClaim(c => c.Type == "name") ? "name"
-                             : "sub";
-            var rebuilt = new ClaimsIdentity(src.Claims, "BackchannelOidc", nameClaim, "roles");
+            var rebuilt = new ClaimsIdentity(src.Claims, "BackchannelOidc", PrincipalNaming.PickNameClaimType(src), "roles");
             return new ClaimsPrincipal(rebuilt);
         }
         catch (Exception ex)
@@ -445,7 +443,10 @@ public sealed class BackchannelOidcClient
             }
         }
 
-        return new ClaimsPrincipal(identity);
+        // Pick the name claim again, now that userinfo has been merged. The id_token carries neither
+        // preferred_username nor name (the OP keeps them off it by design), so the identity arrives
+        // here named after "sub" and the UI showed a bare GUID as the signed-in user.
+        return new ClaimsPrincipal(PrincipalNaming.WithPickedNameClaimType(identity));
     }
 
     private static (string verifier, string challenge) GeneratePkce()

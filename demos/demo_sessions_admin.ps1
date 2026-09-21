@@ -28,6 +28,8 @@
 #requires -Version 7
 
 $BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$DCR_IAT = if ($env:IDENTITY_DCR_TOKEN) { $env:IDENTITY_DCR_TOKEN } else { "dev-only-initial-access-token-not-for-production" }
+$DCR_AUTH = @{ Authorization = "Bearer $DCR_IAT" }
 $PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
 $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $timings = [System.Collections.Generic.List[object]]::new()
@@ -75,7 +77,7 @@ function Dcr {
     $grantList = @($Grants -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     $body = @{ client_name = $Name; grant_types = $grantList; scope = $Scope }
     if ($Redirects.Count -gt 0) { $body['redirect_uris'] = $Redirects }
-    Invoke-RestMethod -Method Post "$BASE/connect/register" `
+    Invoke-RestMethod -Method Post "$BASE/connect/register" -Headers $DCR_AUTH `
         -ContentType "application/json" -Body ($body | ConvertTo-Json)
 }
 

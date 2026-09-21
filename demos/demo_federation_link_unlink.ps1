@@ -29,6 +29,8 @@
 #requires -Version 7
 
 $BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
+$DCR_IAT = if ($env:IDENTITY_DCR_TOKEN) { $env:IDENTITY_DCR_TOKEN } else { "dev-only-initial-access-token-not-for-production" }
+$DCR_AUTH = @{ Authorization = "Bearer $DCR_IAT" }
 $PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
 $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
 $IDP  = "http://127.0.0.1:9199/default"
@@ -181,7 +183,7 @@ Write-Host "mock IdP at $IDP reachable, proceeding." -ForegroundColor DarkGray
 
 # 1) DCRs.
 $userReg = Measure-Step "1a. DCR password client (ROPC + offline_access)" {
-    Get-Json -Method Post -Url "$BASE/connect/register" -Body @{
+    Get-Json -Method Post -Url "$BASE/connect/register" -Headers $DCR_AUTH -Body @{
         client_name = "fed-link-unlink"
         grant_types = @("password","refresh_token")
         scope       = "openid profile email offline_access identity:account"
@@ -191,7 +193,7 @@ $U_RAT = $userReg.registration_access_token
 $U_RCU = $userReg.registration_client_uri
 
 $adminReg = Measure-Step "1b. DCR admin client (users.manage)" {
-    Get-Json -Method Post -Url "$BASE/connect/register" -Body @{
+    Get-Json -Method Post -Url "$BASE/connect/register" -Headers $DCR_AUTH -Body @{
         client_name = "fed-link-unlink-admin"
         grant_types = @("client_credentials")
         scope       = "identity:users:write identity:groups:write identity:consents:write identity:mfa:write"

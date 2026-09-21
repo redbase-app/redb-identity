@@ -65,6 +65,12 @@ public static class RedbRouteOpenIddictServerBuilderExtensions
         // so a denied request never triggers mapper resolution.
         RestrictScopeByGroupMembershipHandler.Descriptor,
 
+        // Role-driven entitlement for administrative scopes. OAuth asks whether the CLIENT may
+        // request a scope; this asks whether the USER should hold it. Without it every account able
+        // to sign in to a console permitted to request identity:manage held the master management
+        // scope. Removes the unentitled scopes, never rejects the sign-in.
+        RestrictAdminScopesByRoleHandler.Descriptor,
+
         // β: per-application group whitelist (ApplicationProps.AllowedGroups).
         // Runs one tick after the scope gate so denied-by-scope requests carry
         // the more specific scope error rather than the generic app error.
