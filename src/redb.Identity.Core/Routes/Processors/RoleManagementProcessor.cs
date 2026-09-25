@@ -346,8 +346,8 @@ internal sealed class RoleManagementProcessor : IProcessor
             .ToListAsync()
             .ConfigureAwait(false);
 
-        // ScopeProps.ScopeName has [RedbIgnore] — the canonical scope name is
-        // stored in _objects.value_string (indexed) rather than in PROPS.
+        // V4-UNIQUE: ScopeName is a stored [RedbUnique] prop. value_string covers rows written before
+        // that and not yet repaired by the boot backfill; the object name is the last resort.
         var rows = scopes.Select(s => new redb.Identity.Contracts.Roles.RoleScopeResponse
         {
             RoleId = roleId.Value,

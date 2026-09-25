@@ -26,7 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="redb.Core" Version="4.1.0" />
+    <PackageReference Include="redb.Core" Version="4.1.1" />
   </ItemGroup>
 
 </Project>

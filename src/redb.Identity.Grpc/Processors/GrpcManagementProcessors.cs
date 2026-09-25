@@ -200,9 +200,12 @@ internal static class GrpcManagementProcessors
 
         if (string.IsNullOrEmpty(error)) return Task.CompletedTask;
 
-        // One table, in the package that owns the controllers. Translated here into the gRPC status space
-        // by the same code path Core's own verdicts go through.
-        source.Headers["redbHttp.ResponseCode"] = ManagementErrorCodes.ToStatusCode(error!);
+        // A status the dispatcher (or Core) already decided wins — a missing method is NOT_FOUND and an
+        // action that threw is INTERNAL, not INVALID_ARGUMENT. The table, in the package that owns the
+        // controllers, speaks only for error documents that came back as a success. Either way the code
+        // is translated into the gRPC status space by the same path Core's own verdicts go through.
+        source.Headers["redbHttp.ResponseCode"] =
+            ManagementErrorCodes.DecidedErrorStatus(source) ?? ManagementErrorCodes.ToStatusCode(error!);
         return GrpcIdentityProcessors.MapErrorToGrpcStatus(exchange, ct);
     }
 

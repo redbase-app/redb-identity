@@ -178,4 +178,65 @@ public class SoapProtocolFlowTests : IClassFixture<SoapIdentityFixture>
         // point back at that endpoint, or a generated client calls the wrong host.
         wsdl.Should().Contain($"127.0.0.1:{_fixture.Port}");
     }
+
+    /// <summary>
+    /// A correct refusal reaches the caller as a fault and is not counted as a failure of the route.
+    /// <para>
+    /// Before, the STS threw its WS-Trust faults. The caller got the right fault either way, but each one
+    /// also failed the exchange: a supervisor saw <c>soap-identity-sts</c> reporting errors for requests it
+    /// had refused exactly as designed — the demo suite's negative probes alone produced three — and a
+    /// real breakage would have drowned in them. Read from the route's own
+    /// <c>redb.route.exchanges.failed</c> counter, filtered to this fixture's endpoint by its port, since
+    /// the meter is process-wide and other SOAP fixtures run the same route id.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task A_refusal_is_a_fault_on_the_wire_and_not_a_failure_of_the_route()
+    {
+        long failed = 0, seen = 0;
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == redb.Route.Telemetry.RouteMetrics.MeterName
+                && instrument.Name is "redb.route.exchanges.failed" or "redb.route.exchange.duration")
+            {
+                l.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((_, value, tags, _) =>
+        {
+            if (IsThisFixture(tags)) Interlocked.Add(ref failed, value);
+        });
+        // Duration is recorded for every exchange whatever its outcome ("processed" counts only the
+        // successful ones), so it is the honest proof that the listener sees this route at all.
+        listener.SetMeasurementEventCallback<double>((_, _, tags, _) =>
+        {
+            if (IsThisFixture(tags)) Interlocked.Increment(ref seen);
+        });
+        listener.Start();
+
+        var malformed = await _fixture.PostAsync(IssueAction, "<not-an-rst/>");
+        var badSecret = await _fixture.PostAsync(IssueAction, IssueRequest(SoapIdentityFixture.GrantedScope),
+            password: "not-the-secret");
+
+        FaultCode(malformed).Should().Be("wst:InvalidRequest");
+        FaultCode(badSecret).Should().Be("wst:FailedAuthentication");
+
+        Interlocked.Read(ref seen).Should().BeGreaterThanOrEqualTo(2,
+            "the listener must see this route's exchanges, or a zero below would prove nothing");
+        Interlocked.Read(ref failed).Should().Be(0,
+            "both requests were refused exactly as designed; a refusal is the STS's answer, not a failure");
+    }
+
+    private bool IsThisFixture(ReadOnlySpan<KeyValuePair<string, object?>> tags)
+    {
+        foreach (var tag in tags)
+        {
+            if (tag.Key != "redb.route.endpoint" || tag.Value is not string endpoint) continue;
+            var match = System.Text.RegularExpressions.Regex.Match(endpoint, @"[?&]port=(\d+)");
+            return match.Success && match.Groups[1].Value == _fixture.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return false;
+    }
 }

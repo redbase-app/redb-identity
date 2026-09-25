@@ -662,6 +662,11 @@ internal static class HttpIdentityProcessors
         if (e.In.Body is not byte[] json || json.Length == 0)
             return Task.CompletedTask;
 
+        // The dispatcher (or Core, through the controller) already said which error this is: leave it.
+        // The table below is for controller error documents that arrived wrapped in a 200.
+        if (ManagementErrorCodes.DecidedErrorStatus(e.In) is not null)
+            return Task.CompletedTask;
+
         try
         {
             var reader = new Utf8JsonReader(json);

@@ -146,20 +146,23 @@ public class SoapIdentityProcessorsTests
         "Unknown request type")]
     public async Task A_malformed_request_faults_with_a_ws_trust_code(string body, string expected)
     {
-        var call = async () => await SoapIdentityProcessors.MapRequest(Request(body), default);
+        var exchange = Request(body);
 
-        var fault = (await call.Should().ThrowAsync<SoapFaultException>()).Which;
-        fault.FaultCode.Should().Be("wst:InvalidRequest");
-        fault.FaultString.Should().Contain(expected);
+        await SoapIdentityProcessors.MapRequest(exchange, default);
+
+        var (code, reason) = AnsweredFault(exchange);
+        code.Should().Be("wst:InvalidRequest");
+        reason.Should().Contain(expected);
     }
 
     [Fact]
     public async Task Cancel_without_a_target_faults_rather_than_revoking_nothing()
     {
-        var call = async () => await SoapIdentityProcessors.MapRequest(Request(Rst(), CancelAction), default);
+        var exchange = Request(Rst(), CancelAction);
 
-        (await call.Should().ThrowAsync<SoapFaultException>())
-            .Which.FaultCode.Should().Be("wst:InvalidRequest");
+        await SoapIdentityProcessors.MapRequest(exchange, default);
+
+        AnsweredFault(exchange).Code.Should().Be("wst:InvalidRequest");
     }
 
     // ── response ─────────────────────────────────────────────
@@ -173,6 +176,20 @@ public class SoapIdentityProcessorsTests
         var exchange = new Exchange(message);
         exchange.Properties[SoapIdentityProcessors.RequestTypeProperty] = requestType;
         return exchange;
+    }
+
+    /// <summary>
+    /// The fault a refusal put on the reply. A refusal is the STS's answer: nothing is thrown, the route
+    /// stops, and the SOAP consumer sends the fault from these two headers while the exchange stays
+    /// successful. Thrown, the same fault reached the caller too — and counted every correct refusal as a
+    /// failure of the route.
+    /// </summary>
+    private static (string? Code, string? Reason) AnsweredFault(IExchange exchange)
+    {
+        exchange.Exception.Should().BeNull("a refusal is an answer, not a failure of the exchange");
+        exchange.IsStopped.Should().BeTrue("nothing may run after a refusal: no call into Core, no RSTR");
+        var reply = exchange.HasOut ? exchange.Out! : exchange.In;
+        return (reply.GetHeader<string>(SoapHeaders.FaultCode), reply.GetHeader<string>(SoapHeaders.FaultString));
     }
 
     [Fact]
@@ -243,7 +260,6 @@ public class SoapIdentityProcessorsTests
     [InlineData("access_denied", "wst:FailedAuthentication")]
     [InlineData("invalid_scope", "wst:InvalidScope")]
     [InlineData("invalid_request", "wst:InvalidRequest")]
-    [InlineData("server_error", "soap:Server")]
     public async Task An_error_document_becomes_the_fault_ws_trust_has_for_it(string error, string expectedCode)
     {
         var exchange = Answer("Issue", new Dictionary<string, object?>
@@ -252,12 +268,33 @@ public class SoapIdentityProcessorsTests
             ["error_description"] = "the reason",
         });
 
+        await SoapIdentityProcessors.MapResponse(exchange, default);
+
+        var (code, reason) = AnsweredFault(exchange);
+        code.Should().Be(expectedCode);
+
+        // The code names the kind of refusal; the reason carries what the code cannot.
+        reason.Should().Be("the reason");
+    }
+
+    /// <summary>
+    /// Our own failure is the one thing that must still fail. A <c>soap:Server</c> fault reaches the caller
+    /// exactly as before, but as a thrown fault, so the route's error count and dead-letter channel see it —
+    /// that is what they are for, and turning it into a quiet answer would hide the breakage.
+    /// </summary>
+    [Fact]
+    public async Task A_server_error_still_fails_the_exchange()
+    {
+        var exchange = Answer("Issue", new Dictionary<string, object?>
+        {
+            ["error"] = "server_error",
+            ["error_description"] = "the reason",
+        });
+
         var call = async () => await SoapIdentityProcessors.MapResponse(exchange, default);
 
         var fault = (await call.Should().ThrowAsync<SoapFaultException>()).Which;
-        fault.FaultCode.Should().Be(expectedCode);
-
-        // The code names the kind of refusal; the reason carries what the code cannot.
+        fault.FaultCode.Should().Be("soap:Server");
         fault.FaultString.Should().Be("the reason");
     }
 
@@ -275,14 +312,14 @@ public class SoapIdentityProcessorsTests
             ["error_description"] = "Too many requests.",
         }, responseCode: 429);
 
-        var call = async () => await SoapIdentityProcessors.MapResponse(exchange, default);
+        await SoapIdentityProcessors.MapResponse(exchange, default);
 
-        var fault = (await call.Should().ThrowAsync<SoapFaultException>()).Which;
-
-        // WS-Trust has no code for rate limiting, and of the two available readings the refusal is ours,
-        // not the caller's — so it must not read as a defect in their request.
-        fault.FaultCode.Should().Be("soap:Server");
-        fault.FaultCode.Should().NotBe("wst:InvalidRequest");
+        // Throttling is the limiter working, so it is an answer like any other refusal (the HTTP facade's
+        // 429 is one too). WS-Trust has no code for it, and of the two available readings the refusal is
+        // ours, not the caller's — so it must not read as a defect in their request.
+        var (code, _) = AnsweredFault(exchange);
+        code.Should().Be("soap:Server");
+        code.Should().NotBe("wst:InvalidRequest");
     }
 
     /// <summary>
@@ -294,9 +331,8 @@ public class SoapIdentityProcessorsTests
     {
         var exchange = Answer("Issue", new Dictionary<string, object?>(), responseCode: 403);
 
-        var call = async () => await SoapIdentityProcessors.MapResponse(exchange, default);
+        await SoapIdentityProcessors.MapResponse(exchange, default);
 
-        (await call.Should().ThrowAsync<SoapFaultException>())
-            .Which.FaultCode.Should().Be("wst:FailedAuthentication");
+        AnsweredFault(exchange).Code.Should().Be("wst:FailedAuthentication");
     }
 }

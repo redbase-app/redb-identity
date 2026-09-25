@@ -34,6 +34,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > NuGet publication follows the source cut.
 
 
+## [4.1.1] — 2026-09-25
+
+### Changed — a WS-Trust refusal is the STS's answer, not a failure of the route
+
+The SOAP facade threw its WS-Trust faults. The caller received the right fault either way, but every
+throw also failed the exchange, so each correct refusal — a malformed RST, bad credentials, a scope the
+caller may not have, a caller over the rate limit — counted against `soap-identity-sts` as a route error,
+headed for a dead-letter channel, and showed the STS as a failing route to whoever supervises it. The demo
+suite's three negative probes alone put it on a supervisor's "needs attention" list, and a real breakage
+would have drowned in such noise.
+
+`redb.Route.Soap` now lets a consumer route answer with a fault: put `redbSoap.faultCode` and
+`redbSoap.faultString` on the reply and return normally, and the consumer sends the `soap:Fault` while the
+exchange stays successful. The STS uses exactly that. A refusal is raised internally as `WsTrustRefusal`
+and turned into the reply at the boundary of the two steps that can refuse (`MapRequest`, `MapResponse`);
+the route stops there, so nothing after a refusal runs.
+
+What stays a failure is our own breakage: Core gave no answer, is unavailable, timed out, or issued no
+token. Those remain `soap:Server` faults thrown as `SoapFaultException`, and the error count and
+dead-letter channel see them — which is what they exist for. Rate limiting is deliberately on the answer
+side: it is the limiter working, the same way the HTTP facade's 429 is an answer. Its code is unchanged
+(`soap:Server`, "wait, do not rewrite the request").
+
+Nothing changes on the wire: same fault codes, same reasons, same HTTP status. The existing SOAP flow
+tests pass unchanged. `SoapProtocolFlowTests` now also reads the route's own
+`redb.route.exchanges.failed` counter, filtered to its fixture's endpoint: before this change a malformed
+RST and a wrong secret counted as two failed exchanges, now as none.
+
+**Deployment order:** this needs the `redb.Route.Soap` that carries the fault-as-reply form. On a host
+whose shared `redb.Route.Soap` predates it, the headers are ignored and a refusal would leave as a
+malformed success reply instead of a fault. Identity and Route ship together, as always; a host built from
+an older Route must be rebuilt before this module is deployed to it.
+
+### Fixed — a missing management route answers 404, and a crash in a controller answers 500
+
+The management surface answered **400** to a path no controller action matches, and **400** again when an
+action threw. On gRPC both arrived as `INVALID_ARGUMENT`. A missing route told the caller their request was
+malformed; an exception in our own code told them it was their fault — which is how a disabled feature once
+showed up as a 400 while the log held an unhandled exception.
+
+The controller dispatcher had already said the right thing: it writes `NotFound` with 404, or
+`InternalError` with 500, both into the body's `error` field and as the status. The facades then read the
+`error` field, looked it up in `ManagementErrorCodes` — which knows the controllers' own codes
+(`not_found`, `duplicate`, …) and nothing of the dispatcher's — and replaced the status with the table's
+fallback. The table exists for exactly one case, a controller that returned an error document wrapped in a
+200; it was reaching past it.
+
+`ManagementErrorCodes.DecidedErrorStatus` now names the status already decided — from
+`redbHttp.ResponseCode` or `status.code`, whichever the dispatcher wrote — and both facades leave such a
+status alone, consulting the table only when nobody stated a code. That is the rule `IdentityVerdict` has
+always stated for the rest of Identity: the status wins where there is one. A status Core sets through a
+controller (a 503 during an outage, say) is kept by the same rule. Teaching the table the dispatcher's strings
+would have made the symptom go away and tied Identity to another package's constants; it was not done.
+
+`ManagementStatusPreservationTests` pins both transports, through the real HTTP pipeline as well as at the
+mappers, and pins that controller error documents still map exactly as before. Without the fix the pipeline
+test answers 400 and the gRPC one `INVALID_ARGUMENT` for a 500.
+
+
 ## [4.1.0] — 2026-09-21
 
 > **This release carries security fixes.** An administrative scope is no longer granted without a role
