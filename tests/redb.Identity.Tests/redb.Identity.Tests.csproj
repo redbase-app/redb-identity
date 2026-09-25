@@ -36,7 +36,7 @@
     <ProjectReference Include="..\..\src\redb.Identity.Http\redb.Identity.Http.csproj" />
     <ProjectReference Include="..\..\src\redb.Identity.Ldap\redb.Identity.Ldap.csproj" />
     <ProjectReference Include="..\..\src\redb.Identity.Resource.Dpop\redb.Identity.Resource.Dpop.csproj" />
-    <PackageReference Include="redb.Identity.Soap" Version="4.1.1" />
+    <ProjectReference Include="..\..\src\redb.Identity.Soap\redb.Identity.Soap.csproj" />
     <PackageReference Include="redb.Core.Pro" Version="4.1.1" />
     <PackageReference Include="redb.Postgres" Version="4.1.1" />
     <PackageReference Include="redb.Postgres.Pro" Version="4.1.1" />
@@ -81,5 +81,4 @@
   </ItemGroup>
 
 </Project>
-
 

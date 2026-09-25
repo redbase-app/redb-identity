@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>redb.Identity.Contracts.Module</AssemblyName>
+    <RootNamespace>redb.Identity.Contracts.Module</RootNamespace>
+    <Description>Carrier package for redb.Identity.Contracts — the one process-wide instance of the DTO assembly every Identity module resolves against. The module itself does nothing; the package exists so that reloading any single module never replaces the contracts underneath the others.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      The whole point of this project: put redb.Identity.Contracts.dll into this package's bin so it
+      ships as this package's COMPANION. Companions go through LoadedAssemblyTracker into the Default
+      ALC — one instance per process, shared by every module. Entry points, by contrast, are isolated
+      per-package and never tracked, which is why the contracts DLL cannot itself be the entry point.
+    -->
+    <ProjectReference Include="..\redb.Identity.Contracts\redb.Identity.Contracts.csproj" />
+    <PackageReference Include="redb.Route" Version="4.1.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="redb.Identity.Contracts.Module.config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Module\manifest.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
+
