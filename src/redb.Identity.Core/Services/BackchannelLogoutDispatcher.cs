@@ -42,19 +42,23 @@ public sealed class BackchannelLogoutDispatcher
     /// Sends logout_token POSTs for every distinct RP affected by a logout.
     /// </summary>
     /// <param name="redb">redb service for loading application records.</param>
-    /// <param name="userId">End-user id (becomes <c>sub</c>).</param>
+    /// <param name="subject">
+    /// The End-User's public subject — the <c>sub</c> of every token this server issued for them
+    /// (<see cref="IdentityPrincipalBuilder"/>), which is what a relying party matches the logout token
+    /// against. Not the internal user id.
+    /// </param>
     /// <param name="sessionId">
     /// When &gt; 0 and the application opted into <c>BackchannelLogoutSessionRequired</c>,
     /// this becomes the <c>sid</c> claim.
     /// </param>
     /// <param name="applicationObjectIds">
-    /// Distinct application object ids that the user had non-revoked authorizations with
-    /// before this logout. Caller must collect them BEFORE revoking.
+    /// Distinct application object ids that obtained tokens through the session being ended (or, for a
+    /// logout of every session, hold tokens for the user). Caller must collect them BEFORE revoking.
     /// </param>
     /// <returns>The number of POSTs successfully delivered (HTTP 2xx).</returns>
     public async Task<int> DispatchAsync(
         IRedbService redb,
-        long userId,
+        Guid subject,
         long sessionId,
         IReadOnlyCollection<long> applicationObjectIds,
         CancellationToken ct = default)
@@ -65,13 +69,16 @@ public sealed class BackchannelLogoutDispatcher
         if (applicationObjectIds.Count == 0)
             return 0;
 
+        if (subject == Guid.Empty)
+            throw new ArgumentException("The subject must be the user's public subject GUID.", nameof(subject));
+
         if (!_tokenBuilder.CanIssue)
         {
             _logger?.LogDebug("LogoutTokenBuilder.CanIssue=false — skipping backchannel dispatch.");
             return 0;
         }
 
-        var subject = userId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var sub = subject.ToString("D");
         var sid = sessionId > 0 ? sessionId.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
         var http = _httpClientFactory.CreateClient(HttpClientName);
         if (http.Timeout == Timeout.InfiniteTimeSpan)
@@ -98,7 +105,7 @@ public sealed class BackchannelLogoutDispatcher
                 continue;
 
             var includeSid = props.BackchannelLogoutSessionRequired && sid is not null;
-            var token = _tokenBuilder.Build(props.ClientId, subject, includeSid ? sid : null);
+            var token = _tokenBuilder.Build(props.ClientId, sub, includeSid ? sid : null);
             if (token is null)
                 continue;
 

@@ -341,8 +341,8 @@ public class FullStackBrowserFlowTests
         ((int)authResp.StatusCode).Should().BeOneOf([200, 302],
             "authorize should succeed with valid session");
 
-        // Step 3: Logout
-        await client.PostAsync("/connect/logout", new FormUrlEncodedContent([]));
+        // Step 3: Logout — without an id_token_hint the OP asks the browser to confirm; post the state back.
+        await LogoutFlow.ConfirmAsync(client, await client.PostAsync("/connect/logout", new FormUrlEncodedContent([])));
 
         // Step 4: Authorize again — session should be invalidated
         var (_, challenge2) = GeneratePkce();

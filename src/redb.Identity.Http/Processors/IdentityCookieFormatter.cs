@@ -54,6 +54,40 @@ internal static class IdentityCookieFormatter
     public static (string prefixed, string bare) Candidates(string bareName)
         => ("__Host-" + bareName, bareName);
 
+    /// <summary>
+    /// Adds a cookie to the response message, keeping any already there.
+    /// <para>
+    /// Two cookies must leave as two <c>Set-Cookie</c> lines. Joined into one value they are read by a
+    /// browser as a single cookie — it does not split on commas (RFC 6265 §3) — with every attribute of
+    /// the second appended to the first, and of several <c>Max-Age</c> attributes the last wins. The
+    /// federation callback once folded a session cookie with the binding cookie's expiry that way, and
+    /// the browser deleted the session as it arrived. Assigning the header instead of adding to it loses
+    /// the first cookie outright. The HTTP consumer writes an array value as one line per entry, so a
+    /// second cookie turns the value into an array; a single cookie stays the plain string every reader of
+    /// the header already expects.
+    /// </para>
+    /// </summary>
+    public static void AddSetCookie(IDictionary<string, object?> headers, string cookie)
+    {
+        ArgumentNullException.ThrowIfNull(headers);
+        ArgumentException.ThrowIfNullOrEmpty(cookie);
+
+        if (!headers.TryGetValue("Set-Cookie", out var existing) || existing is null or string { Length: 0 })
+        {
+            headers["Set-Cookie"] = cookie;
+            return;
+        }
+
+        headers["Set-Cookie"] = existing switch
+        {
+            string single => new[] { single, cookie },
+            string[] several => [.. several, cookie],
+            // Identity only ever writes strings built by Build; anything else is not ours to reinterpret.
+            _ => throw new InvalidOperationException(
+                $"Set-Cookie already holds a {existing.GetType().Name}; expected a string or string[]."),
+        };
+    }
+
     private static string SameSiteToken(CookieSameSiteMode mode) => mode switch
     {
         CookieSameSiteMode.Strict => "Strict",

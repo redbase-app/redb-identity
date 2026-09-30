@@ -34,6 +34,7 @@ public class RouteRegistrationTests
         services.AddSingleton<MfaStateProtector>();
         services.AddSingleton<MfaSetupTokenProtector>();
         services.AddSingleton<MfaSecretProtector>();
+        services.AddSingleton<LogoutConfirmationProtector>();
 
         services.AddOpenIddict()
             .AddServer(options =>
@@ -200,6 +201,7 @@ public class RouteRegistrationTests
         services.AddSingleton<MfaStateProtector>();
         services.AddSingleton<MfaSetupTokenProtector>();
         services.AddSingleton<MfaSecretProtector>();
+        services.AddSingleton<LogoutConfirmationProtector>();
 
         services.AddOpenIddict()
             .AddServer(o =>
@@ -244,6 +246,7 @@ public class RouteRegistrationTests
         services.AddSingleton<MfaStateProtector>();
         services.AddSingleton<MfaSetupTokenProtector>();
         services.AddSingleton<MfaSecretProtector>();
+        services.AddSingleton<LogoutConfirmationProtector>();
 
         services.AddOpenIddict()
             .AddServer(o =>
@@ -291,6 +294,7 @@ public class RouteRegistrationTests
         services.AddSingleton<MfaStateProtector>();
         services.AddSingleton<MfaSetupTokenProtector>();
         services.AddSingleton<MfaSecretProtector>();
+        services.AddSingleton<LogoutConfirmationProtector>();
 
         services.AddOpenIddict()
             .AddServer(o =>
@@ -335,6 +339,7 @@ public class RouteRegistrationTests
         services.AddSingleton<MfaStateProtector>();
         services.AddSingleton<MfaSetupTokenProtector>();
         services.AddSingleton<MfaSecretProtector>();
+        services.AddSingleton<LogoutConfirmationProtector>();
 
         services.AddOpenIddict()
             .AddServer(o =>

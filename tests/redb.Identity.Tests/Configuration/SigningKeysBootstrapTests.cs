@@ -1,6 +1,8 @@
+using System.Security.Cryptography;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Server;
 using redb.Core.Models.Configuration;
 using redb.Identity.Core;
@@ -96,6 +98,94 @@ public sealed class SigningKeysBootstrapTests
         act.Should().Throw<InvalidOperationException>(
             "production-mode access-token encryption without persistent encryption " +
             "credentials must fail at bootstrap (A3 symmetric guard).");
+    }
+
+    [Fact]
+    public void EphemeralKeys_And_PropsStore_Together_AreRefused()
+    {
+        // Ephemeral keys stand in for keys that persist; the props store is the keys that persist. With both
+        // flags the ephemeral key is registered first and stays in the credential lists beside the store's
+        // keys: in this replica's JWKS only, trusted for validation, and the encryption key until the store
+        // has one. That is the per-process failure the store exists to remove, so the pair is a contradiction
+        // the registration must refuse rather than resolve by list order.
+        var act = () => BuildIdentitySp(new RedbIdentityOptions
+        {
+            AllowEphemeralKeys = true,
+            UsePropsSigningKeyStore = true,
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*AllowEphemeralKeys*UsePropsSigningKeyStore*");
+    }
+
+    [Fact]
+    public void NoEncryptionCreds_AccessTokenEncryptionDisabled_NoEphemeral_StillThrows()
+    {
+        // DisableAccessTokenEncryption leaves only access tokens as plain JWS. Authorization codes, refresh
+        // tokens, device and user codes and OpenIddict's state tokens are encrypted whatever it says, and
+        // OpenIddict refuses to build its options without an encryption credential. The registration has to
+        // say so itself, with the operator's options in hand, not let the first options build fail inside
+        // OpenIddict with a message about a setting the operator never saw.
+        var act = () => BuildIdentitySp(new RedbIdentityOptions
+        {
+            AllowEphemeralKeys = false,
+            DisableAccessTokenEncryption = true,
+            SigningCredentials = { new SigningCredentials(new RsaSecurityKey(RSA.Create(2048)), SecurityAlgorithms.RsaSha256) },
+            // Keep the at-rest gate out of the way: its own message mentions RequireAtRestEncryption and
+            // would satisfy a loose match for the wrong reason.
+            DataProtection = new DataProtectionOptions { RequireAtRestEncryption = false },
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*no encryption credentials*");
+    }
+
+    // Configured credentials together with the props store are a migration state; both sources validate
+    // and are published, and MintingKeySource says which one signs new tokens. Neither an unspoken choice
+    // nor a choice with nothing to choose from is accepted.
+
+    [Fact]
+    public void ConfiguredCredentials_And_PropsStore_WithoutMintingKeySource_AreRefused()
+    {
+        var act = () => BuildIdentitySp(new RedbIdentityOptions
+        {
+            AllowEphemeralKeys = false,
+            UsePropsSigningKeyStore = true,
+            SigningCredentials = { new SigningCredentials(new RsaSecurityKey(RSA.Create(2048)), SecurityAlgorithms.RsaSha256) },
+            DataProtection = new DataProtectionOptions { RequireAtRestEncryption = false },
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*MintingKeySource is not set*");
+    }
+
+    [Fact]
+    public void ConfiguredCredentials_And_PropsStore_WithMintingKeySource_AreAccepted()
+    {
+        var act = () => BuildIdentitySp(new RedbIdentityOptions
+        {
+            AllowEphemeralKeys = false,
+            UsePropsSigningKeyStore = true,
+            MintingKeySource = MintingKeySource.Configured,
+            SigningCredentials = { new SigningCredentials(new RsaSecurityKey(RSA.Create(2048)), SecurityAlgorithms.RsaSha256) },
+            DataProtection = new DataProtectionOptions { RequireAtRestEncryption = false },
+        });
+
+        act.Should().NotThrow("with the choice made, the pair is a supported migration state");
+    }
+
+    [Fact]
+    public void MintingKeySource_WithASingleKeySource_IsRefused()
+    {
+        var act = () => BuildIdentitySp(new RedbIdentityOptions
+        {
+            AllowEphemeralKeys = true,
+            MintingKeySource = MintingKeySource.Store,
+            DisableAccessTokenEncryption = true,
+        });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*only one key source*");
     }
 
     private static ServiceProvider BuildIdentitySp(RedbIdentityOptions opts)

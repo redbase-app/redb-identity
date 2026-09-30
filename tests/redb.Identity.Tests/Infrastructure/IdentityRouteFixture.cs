@@ -62,6 +62,7 @@ public sealed class IdentityRouteFixture : IAsyncLifetime
         services.AddSingleton<redb.Identity.Core.Services.MfaStateProtector>();
         services.AddSingleton<redb.Identity.Core.Services.MfaSetupTokenProtector>();
         services.AddSingleton<redb.Identity.Core.Services.MfaSecretProtector>();
+        services.AddSingleton<redb.Identity.Core.Services.LogoutConfirmationProtector>();
 
         // Identity options
         services.AddSingleton(Options.Create(new RedbIdentityOptions

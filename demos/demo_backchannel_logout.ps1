@@ -1,17 +1,15 @@
-# OIDC Back-Channel Logout 1.0 — end-to-end probe.
-#   1. DCR a confidential client with `backchannel_logout_uri` (RFC 7591 +
-#      OIDC Back-Channel Logout 1.0 §2.2) pointing at a local HttpListener.
-#   2. Register a user, ROPC login → access + id + refresh tokens.
-#   3. Start an HttpListener on 127.0.0.1:9876 in a runspace to capture the
-#      inbound logout_token POST.
-#   4. POST /connect/logout with id_token_hint — server fans out to the
-#      registered backchannel URI.
-#   5. Verify response.backchannel_delivered ≥ 1 AND the captured POST is
-#      `application/x-www-form-urlencoded` with a JWT in `logout_token=…`.
-#   6. Decode the JWT payload and assert the OIDC required claims:
-#        - events claim contains "http://schemas.openid.net/event/backchannel-logout"
-#        - sub  (subject)
-#        - sid  (when backchannel_logout_session_required=true)
+# OIDC Back-Channel Logout 1.0 — end-to-end probe, the way a browser does it.
+#   1. DCR a public (PKCE) client with `backchannel_logout_uri` (RFC 7591 + OIDC Back-Channel
+#      Logout 1.0 §2.2) pointing at a local HttpListener, backchannel_logout_session_required=true.
+#   2. Register a user and sign in at the OP through /login with a cookie jar — that is the OP session.
+#   3. authorization_code + PKCE through that session → id_token; note its `sub` and `sid`.
+#   4. Start the HttpListener; RP-initiated logout: POST /connect/logout with the session cookie and
+#      `id_token_hint` (RP-Initiated Logout 1.0 §2).
+#   5. The OP POSTs a logout_token to the RP (§2.4): form-urlencoded, a JWT whose `events` claim names
+#      the back-channel logout event, whose `sub` equals the id_token's `sub` and whose `sid` equals
+#      the id_token's `sid` — the RP ends exactly the session that ended at the OP.
+# The endpoint acts on the browser's own session only: a request without the cookie ends nothing,
+# whatever it says about the user, so there is no "userId" to send here.
 # Usage: pwsh -File demo_backchannel_logout.ps1
 
 $BASE = if ($env:IDENTITY_BASE) { $env:IDENTITY_BASE } else { "https://127.0.0.1:5002" }
@@ -52,52 +50,116 @@ function Decode-JwtPayload([string]$jwt) {
     return ($json | ConvertFrom-Json)
 }
 
+function ConvertTo-Base64Url([byte[]]$bytes) {
+    [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_')
+}
+
 $total = [System.Diagnostics.Stopwatch]::StartNew()
 
-# 1) DCR — confidential client with password+refresh and backchannel_logout_uri.
-$reg = Measure-Step "1. DCR /connect/register (password + backchannel_logout_uri)" {
+# 1) DCR — public authorization_code client (PKCE) with backchannel_logout_uri.
+$reg = Measure-Step "1. DCR /connect/register (authorization_code + PKCE, backchannel_logout_uri)" {
     Invoke-RestMethod -Method Post "$BASE/connect/register" -Headers $DCR_AUTH `
       -ContentType "application/json" `
       -Body (@{
         client_name                         = "bclogout-demo"
         redirect_uris                       = @($REDIRECT_CB)
-        grant_types                         = @("password","refresh_token")
-        scope                               = "openid profile email offline_access"
-        backchannel_logout_uri              = "http://127.0.0.1:$LSN_PORT/bclogout/"
+        grant_types                         = @("authorization_code")
+        response_types                      = @("code")
+        token_endpoint_auth_method          = "none"
+        scope                               = "openid profile email"
+        backchannel_logout_uri              = $LSN_URL
         backchannel_logout_session_required = $true
       } | ConvertTo-Json)
 }
-$reg | Format-List client_id, client_secret
+$reg | Format-List client_id, backchannel_logout_uri
 
 # 2) Register a user.
 $user = "bcl_$([Guid]::NewGuid().ToString('N').Substring(0,8))"
 $pwd  = "Test1234Pass!"
-$reg2 = Measure-Step "2. account/register" {
+Measure-Step "2. account/register" {
     Invoke-RestMethod -Method Post "$BASE/api/v1/identity/account/register" `
       -ContentType "application/json" `
       -Body (@{ login=$user; email="$user@example.com"; password=$pwd; displayName=$user } | ConvertTo-Json)
-}
-$userId = [int64]$reg2.userId
-Write-Host "  userId   : $userId"
+} | Out-Null
 
-# 3) ROPC → access + id + refresh.
-$tok = Measure-Step "3. ROPC → id_token" {
+# 3) Sign in at the OP: the cookie jar is the browser, the cookie is the OP session.
+$session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+Measure-Step "3. POST /login (cookie jar = the OP session)" {
+    try {
+        Invoke-WebRequest -Method Post "$BASE/login" `
+          -WebSession $session `
+          -ContentType "application/x-www-form-urlencoded" `
+          -Body @{ username = $user; password = $pwd } `
+          -MaximumRedirection 0 -ErrorAction Stop | Out-Null
+    } catch {
+        # 302 on success surfaces as an exception with -MaximumRedirection 0; that is expected.
+        if ($_.Exception.Response.StatusCode.value__ -notin 200,302) { throw }
+    }
+    if ($session.Cookies.GetCookies("$BASE").Count -lt 1) {
+        throw "no session cookie was set by /login"
+    }
+} | Out-Null
+
+# 4) authorization_code + PKCE through that session.
+$pkce = Measure-Step "4. generate PKCE verifier+challenge (S256)" {
+    $verifierBytes = New-Object byte[] 32
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($verifierBytes)
+    $verifier = ConvertTo-Base64Url $verifierBytes
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $challenge = ConvertTo-Base64Url ($sha.ComputeHash([Text.Encoding]::ASCII.GetBytes($verifier)))
+    [pscustomobject]@{ verifier=$verifier; challenge=$challenge }
+}
+
+$authCode = Measure-Step "5. POST /connect/authorize (session cookie) → code" {
+    $resp = $null
+    try {
+        $resp = Invoke-WebRequest -Method Post "$BASE/connect/authorize" `
+          -WebSession $session `
+          -ContentType "application/x-www-form-urlencoded" `
+          -Body @{
+            response_type         = "code"
+            client_id             = $reg.client_id
+            redirect_uri          = $REDIRECT_CB
+            scope                 = "openid profile email"
+            code_challenge        = $pkce.challenge
+            code_challenge_method = "S256"
+            state                 = "bclogout-demo-state"
+            nonce                 = [Guid]::NewGuid().ToString('N')
+          } -MaximumRedirection 0 -ErrorAction Stop
+    } catch {
+        $resp = $_.Exception.Response
+    }
+    $location = if ($resp -is [System.Net.Http.HttpResponseMessage]) { $resp.Headers.Location.ToString() } else { $resp.Headers["Location"] }
+    if (-not $location) { throw "no Location header on /connect/authorize response" }
+    $q = ([uri]$location).Query.TrimStart('?')
+    $kv = @{}
+    foreach ($pair in $q.Split('&')) {
+        $i = $pair.IndexOf('=')
+        if ($i -gt 0) { $kv[$pair.Substring(0,$i)] = [uri]::UnescapeDataString($pair.Substring($i+1)) }
+    }
+    if (-not $kv.code) { throw "authorize did not return a code (got: $location)" }
+    $kv.code
+}
+
+$tok = Measure-Step "6. POST /connect/token (authorization_code + PKCE) → id_token" {
     Invoke-RestMethod -Method Post "$BASE/connect/token" `
       -ContentType "application/x-www-form-urlencoded" `
       -Body @{
-        grant_type    = "password"
+        grant_type    = "authorization_code"
         client_id     = $reg.client_id
-        client_secret = $reg.client_secret
-        username      = $user
-        password      = $pwd
-        scope         = "openid profile email offline_access"
+        code          = $authCode
+        redirect_uri  = $REDIRECT_CB
+        code_verifier = $pkce.verifier
       }
 }
-if (-not $tok.id_token) { throw "no id_token issued — cannot drive backchannel logout" }
-Write-Host "  id_token : $($tok.id_token.Substring(0,32))…"
+if (-not $tok.id_token) { throw "no id_token issued — cannot drive RP-initiated logout" }
+$idClaims = Decode-JwtPayload $tok.id_token
+Write-Host "  id_token sub : $($idClaims.sub)"
+Write-Host "  id_token sid : $($idClaims.sid)"
+if (-not $idClaims.sid) { throw "id_token carries no sid — the OP session is unnamed and back-channel logout cannot target it" }
 
-# 4) Start HttpListener in a runspace; capture inbound logout_token POST.
-$listenerJob = Measure-Step "4. start HttpListener on $LSN_URL" {
+# 7) Start HttpListener in a runspace; capture the inbound logout_token POST.
+$listenerJob = Measure-Step "7. start HttpListener on $LSN_URL" {
     $rs = [runspacefactory]::CreateRunspace()
     $rs.Open()
     $ps = [powershell]::Create()
@@ -136,31 +198,29 @@ $listenerJob = Measure-Step "4. start HttpListener on $LSN_URL" {
 # Tiny wait to ensure the listener is bound before we POST.
 Start-Sleep -Milliseconds 300
 
-# 5) POST /connect/logout with id_token_hint — triggers fan-out.
-# 5) POST /connect/logout — server fans out backchannel POSTs to registered RPs.
-# Note: /connect/logout's response body is replaced by HandlePostLogoutRedirect with
-# an HTML "Signed Out" page (browser-friendly), so the JSON shape of the underlying
-# LogoutProcessor (success / sessions_revoked / backchannel_delivered) is NOT visible
-# to the caller. The proof of fan-out is the captured POST on our HttpListener.
-Measure-Step "5. POST /connect/logout (id_token_hint) — triggers fan-out" {
+# 8) RP-initiated logout: the browser (cookie jar) is sent to end_session_endpoint with id_token_hint.
+# Note: the response body is the "Signed Out" page (or a redirect), so the JSON shape of the underlying
+# LogoutProcessor is not visible here. The proof of fan-out is the captured POST on our HttpListener.
+Measure-Step "8. POST /connect/logout (session cookie + id_token_hint) — RP-initiated" {
+    $status = 0
     try {
         $wr = Invoke-WebRequest -Method Post "$BASE/connect/logout" `
+          -WebSession $session `
           -ContentType "application/x-www-form-urlencoded" `
           -Body @{
             id_token_hint = $tok.id_token
-            userId        = $userId
             client_id     = $reg.client_id
-          } -MaximumRedirection 0 -ErrorAction SilentlyContinue
-        $code = $wr.StatusCode
+          } -MaximumRedirection 0 -ErrorAction Stop
+        $status = $wr.StatusCode
     } catch {
-        $code = $_.Exception.Response.StatusCode.value__
+        $status = $_.Exception.Response.StatusCode.value__
     }
-    Write-Host "  status: $code"
-    if ($code -lt 200 -or $code -ge 400) { throw "Unexpected logout status: $code" }
+    Write-Host "  status: $status"
+    if ($status -lt 200 -or $status -ge 400) { throw "Unexpected logout status: $status" }
 } | Out-Null
 
-# 6) Drain the listener.
-$capture = Measure-Step "6. drain HttpListener (await captured POST)" {
+# 9) Drain the listener.
+$capture = Measure-Step "9. drain HttpListener (await captured POST)" {
     $r = $listenerJob.ps.EndInvoke($listenerJob.handle)
     $listenerJob.ps.Dispose(); $listenerJob.rs.Close()
     return $r[0]
@@ -175,7 +235,7 @@ if ($capture.contentType -notmatch 'application/x-www-form-urlencoded') {
 if ($capture.body -notmatch 'logout_token=') { throw "POST body has no logout_token field: $($capture.body)" }
 Write-Host "  ✓ POST captured with form-urlencoded logout_token" -ForegroundColor Green
 
-# 7) Decode logout_token JWT and verify required OIDC claims.
+# 10) Decode logout_token JWT and verify the OIDC Back-Channel Logout 1.0 §2.4 claims.
 $jwt = ($capture.body -split 'logout_token=')[1] -split '&' | Select-Object -First 1
 $jwt = [Uri]::UnescapeDataString($jwt)
 $payload = Decode-JwtPayload $jwt
@@ -195,16 +255,20 @@ if (-not $hasBcLogoutEvent) {
 }
 Write-Host "  ✓ events claim contains backchannel-logout event" -ForegroundColor Green
 if (-not $payload.sub) { throw "logout_token missing required 'sub' claim" }
-Write-Host "  ✓ sub claim present: $($payload.sub)" -ForegroundColor Green
+if ($payload.sub -ne $idClaims.sub) {
+    throw "logout_token sub '$($payload.sub)' differs from the id_token sub '$($idClaims.sub)' — the RP cannot match the user"
+}
+Write-Host "  ✓ sub equals the id_token sub: $($payload.sub)" -ForegroundColor Green
+if (-not $payload.sid) { throw "logout_token missing 'sid' although backchannel_logout_session_required=true" }
+if ($payload.sid -ne $idClaims.sid) {
+    throw "logout_token sid '$($payload.sid)' differs from the id_token sid '$($idClaims.sid)' — the RP would end the wrong session"
+}
+Write-Host "  ✓ sid equals the id_token sid: $($payload.sid) (the session that ended)" -ForegroundColor Green
+if ($payload.aud -ne $reg.client_id) { throw "logout_token aud '$($payload.aud)' is not the RP's client_id" }
+Write-Host "  ✓ aud is the RP's client_id" -ForegroundColor Green
 if (-not $payload.iss) { Write-Host "  ! 'iss' claim missing (RFC requires)" -ForegroundColor Yellow }
-if (-not $payload.aud) { Write-Host "  ! 'aud' claim missing (RFC requires)" -ForegroundColor Yellow }
 if (-not $payload.iat) { Write-Host "  ! 'iat' claim missing (RFC requires)" -ForegroundColor Yellow }
 if (-not $payload.jti) { Write-Host "  ! 'jti' claim missing (RFC requires)" -ForegroundColor Yellow }
-if ($payload.sid) {
-    Write-Host "  ✓ sid claim present (backchannel_logout_session_required=true honored)" -ForegroundColor Green
-} else {
-    Write-Host "  ! sid claim absent despite backchannel_logout_session_required=true" -ForegroundColor Yellow
-}
 
 $total.Stop()
 Write-Host ""

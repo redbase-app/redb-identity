@@ -105,6 +105,33 @@ public sealed class SessionService
     }
 
     /// <summary>
+    /// Records that <paramref name="applicationObjectId"/> obtained tokens through session
+    /// <paramref name="sessionId"/> (<see cref="SessionProps.ClientApplicationIds"/>). Idempotent. The
+    /// append runs under a row lock: two authorization requests from the same browser (two tabs, two
+    /// relying parties) must not lose each other's entry, because a lost entry is a relying party that is
+    /// never told about the logout. Returns false for an unknown or revoked session.
+    /// </summary>
+    public async Task<bool> BindClientAsync(long sessionId, long applicationObjectId, CancellationToken ct = default)
+    {
+        if (sessionId <= 0 || applicationObjectId <= 0) return false;
+
+        return await _redb.Context.ExecuteAtomicAsync(async () =>
+        {
+            await _redb.LockForUpdateAsync([sessionId], ct).ConfigureAwait(false);
+
+            var session = await _redb.LoadAsync<SessionProps>(sessionId).ConfigureAwait(false);
+            if (session is null || session.Props.Status != "active") return false;
+
+            var bound = session.Props.ClientApplicationIds ?? [];
+            if (bound.Contains(applicationObjectId)) return true;
+
+            session.Props.ClientApplicationIds = [.. bound, applicationObjectId];
+            await _redb.SaveAsync(session).ConfigureAwait(false);
+            return true;
+        }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Checks whether a specific session (by its object ID) has been revoked.
     /// Returns <c>true</c> if the session exists and is revoked, <c>false</c> otherwise.
     /// </summary>
@@ -375,14 +402,20 @@ public sealed class SessionService
     }
 
     /// <summary>
-    /// Performs full logout: revokes all sessions AND all authorizations for the user.
-    /// Revoking authorizations effectively invalidates all tokens linked to them.
+    /// Signs the user out everywhere: every active session, every authorization and every valid token of
+    /// theirs is revoked, so nothing issued to the user keeps working. This is what a password change or
+    /// reset, an operator's logout, a SCIM deactivation and a user disable rely on.
     /// <para>
-    /// Both session and authorization revocations are flushed via batched
-    /// <c>SaveAsync(IEnumerable&lt;...&gt;)</c> rather than per-row \u2014 a user with many
-    /// long-lived consents (one row per (user, client) authorization, plus a fresh row
-    /// per refresh-token rotation) would otherwise force the logout endpoint into
-    /// hundreds of sequential round-trips.
+    /// Authorizations and tokens are written by the OpenIddict stores and keyed by the user's public
+    /// subject (<c>value_guid</c>), not by the internal user id the sessions carry in <c>Key</c>. Tokens
+    /// are revoked on their own, not only through their authorization: the password grant issues refresh
+    /// tokens with no authorization row, and a revoked authorization leaves an already issued access token
+    /// valid until it expires, while a revoked token entry is refused at introspection and on refresh.
+    /// </para>
+    /// <para>
+    /// Every revocation is flushed via batched <c>SaveAsync(IEnumerable&lt;...&gt;)</c> rather than per
+    /// row: a user with many consents and rotated refresh tokens would otherwise turn this into hundreds
+    /// of round-trips.
     /// </para>
     /// </summary>
     /// <returns>Number of sessions revoked.</returns>
@@ -391,22 +424,51 @@ public sealed class SessionService
         // 1. Revoke all active sessions
         var sessionCount = await RevokeAllAsync(userId, ct).ConfigureAwait(false);
 
-        // 2. Revoke all non-revoked authorizations \u2192 cascades to token invalidation
+        // 2. Every grant of the user, by public subject.
+        var subject = await ResolveSubjectAsync(userId).ConfigureAwait(false);
+        if (subject == Guid.Empty)
+            return sessionCount;
+
         var auths = await _redb.Query<AuthorizationProps>()
-            .WhereRedb(a => a.Key == userId)
+            .WhereRedb(o => o.ValueGuid == subject)
             .Where(a => a.Status != "revoked")
             .ToListAsync()
             .ConfigureAwait(false);
-
         if (auths.Count > 0)
         {
             foreach (var auth in auths)
                 auth.Props.Status = "revoked";
-
             await _redb.SaveAsync(auths).ConfigureAwait(false);
         }
 
+        var tokens = await _redb.Query<TokenProps>()
+            .WhereRedb(o => o.ValueGuid == subject)
+            .Where(t => t.Status == "valid")
+            .ToListAsync()
+            .ConfigureAwait(false);
+        if (tokens.Count > 0)
+        {
+            foreach (var token in tokens)
+                token.Props.Status = "revoked";
+            await _redb.SaveAsync(tokens).ConfigureAwait(false);
+        }
+
         return sessionCount;
+    }
+
+    /// <summary>
+    /// The user's public subject GUID \u2014 the <c>sub</c> of every token and the <c>value_guid</c> the
+    /// OpenIddict stores key authorizations and tokens by. It lives on the UserProps object whose
+    /// <c>Key</c> is the core user id. <see cref="Guid.Empty"/> when the user has no such object, and
+    /// then there are no grants to revoke either.
+    /// </summary>
+    private async Task<Guid> ResolveSubjectAsync(long userId)
+    {
+        var userProps = await _redb.Query<UserProps>()
+            .WhereRedb(o => o.Key == userId)
+            .FirstOrDefaultAsync()
+            .ConfigureAwait(false);
+        return userProps?.value_guid ?? Guid.Empty;
     }
 
     /// <summary>Session info DTO for API responses.</summary>

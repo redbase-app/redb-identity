@@ -474,8 +474,14 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process(HttpIdentityProcessors.SerializeJsonResponse)
             .Process(HttpIdentityProcessors.AddNoStoreCacheHeaders); // RFC 7662 / 6749 §5.1
 
-        // Logout — GET /connect/logout (OIDC RP-Initiated Logout §2: browser redirect)
-        // ReadSessionCookie extracts userId from cookie so LogoutProcessor can revoke sessions.
+        // Logout — GET /connect/logout (OIDC RP-Initiated Logout 1.0 §2: the RP redirects the browser here).
+        // ReadSessionCookie decodes the browser's own session into headers; that session, and nothing the
+        // request says about the user, is what LogoutProcessor ends. Neither verb carries
+        // RejectCrossSiteFormPost, on purpose: an RP-initiated logout is a cross-site request by design
+        // (RP origin → OP), and the request acts only on the cookie the browser sends. A cross-site POST
+        // carries no SameSite=Lax cookie and ends nothing; a cross-site top-level GET does carry it, which
+        // is why a request without a valid id_token_hint for the session's user gets the confirmation page
+        // (RenderLogoutConfirmation) and ends nothing until the page's own state comes back.
         // Phase 9e: post_logout_redirect_uri validation goes through BrokeredPostLogoutRedirectValidator
         // (direct-vm broker call into Core). The validator is resolved at route-build time and
         // captured by the inline lambda below; null in test-fixture mode → falls back to "signed out".
@@ -491,6 +497,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process(HttpIdentityProcessors.MapQueryToBody)
             .Process(HttpIdentityProcessors.PreservePostLogoutRedirectUri)
             .To(IdentityEndpoints.Logout)
+            .Process((e, ct) => HttpIdentityProcessors.RenderLogoutConfirmation(e, ct, _transportOptions))
             .Process((e, ct) => SessionCookieProcessors.ClearSessionCookie(e, ct, secureCookie, sessionCookieName, sessionSameSite, useHostPrefix))
             .Process((e, ct) => HttpIdentityProcessors.HandlePostLogoutRedirect(e, ct, _transportOptions, validatePostLogout))
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
@@ -503,6 +510,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process(HttpIdentityProcessors.MapFormToBody)
             .Process(HttpIdentityProcessors.PreservePostLogoutRedirectUri)
             .To(IdentityEndpoints.Logout)
+            .Process((e, ct) => HttpIdentityProcessors.RenderLogoutConfirmation(e, ct, _transportOptions))
             .Process((e, ct) => SessionCookieProcessors.ClearSessionCookie(e, ct, secureCookie, sessionCookieName, sessionSameSite, useHostPrefix))
             .Process((e, ct) => HttpIdentityProcessors.HandlePostLogoutRedirect(e, ct, _transportOptions, validatePostLogout))
             .Process(HttpIdentityProcessors.SerializeJsonResponse);
@@ -696,8 +704,12 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process(ScimHttpProcessors.MapScimResponseToHttpStatus)
             .Process(ScimHttpProcessors.SerializeScimJsonResponse);
 
+        // The strip comes first here as on every other route: this catch-all used to skip it, which left
+        // the caller's own session_user_id / user_id / ip_address headers on the exchange for any later
+        // step to trust. HttpRouteReservedHeaderStripTests keeps every route honest about it.
         var route = From($"{_scheme}:0.0.0.0:{port}/api/v1/identity/{{**path}}?inOut=true{_sslParams}")
-            .RouteId("http-management-api");
+            .RouteId("http-management-api")
+            .Process(HttpIdentityProcessors.PropagateCorrelationId);
 
         // Bearer-auth runs in Core's RouteContext via direct-vm. Synchronous, same
         // exchange — equivalent to inline Process(...) but keeps Http facade free of
@@ -729,8 +741,8 @@ public class HttpFacadeRouteBuilder : RouteBuilder
 
         From($"{_scheme}:GET:0.0.0.0:{port}/scim/v2/ServiceProviderConfig?inOut=true{_sslParams}")
             .RouteId("http-scim-discovery-spc")
-            .Process((e, ct) => { System.Diagnostics.Debug.WriteLine("[SCIM-DISCOVERY-SPC] Route matched!"); return Task.CompletedTask; })
             .Process(HttpIdentityProcessors.PropagateCorrelationId)
+            .Process((e, ct) => { System.Diagnostics.Debug.WriteLine("[SCIM-DISCOVERY-SPC] Route matched!"); return Task.CompletedTask; })
             .Process(ScimHttpProcessors.StripScimPrefix)
             .RedbHttpController(discoveryRegistry)
             .Process(ScimHttpProcessors.SerializeScimJsonResponse);
@@ -772,8 +784,10 @@ public class HttpFacadeRouteBuilder : RouteBuilder
         if (_transportOptions.Features.EnableScimBulk)
             scimRegistry.RegisterController(typeof(ScimBulkController));
 
+        // Strip first, as on every route (see the management catch-all above).
         var route = From($"{_scheme}:0.0.0.0:{port}/scim/v2/{{**path}}?inOut=true{_sslParams}")
             .RouteId("http-scim-api")
+            .Process(HttpIdentityProcessors.PropagateCorrelationId)
             .Process((e, ct) => { System.Diagnostics.Debug.WriteLine("[SCIM-CATCHALL] Route matched!"); return Task.CompletedTask; });
 
         // SCIM bearer-auth runs in Core's RouteContext via direct-vm.

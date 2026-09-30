@@ -13,6 +13,16 @@ public class SessionProps
     /// <summary>FK to the application (client) the user logged into.</summary>
     public long ApplicationObjectId { get; set; }
 
+    /// <summary>
+    /// The applications (object ids) that obtained tokens through this session at the authorization
+    /// endpoint, in the order they first did. Back-channel logout for this session goes to exactly these
+    /// relying parties, with this session's id as <c>sid</c> (OIDC Back-Channel Logout 1.0 §2.1: the OP
+    /// notifies the RPs the End-User logged in to through the session being ended). Appended by
+    /// <see cref="Services.SessionService.BindClientAsync"/>; null for a session no relying party has
+    /// used yet.
+    /// </summary>
+    public long[]? ClientApplicationIds { get; set; }
+
     /// <summary>"active" or "revoked".</summary>
     public string? Status { get; set; }
 

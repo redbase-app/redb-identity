@@ -47,6 +47,7 @@ public sealed class ClusteredRouteMarkingTests
         services.AddSingleton<MfaStateProtector>();
         services.AddSingleton<MfaSetupTokenProtector>();
         services.AddSingleton<MfaSecretProtector>();
+        services.AddSingleton<LogoutConfirmationProtector>();
 
         services.AddOpenIddict()
             .AddServer(options =>

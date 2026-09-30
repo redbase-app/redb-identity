@@ -97,8 +97,9 @@ public sealed class LogoutG10Tests
         var ourSession = activeBefore.OrderByDescending(s => s.id).FirstOrDefault();
         ourSession.Should().NotBeNull("login must have inserted at least one active session row");
 
-        // Perform logout via POST /connect/logout (cookie jar auto-forwards the session cookie).
-        var logoutResp = await client.PostAsync("/connect/logout", Form(new()));
+        // Perform logout via POST /connect/logout (cookie jar auto-forwards the session cookie). Without an
+        // id_token_hint the OP asks the browser to confirm first; LogoutFlow posts the page's state back.
+        var logoutResp = await LogoutFlow.ConfirmAsync(client, await client.PostAsync("/connect/logout", Form(new())));
         // The endpoint may either render the Signed-Out page (200) or redirect to the post-logout URI.
         ((int)logoutResp.StatusCode).Should().BeOneOf(200, 302);
 

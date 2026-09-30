@@ -89,9 +89,9 @@ internal static class FederationHttpProcessors
             && ssObj is CookieSameSiteMode ss ? ss : CookieSameSiteMode.Lax;
         var useHostPrefix = e.Properties.TryGetValue("federation-binding-host-prefix", out var hpObj)
             && hpObj is bool hp && hp;
-        e.Out!.Headers["Set-Cookie"] = IdentityCookieFormatter.Build(
+        IdentityCookieFormatter.AddSetCookie(e.Out!.Headers, IdentityCookieFormatter.Build(
             name, secret, maxAgeSeconds: 600, secure: secure,
-            sameSite: sameSite, useHostPrefix: useHostPrefix);
+            sameSite: sameSite, useHostPrefix: useHostPrefix));
     }
 
     /// <summary>
@@ -165,9 +165,8 @@ internal static class FederationHttpProcessors
         var clear = IdentityCookieFormatter.Build(
             bindingCookieName, value: string.Empty, maxAgeSeconds: 0,
             secure: secure, sameSite: sameSite, useHostPrefix: useHostPrefix);
-        if (e.Out!.Headers.TryGetValue("Set-Cookie", out var existing) && existing is string es && es.Length > 0)
-            e.Out!.Headers["Set-Cookie"] = es + ", " + clear;
-        else
-            e.Out!.Headers["Set-Cookie"] = clear;
+        // A separate line, never folded into the session cookie with ", ": the browser would read the
+        // fold as one cookie whose last Max-Age is this clear's 0, and delete the session it just got.
+        IdentityCookieFormatter.AddSetCookie(e.Out!.Headers, clear);
     }
 }

@@ -37,8 +37,9 @@ public class LogoutSecurityTests
 
         await LoginAsync(client);
 
-        // Attempt logout with an unregistered URI (potential open redirect)
-        var resp = await client.GetAsync(
+        // Attempt logout with an unregistered URI (potential open redirect). No id_token_hint, so the OP
+        // asks the browser to confirm first; LogoutFlow posts the page's state (and the URI) back.
+        var resp = await LogoutFlow.SignOutAsync(client,
             "/connect/logout?post_logout_redirect_uri=" +
             Uri.EscapeDataString("https://evil.example.com/steal-tokens"));
 
@@ -68,8 +69,8 @@ public class LogoutSecurityTests
 
         await LoginAsync(client);
 
-        // Logout with the registered redirect URI
-        var resp = await client.GetAsync(
+        // Logout with the registered redirect URI, confirming the page the OP shows without an id_token_hint.
+        var resp = await LogoutFlow.SignOutAsync(client,
             "/connect/logout?post_logout_redirect_uri=" +
             Uri.EscapeDataString(ProductionHttpFixture.TestRedirectUri));
 
@@ -101,8 +102,8 @@ public class LogoutSecurityTests
 
         await LoginAsync(client);
 
-        // Logout without post_logout_redirect_uri
-        var resp = await client.GetAsync("/connect/logout");
+        // Logout without post_logout_redirect_uri, confirming the page the OP shows without an id_token_hint.
+        var resp = await LogoutFlow.SignOutAsync(client);
 
         // Should show "Signed Out" page
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -131,7 +132,7 @@ public class LogoutSecurityTests
         {
             ["post_logout_redirect_uri"] = "https://evil.example.com/phish"
         });
-        var resp = await client.PostAsync("/connect/logout", form);
+        var resp = await LogoutFlow.ConfirmAsync(client, await client.PostAsync("/connect/logout", form));
 
         resp.StatusCode.Should().Be(HttpStatusCode.OK,
             because: "unregistered URI via POST must not redirect");

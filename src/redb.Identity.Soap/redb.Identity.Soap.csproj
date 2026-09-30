@@ -13,7 +13,7 @@
       See doc/PHASE-8-FACADE-ISOLATION-PLAN-RU.md and doc/SOAP/ARCHITECTURE.md.
     -->
     <ProjectReference Include="..\redb.Identity.Contracts\redb.Identity.Contracts.csproj" />
-    <PackageReference Include="redb.Route.Soap" Version="4.1.1" />
+    <PackageReference Include="redb.Route.Soap" Version="4.2.0" />
   </ItemGroup>
 
   <ItemGroup>

@@ -62,7 +62,7 @@ public sealed class LdapHealthCheck : IHealthCheck
 
                 if (options.UseSsl) builder.Ssl();
                 if (options.UseStartTls) builder.StartTls();
-                if (options.SkipCertificateValidation) builder.SkipCertificateValidation();
+                if (options.SkipCertificateValidation) builder.TrustAllCertificates();
                 if (options.OperationTimeoutSeconds > 0)
                     builder.OperationTimeout(options.OperationTimeoutSeconds * 1000);
 

@@ -79,7 +79,7 @@ public sealed class LdapSyncRouteBuilder : RouteBuilder
             builder.StartTls();
 
         if (_options.SkipCertificateValidation)
-            builder.SkipCertificateValidation();
+            builder.TrustAllCertificates();
 
         if (_options.Attributes.Length > 0)
             builder.Attributes(_options.Attributes);

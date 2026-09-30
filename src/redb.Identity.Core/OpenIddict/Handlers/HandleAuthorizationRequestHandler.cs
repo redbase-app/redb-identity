@@ -5,6 +5,7 @@ using OpenIddict.Server;
 using redb.Core;
 using redb.Identity.Core.Models;
 using redb.Identity.Core.Services;
+using redb.Route.Abstractions;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 using static OpenIddict.Server.OpenIddictServerEvents;
 using static OpenIddict.Server.OpenIddictServerHandlerDescriptor;
@@ -285,6 +286,32 @@ internal sealed class HandleAuthorizationRequestHandler : IOpenIddictServerHandl
         // Session is now created at login time (LoginProcessor) and tracked via session_id in cookie.
         // Per-app authorization tracking is handled by OpenIddict's built-in authorization store.
 
+        // The relying party is about to hold tokens obtained through this browser session, so this
+        // session's back-channel logout has to reach it (Back-Channel Logout 1.0 §2.1). This is the one
+        // point that knows both the session and the client, so the binding is recorded here.
+        if (appObjectId > 0)
+        {
+            var boundSessionId = SessionIdOf(context.Transaction.GetRouteExchange());
+            if (boundSessionId > 0)
+            {
+                await new SessionService(redb)
+                    .BindClientAsync(boundSessionId, appObjectId, context.CancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+
         _logger.LogDebug("Authorization granted for user {UserId} via session", userId);
+    }
+
+    /// <summary>The session active on this request: ReadSessionCookie decodes it from the session ticket into the "session_id" header. 0 when none.</summary>
+    private static long SessionIdOf(IExchange? exchange)
+    {
+        if (exchange is null || !exchange.In.Headers.TryGetValue("session_id", out var raw)) return 0;
+        return raw switch
+        {
+            long value => value,
+            string text when long.TryParse(text, out var parsed) => parsed,
+            _ => 0,
+        };
     }
 }

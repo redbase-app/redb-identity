@@ -177,14 +177,25 @@ public class RedbIdentityOptions
     /// empty; private PEM material is encrypted with the DataProtection key ring. Cluster
     /// replicas share one JWKS because they read from the same PROPS rows.
     /// <para>
-    /// Mutually exclusive with pre-populated <see cref="SigningCredentials"/> /
-    /// <see cref="EncryptionCredentials"/>: when both are configured, store-provided
-    /// credentials are APPENDED after the configured ones so operators retain the option of
-    /// an HSM/KMS-backed primary with an PROPS secondary for disaster recovery.
+    /// Can be combined with pre-populated <see cref="SigningCredentials"/> /
+    /// <see cref="EncryptionCredentials"/> — the state of a deployment moving its keys to or from
+    /// configured ones. Both sources are then trusted for validation and published in the JWKS, and
+    /// <see cref="MintingKeySource"/> must say which one signs and encrypts new tokens. Not with
+    /// <see cref="AllowEphemeralKeys"/>: ephemeral keys stand in for persistent ones, and this is them.
     /// </para>
     /// Default: <c>false</c> (feature is opt-in until rotation automation ships).
     /// </summary>
     public bool UsePropsSigningKeyStore { get; set; } = false;
+
+    /// <summary>
+    /// Which key source signs and encrypts new tokens when both <see cref="SigningCredentials"/> /
+    /// <see cref="EncryptionCredentials"/> and the props signing-key store
+    /// (<see cref="UsePropsSigningKeyStore"/>) are configured. Both sources are always trusted for
+    /// validation and published in the JWKS; this decides the minting key only. Required when both sources
+    /// are present and refused when they are not: the pair is a migration state, and who mints during it is
+    /// the operator's decision, not the order two registrations happen to run in.
+    /// </summary>
+    public MintingKeySource? MintingKeySource { get; set; }
 
     /// <summary>Access token lifetime. Default: 1 hour.</summary>
     public TimeSpan AccessTokenLifetime { get; set; } = TimeSpan.FromHours(1);
@@ -205,7 +216,11 @@ public class RedbIdentityOptions
     /// <summary>Identity token lifetime. Default: 5 minutes.</summary>
     public TimeSpan IdentityTokenLifetime { get; set; } = TimeSpan.FromMinutes(5);
 
-    /// <summary>Disable access token encryption (tokens are signed but not encrypted). Default: false.</summary>
+    /// <summary>
+    /// Issue access tokens as plain JWS (signed, not encrypted). Only access tokens: authorization codes,
+    /// refresh tokens, device and user codes and OpenIddict's state tokens stay encrypted, so an encryption
+    /// credential is required either way. Default: false.
+    /// </summary>
     public bool DisableAccessTokenEncryption { get; set; }
 
     /// <summary>

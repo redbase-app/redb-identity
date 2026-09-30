@@ -68,7 +68,7 @@ internal static class MfaCookieProcessors
         if (string.IsNullOrEmpty(state))
             return Task.CompletedTask;
 
-        AppendSetCookie(msg, IdentityCookieFormatter.Build(
+        IdentityCookieFormatter.AddSetCookie(msg.Headers, IdentityCookieFormatter.Build(
             BareCookieName, value: state, maxAgeSeconds: (int)maxAge.TotalSeconds,
             secure: secure, sameSite: sameSite, useHostPrefix: useHostPrefix));
         return Task.CompletedTask;
@@ -87,7 +87,7 @@ internal static class MfaCookieProcessors
         if (msg.Body is not IDictionary<string, object?> body) return Task.CompletedTask;
         if (!body.TryGetValue("success", out var s) || s is not true) return Task.CompletedTask;
 
-        AppendSetCookie(msg, IdentityCookieFormatter.Build(
+        IdentityCookieFormatter.AddSetCookie(msg.Headers, IdentityCookieFormatter.Build(
             BareCookieName, value: string.Empty, maxAgeSeconds: 0,
             secure: secure, sameSite: sameSite, useHostPrefix: useHostPrefix));
         return Task.CompletedTask;
@@ -99,33 +99,6 @@ internal static class MfaCookieProcessors
         msg.Body is IDictionary<string, object?> d && d.TryGetValue("mfa_state", out var v)
             ? v?.ToString()
             : null;
-
-    /// <summary>
-    /// Appends a Set-Cookie value to the response message, preserving any previous
-    /// Set-Cookie (e.g. the session cookie written upstream). HTTP allows multiple
-    /// Set-Cookie headers; transport adapters typically accept a string[] / IList.
-    /// </summary>
-    private static void AppendSetCookie(IMessage msg, string setCookieValue)
-    {
-        if (msg.Headers.TryGetValue("Set-Cookie", out var existing) && existing is not null)
-        {
-            if (existing is string[] arr)
-                msg.Headers["Set-Cookie"] = arr.Append(setCookieValue).ToArray();
-            else if (existing is System.Collections.IList list)
-            {
-                list.Add(setCookieValue);
-                msg.Headers["Set-Cookie"] = list;
-            }
-            else
-            {
-                msg.Headers["Set-Cookie"] = new[] { existing.ToString()!, setCookieValue };
-            }
-        }
-        else
-        {
-            msg.Headers["Set-Cookie"] = setCookieValue;
-        }
-    }
 
     private static string? ParseCookieValue(string cookieHeader, string name)
     {

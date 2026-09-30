@@ -25,6 +25,9 @@ namespace redb.Identity.Tests.Services;
 /// </summary>
 public sealed class BackchannelLogoutDispatcherTests
 {
+    /// <summary>The user's public subject: what the RP saw as <c>sub</c> in its id_token and matches the logout token against.</summary>
+    private static readonly Guid Subject = Guid.Parse("7d6a1f2e-3b4c-4d5e-8f90-a1b2c3d4e5f6");
+
     private static (BackchannelLogoutDispatcher dispatcher, RecordingHandler handler, IRedbService redb, List<RedbObject<ApplicationProps>> apps)
         CreateDispatcher(SecurityKey? customKey = null)
     {
@@ -82,7 +85,7 @@ public sealed class BackchannelLogoutDispatcherTests
         StubApp(apps, 100, "client-a", "https://rp-a.example.com/logout");
         StubApp(apps, 101, "client-b", "https://rp-b.example.com/logout");
 
-        var delivered = await dispatcher.DispatchAsync(redb, userId: 42, sessionId: 0,
+        var delivered = await dispatcher.DispatchAsync(redb, Subject, sessionId: 0,
             new[] { 100L, 101L });
 
         delivered.Should().Be(2);
@@ -101,7 +104,7 @@ public sealed class BackchannelLogoutDispatcherTests
         StubApp(apps, 200, "client-c", backchannelUri: null);
         StubApp(apps, 201, "client-d", "https://rp-d.example.com/logout");
 
-        var delivered = await dispatcher.DispatchAsync(redb, userId: 1, sessionId: 0,
+        var delivered = await dispatcher.DispatchAsync(redb, Subject, sessionId: 0,
             new[] { 200L, 201L });
 
         delivered.Should().Be(1);
@@ -115,7 +118,7 @@ public sealed class BackchannelLogoutDispatcherTests
         var (dispatcher, handler, redb, apps) = CreateDispatcher();
         StubApp(apps, 300, "client-e", "https://rp-e.example.com/logout", sessionRequired: true);
 
-        await dispatcher.DispatchAsync(redb, userId: 99, sessionId: 555, new[] { 300L });
+        await dispatcher.DispatchAsync(redb, Subject, sessionId: 555, new[] { 300L });
 
         var req = handler.Requests.Single();
         req.Method.Should().Be(HttpMethod.Post);
@@ -128,7 +131,9 @@ public sealed class BackchannelLogoutDispatcherTests
 
         var jwt = new JwtSecurityTokenHandler { MapInboundClaims = false }.ReadJwtToken(token);
         jwt.Audiences.Should().ContainSingle().Which.Should().Be("client-e");
-        jwt.Payload["sub"].Should().Be("99");
+        // Back-Channel Logout 1.0 §2.4: sub identifies the End-User as the RP knows them, i.e. the same
+        // value as the id_token's sub — the public GUID, never the internal user id.
+        jwt.Payload["sub"].Should().Be(Subject.ToString("D"));
         jwt.Payload["sid"].Should().Be("555"); // included because sessionRequired=true and sessionId>0
     }
 
@@ -138,7 +143,7 @@ public sealed class BackchannelLogoutDispatcherTests
         var (dispatcher, handler, redb, apps) = CreateDispatcher();
         StubApp(apps, 400, "client-f", "https://rp-f.example.com/logout", sessionRequired: false);
 
-        await dispatcher.DispatchAsync(redb, userId: 1, sessionId: 999, new[] { 400L });
+        await dispatcher.DispatchAsync(redb, Subject, sessionId: 999, new[] { 400L });
 
         var body = handler.RequestBodies.Single();
         var token = System.Web.HttpUtility.ParseQueryString(body)["logout_token"];
@@ -153,7 +158,7 @@ public sealed class BackchannelLogoutDispatcherTests
         handler.NextResponseStatus = HttpStatusCode.ServiceUnavailable;
         StubApp(apps, 500, "client-g", "https://rp-down.example.com/logout");
 
-        var delivered = await dispatcher.DispatchAsync(redb, userId: 7, sessionId: 0, new[] { 500L });
+        var delivered = await dispatcher.DispatchAsync(redb, Subject, sessionId: 0, new[] { 500L });
 
         delivered.Should().Be(0);
         handler.Requests.Should().HaveCount(1); // attempt was made
@@ -164,7 +169,7 @@ public sealed class BackchannelLogoutDispatcherTests
     {
         var (dispatcher, handler, redb, apps) = CreateDispatcher();
 
-        var delivered = await dispatcher.DispatchAsync(redb, 1, 0, Array.Empty<long>());
+        var delivered = await dispatcher.DispatchAsync(redb, Subject, 0, Array.Empty<long>());
 
         delivered.Should().Be(0);
         handler.Requests.Should().BeEmpty();

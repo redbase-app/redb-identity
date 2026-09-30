@@ -112,9 +112,9 @@ internal static class SessionCookieProcessors
             return Task.CompletedTask;
 
         var msg = e.HasOut ? e.Out! : e.In;
-        // A success code-redirect never carries a Set-Cookie of its own; the login/consent
-        // redirects don't either, so a single Set-Cookie is safe here.
-        msg.Headers["Set-Cookie"] = setCookie;
+        // Added, not assigned. No response on this route carries another cookie today, but losing this
+        // one to a later assignment is the bypass named above, so it must never depend on that.
+        IdentityCookieFormatter.AddSetCookie(msg.Headers, setCookie);
         return Task.CompletedTask;
     }
 
@@ -141,13 +141,13 @@ internal static class SessionCookieProcessors
             var sessionId = body.TryGetValue("sessionId", out var sid) && sid is long sId ? sId : 0L;
             var ticket = ticketService.Protect(userId, sessionId, username);
 
-            msg.Headers["Set-Cookie"] = IdentityCookieFormatter.Build(
+            IdentityCookieFormatter.AddSetCookie(msg.Headers, IdentityCookieFormatter.Build(
                 bareCookieName,
                 ticket,
                 maxAgeSeconds: (int)maxAge.TotalSeconds,
                 secure: secure,
                 sameSite: sameSite,
-                useHostPrefix: useHostPrefix);
+                useHostPrefix: useHostPrefix));
         }
 
         return Task.CompletedTask;
@@ -162,13 +162,13 @@ internal static class SessionCookieProcessors
         CookieSameSiteMode sameSite, bool useHostPrefix)
     {
         var msg = e.Out ?? e.In;
-        msg.Headers["Set-Cookie"] = IdentityCookieFormatter.Build(
+        IdentityCookieFormatter.AddSetCookie(msg.Headers, IdentityCookieFormatter.Build(
             bareCookieName,
             value: string.Empty,
             maxAgeSeconds: 0,
             secure: secure,
             sameSite: sameSite,
-            useHostPrefix: useHostPrefix);
+            useHostPrefix: useHostPrefix));
         return Task.CompletedTask;
     }
 

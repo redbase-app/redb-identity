@@ -15,6 +15,13 @@ namespace redb.Identity.Contracts.Routes;
 /// path, so the HTTP facade strips it on its own), but on the gRPC envelope route the caller names
 /// the operation in metadata by design — that transport's equivalent of a URL path.
 /// </para>
+/// <para>
+/// Also here: <c>Set-Cookie</c>, a response header no caller has any business sending. The routes
+/// answer on the request message, and the cookie writers add to whatever <c>Set-Cookie</c> is already
+/// on it — so a caller's own value ended up in the same array as ours and went back out with it. The
+/// transport refuses to echo a request header only while it is the untouched object the client sent,
+/// and an array built around it is not.
+/// </para>
 /// </summary>
 public static class IdentityReservedInboundHeaders
 {
@@ -23,6 +30,7 @@ public static class IdentityReservedInboundHeaders
         "session_user_id", "session_username", "session_id", "reauth_marked_sid",
         "client_id", "client_secret", "access_token",
         "user_id", "ip_address", "user_agent",
+        "Set-Cookie",
     };
 
     /// <summary>Removes every reserved name from <paramref name="headers"/> (case-insensitive dictionaries remove any casing).</summary>

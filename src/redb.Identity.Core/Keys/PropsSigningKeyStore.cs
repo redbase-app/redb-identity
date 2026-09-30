@@ -133,11 +133,12 @@ public sealed class PropsSigningKeyStore : ISigningKeyStore
             .GetRequiredService<IDataProtectionProvider>()
             .CreateProtector(ProtectorPurpose);
 
-        // 1. Demote every currently-active key of this kind. The keys stay in the JWKS
-        //    until their own NotAfter passes — that's the entire point of rotation: a
-        //    smooth handover so RPs that cached the JWKS continue to validate tokens
-        //    signed under the old key. RetireAsync is the explicit "remove from JWKS now"
-        //    step, called once the cache grace window has elapsed.
+        // 1. Demote every currently-active key of this kind. The keys stay in the JWKS and in
+        //    OpenIddict's credentials until their own NotAfter passes — that's the entire point of
+        //    rotation: a smooth handover so RPs that cached the JWKS continue to validate tokens
+        //    signed under the old key. RetireAsync is the explicit "stop trusting it now" step:
+        //    it sets NotAfter to the present, and on the next options refresh the key is gone
+        //    from the JWKS, from minting and from validation alike.
         var activeRows = await redb.Query<SigningKeyProps>()
             .Where(k => k.KeyKind == keyKind && k.IsActive)
             .ToListAsync()

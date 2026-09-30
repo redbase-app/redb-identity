@@ -70,8 +70,11 @@ internal sealed class SigningKeyInitListener : IRouteLifecycleListener
         try
         {
             await store.EnsureBootstrappedAsync("signing", ct).ConfigureAwait(false);
-            if (!options.DisableAccessTokenEncryption)
-                await store.EnsureBootstrappedAsync("encryption", ct).ConfigureAwait(false);
+            // Both kinds, always. DisableAccessTokenEncryption leaves only access tokens as plain JWS;
+            // authorization codes, refresh tokens, device and user codes and OpenIddict's state tokens are
+            // encrypted whatever it says, and OpenIddict refuses to build its options without an encryption
+            // credential. A store with a signing key and no encryption key is a server that cannot start.
+            await store.EnsureBootstrappedAsync("encryption", ct).ConfigureAwait(false);
 
             var materials = await store.GetAllAsync(ct).ConfigureAwait(false);
             logger.LogInformation(

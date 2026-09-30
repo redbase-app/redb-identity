@@ -71,6 +71,7 @@ public sealed class RouteTransactionMarkingTests
         services.AddSingleton<MfaStateProtector>();
         services.AddSingleton<MfaSetupTokenProtector>();
         services.AddSingleton<MfaSecretProtector>();
+        services.AddSingleton<LogoutConfirmationProtector>();
 
         services.AddOpenIddict()
             .AddServer(options =>

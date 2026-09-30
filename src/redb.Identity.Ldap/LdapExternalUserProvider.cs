@@ -240,7 +240,7 @@ public sealed class LdapExternalUserProvider : IExternalUserProvider, IAsyncDisp
             builder.StartTls();
 
         if (_options.SkipCertificateValidation)
-            builder.SkipCertificateValidation();
+            builder.TrustAllCertificates();
 
         if (_options.MaxConnections != 5)
             builder.MaxConnections(_options.MaxConnections);

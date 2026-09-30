@@ -112,7 +112,8 @@ public sealed class SessionCookieRotationTests
         preLogout.Should().NotBeNull();
         preLogout!.Value.Should().NotBeNullOrEmpty();
 
-        var logoutResp = await client.PostAsync("/connect/logout", new FormUrlEncodedContent([]));
+        // No id_token_hint: the OP asks the browser to confirm first; LogoutFlow posts the page's state back.
+        var logoutResp = await LogoutFlow.ConfirmAsync(client, await client.PostAsync("/connect/logout", new FormUrlEncodedContent([])));
 
         // The Set-Cookie on the logout response must clear the session cookie.
         // CookieContainer treats Max-Age=0 / Expires in past as deletion; check

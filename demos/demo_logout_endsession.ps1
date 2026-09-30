@@ -132,29 +132,25 @@ Measure-Step "7. POST /connect/logout (id_token_hint)" {
         Write-Host "  (skipped — no id_token was issued)" -ForegroundColor DarkGray
         return
     }
-    try {
-        $wr = Invoke-WebRequest -Method Post "$BASE/connect/logout" `
-          -ContentType "application/x-www-form-urlencoded" `
-          -Body @{
-            id_token_hint            = $tok.id_token
-            client_id                = $reg.client_id
-            post_logout_redirect_uri = "http://localhost:9999/post-logout"
-            state                    = "s_$(Get-Random)"
-          } `
-          -MaximumRedirection 0 -ErrorAction SilentlyContinue
-        $code = $wr.StatusCode
-        if ($code -in 200,204,302,303) {
-            Write-Host "  ✓ logout accepted: $code" -ForegroundColor Green
-        } else {
-            Write-Host "  ! unexpected: $code" -ForegroundColor Yellow
-        }
-    } catch {
-        $code = $_.Exception.Response.StatusCode.value__
-        if ($code -in 200,204,302,303) {
-            Write-Host "  ✓ logout: $code" -ForegroundColor Green
-        } else {
-            Write-Host "  status: $code — $($_.Exception.Message)" -ForegroundColor Yellow
-        }
+    $state = "s_$(Get-Random)"
+    $form = "id_token_hint=$([uri]::EscapeDataString($tok.id_token))" +
+            "&client_id=$([uri]::EscapeDataString($reg.client_id))" +
+            "&post_logout_redirect_uri=$([uri]::EscapeDataString('http://localhost:9999/post-logout'))" +
+            "&state=$state"
+    # curl.exe, not Invoke-WebRequest: with -MaximumRedirection 0 the latter throws on an https→http
+    # redirect and loses the status (same trap as in demo_federation_e2e).
+    $out = & curl.exe -sk -o NUL -w "%{http_code} %{redirect_url}" -X POST "$BASE/connect/logout" `
+        -H "Content-Type: application/x-www-form-urlencoded" --data $form
+    $code, $location = $out -split ' ', 2
+    Write-Host "  status   : $code"
+    if ($code -notin '200','204','302','303') { throw "unexpected logout status: $code" }
+    if ($code -in '302','303') {
+        Write-Host "  location : $location"
+        # RP-Initiated Logout 1.0 §3: the RP's state comes back on the redirect, unchanged.
+        if ($location -notmatch "state=$state") { throw "post-logout redirect lost the RP state: $location" }
+        Write-Host "  ✓ redirect to post_logout_redirect_uri carries the RP state" -ForegroundColor Green
+    } else {
+        Write-Host "  ✓ logout accepted: $code (no registered post_logout_redirect_uri — signed-out page)" -ForegroundColor Green
     }
 } | Out-Null
 

@@ -14,7 +14,7 @@
       per-package and never tracked, which is why the contracts DLL cannot itself be the entry point.
     -->
     <ProjectReference Include="..\redb.Identity.Contracts\redb.Identity.Contracts.csproj" />
-    <PackageReference Include="redb.Route" Version="4.1.1" />
+    <PackageReference Include="redb.Route" Version="4.2.0" />
   </ItemGroup>
 
   <ItemGroup>

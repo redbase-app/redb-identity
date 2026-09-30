@@ -582,21 +582,65 @@ internal static class HttpIdentityProcessors
     }
 
     /// <summary>
+    /// Renders the logout confirmation page when the core answered <c>confirm_required</c>: the request
+    /// carried the browser's session but neither a valid <c>id_token_hint</c> for its user nor the state of
+    /// a page this server showed. The form posts that state back to <c>/connect/logout</c> together with
+    /// the relying party's own parameters, so the redirect back to it still happens after confirmation.
+    /// Stops the route here: the session cookie is not cleared and no redirect is performed until the
+    /// End-User confirms.
+    /// </summary>
+    internal static Task RenderLogoutConfirmation(IExchange e, CancellationToken ct, IdentityTransportOptions opts)
+    {
+        if (!e.Properties.TryGetValue("logout_confirm_required", out var flag) || flag is not true)
+            return Task.CompletedTask;
+        if (e.In.Body is not IDictionary<string, object?> answer)
+            throw new InvalidOperationException("Logout confirmation was requested without the core's answer body.");
+
+        var fields = new StringBuilder();
+        foreach (var name in new[] { "logout_state", "post_logout_redirect_uri", "state", "client_id" })
+        {
+            if (answer.TryGetValue(name, out var value) && value is string text && !string.IsNullOrEmpty(text))
+                fields.Append($"<input type=\"hidden\" name=\"{name}\" value=\"{WebUtility.HtmlEncode(text)}\" />\n");
+        }
+
+        var card = $$"""
+            <h1>Sign out</h1>
+            <p>Do you want to sign out of your account?</p>
+            <form method="POST" action="/connect/logout">
+                {{fields}}<div class="actions">
+                    <button type="submit" class="btn btn-primary">Sign out</button>
+                </div>
+            </form>
+            """;
+
+        var msg = new Message(IdentityPageTemplates.WrapPage("Sign out", card, opts));
+        msg.Headers[HttpHeaders.ResponseContentType] = "text/html; charset=utf-8";
+        msg.Headers[HttpHeaders.ResponseCode] = 200;
+        AttachSecurityHeaders(msg);
+        e.Out = msg;
+        e.Stop();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
     /// Handles post-logout redirect per OIDC RP-Initiated Logout §2.
     /// If the response contains <c>post_logout_redirect_uri</c>, validates it against
     /// registered application URIs and redirects (302) only if valid.
     /// Otherwise renders a simple "logged out" HTML page.
     /// </summary>
     /// <summary>
-    /// Saves post_logout_redirect_uri from body to exchange properties before To() replaces the body.
+    /// Saves the relying party's <c>post_logout_redirect_uri</c> and <c>state</c> from the body to exchange
+    /// properties before To() replaces the body. The state goes back to the RP verbatim on the redirect
+    /// (RP-Initiated Logout 1.0 §3).
     /// </summary>
     internal static Task PreservePostLogoutRedirectUri(IExchange e, CancellationToken ct)
     {
-        if (e.In.Body is IDictionary<string, object?> body
-            && body.TryGetValue("post_logout_redirect_uri", out var uri)
-            && uri is string s && !string.IsNullOrEmpty(s))
+        if (e.In.Body is IDictionary<string, object?> body)
         {
-            e.Properties["post_logout_redirect_uri"] = s;
+            if (body.TryGetValue("post_logout_redirect_uri", out var uri) && uri is string s && !string.IsNullOrEmpty(s))
+                e.Properties["post_logout_redirect_uri"] = s;
+            if (body.TryGetValue("state", out var stateValue) && stateValue is string state && !string.IsNullOrEmpty(state))
+                e.Properties["post_logout_state"] = state;
         }
         return Task.CompletedTask;
     }
@@ -625,8 +669,13 @@ internal static class HttpIdentityProcessors
 
             if (isValid)
             {
+                // RP-Initiated Logout 1.0 §3: the RP's state is returned as a query parameter, unchanged.
+                var location = redirectUri;
+                if (e.Properties.TryGetValue("post_logout_state", out var stateObj) && stateObj is string state && state.Length > 0)
+                    location += (redirectUri.Contains('?') ? "&" : "?") + "state=" + Uri.EscapeDataString(state);
+
                 msg.Headers[HttpHeaders.ResponseCode] = 302;
-                msg.Headers["Location"] = redirectUri;
+                msg.Headers["Location"] = location;
                 return;
             }
             // Invalid or unregistered URI — fall through to "signed out" page

@@ -156,18 +156,39 @@ public class SessionServiceTests
         // Create session
         await svc.CreateAsync(userId, app.id);
 
-        // Create authorization for the same user
-        var auth = new redb.Core.Models.Entities.RedbObject<AuthorizationProps>
+        // The user's public subject lives on the UserProps object (Key = core user id, value_guid = sub);
+        // the OpenIddict stores key authorizations and tokens by that GUID, never by the user id.
+        var subject = Guid.NewGuid();
+        var oidcUser = new redb.Core.Models.Entities.RedbObject<UserProps>
         {
             key = userId,
-            Props = new AuthorizationProps
-            {
-                ApplicationObjectId = app.id,
-                Status = "valid",
-                Type = "permanent"
-            }
+            value_guid = subject,
+            Props = new UserProps { UserId = userId },
+        };
+        oidcUser.id = await _fx.Redb.SaveAsync(oidcUser);
+
+        var auth = new redb.Core.Models.Entities.RedbObject<AuthorizationProps>
+        {
+            value_guid = subject,
+            Props = new AuthorizationProps { ApplicationObjectId = app.id, Status = "valid", Type = "permanent" }
         };
         auth.id = await _fx.Redb.SaveAsync(auth);
+
+        // A refresh token without an authorization row (the password grant issues those) and an access token.
+        var refresh = new redb.Core.Models.Entities.RedbObject<TokenProps>
+        {
+            value_guid = subject,
+            Props = new TokenProps { ApplicationObjectId = app.id, Status = "valid", Type = "refresh_token" }
+        };
+        refresh.id = await _fx.Redb.SaveAsync(refresh);
+
+        // Somebody else's token: the revocation is scoped to the subject, not to the application.
+        var stranger = new redb.Core.Models.Entities.RedbObject<TokenProps>
+        {
+            value_guid = Guid.NewGuid(),
+            Props = new TokenProps { ApplicationObjectId = app.id, Status = "valid", Type = "refresh_token" }
+        };
+        stranger.id = await _fx.Redb.SaveAsync(stranger);
 
         // Perform logout
         var sessionsRevoked = await svc.LogoutAsync(userId);
@@ -177,9 +198,12 @@ public class SessionServiceTests
         var sessions = await svc.ListAsync(userId);
         sessions.Should().BeEmpty();
 
-        // Verify authorization is revoked
-        var reloadedAuth = await _fx.Redb.LoadAsync<AuthorizationProps>(auth.id);
-        reloadedAuth!.Props.Status.Should().Be("revoked");
+        // Every grant of the user is revoked, and nobody else's.
+        (await _fx.Redb.LoadAsync<AuthorizationProps>(auth.id))!.Props.Status.Should().Be("revoked");
+        (await _fx.Redb.LoadAsync<TokenProps>(refresh.id))!.Props.Status.Should().Be("revoked",
+            "a token with no authorization row is revoked on its own");
+        (await _fx.Redb.LoadAsync<TokenProps>(stranger.id))!.Props.Status.Should().Be("valid",
+            "another subject's token at the same application is not this user's grant");
     }
 
     [Fact]

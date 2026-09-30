@@ -617,9 +617,10 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         // 14. Logout — E1: tx-wrapped (revokes session + tokens).
         var logoutLogger = _sp.GetRequiredService<ILoggerFactory>().CreateLogger<LogoutProcessor>();
         var oidcServerOptions = _sp.GetRequiredService<IOptionsMonitor<OpenIddictServerOptions>>();
+        var logoutConfirmation = _sp.GetRequiredService<LogoutConfirmationProtector>();
         WithRedbTx(From(IdentityEndpoints.Logout)
             .RouteId(IdentityEndpoints.RouteIds.Logout))
-            .Process(new LogoutProcessor(Context!, oidcServerOptions, _redbName, logoutLogger))
+            .Process(new LogoutProcessor(Context!, oidcServerOptions, logoutConfirmation, _redbName, logoutLogger))
             .WireTap(IdentityEndpoints.Events);
 
         // 14b. Consent grant (user-facing approval from consent page) — E1: tx-wrapped.
@@ -1112,7 +1113,7 @@ public class IdentityCoreRouteBuilder : RouteBuilder
             if (!string.IsNullOrWhiteSpace(smtp.Password))
                 smtpBuilder = smtpBuilder.Password(smtp.Password);
             if (smtp.SkipCertificateValidation)
-                smtpBuilder = smtpBuilder.SkipCertificateValidation();
+                smtpBuilder = smtpBuilder.TrustAllCertificates();
 
             From(IdentityEndpoints.EmailSend)
                 .RouteId(IdentityEndpoints.RouteIds.EmailSend)

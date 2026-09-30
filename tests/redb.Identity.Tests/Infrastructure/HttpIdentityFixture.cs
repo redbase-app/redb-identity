@@ -90,6 +90,7 @@ public sealed class HttpIdentityFixture : IAsyncLifetime
         services.AddSingleton<MfaStateProtector>();
         services.AddSingleton<MfaSetupTokenProtector>();
         services.AddSingleton<MfaSecretProtector>();
+        services.AddSingleton<LogoutConfirmationProtector>();
 
         // Identity options
         var identityOptions = new RedbIdentityOptions

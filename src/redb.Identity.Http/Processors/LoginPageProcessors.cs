@@ -144,8 +144,17 @@ internal static class LoginPageProcessors
     }
 
     /// <summary>
-    /// Validates returnUrl against open redirect attacks.
-    /// Only allows relative URLs starting with /.
+    /// Validates returnUrl against open redirect attacks: only a path on this server passes.
+    /// <para>
+    /// Three rules, and the last is not decoration. The value starts with a single <c>/</c>; its second
+    /// character is neither <c>/</c> nor <c>\</c>, either of which makes it protocol-relative (another
+    /// host); and it carries no control character anywhere. A browser removes ASCII tab and newline from
+    /// a URL before resolving it (WHATWG URL, "remove all ASCII tab or newline from input"), so
+    /// <c>/\t/evil.example</c> passes the first two rules and still lands on <c>//evil.example</c> —
+    /// straight after the user typed their password here. ASP.NET Core's <c>IsLocalUrl</c> rejects control
+    /// characters for exactly this reason. Every redirect point (login, MFA, federation, consent) calls
+    /// this method, so the rule holds wherever the value ends up.
+    /// </para>
     /// </summary>
     internal static bool IsValidReturnUrl(string? url)
     {
@@ -157,6 +166,12 @@ internal static class LoginPageProcessors
 
         if (url.Length > 1 && (url[1] == '/' || url[1] == '\\'))
             return false;
+
+        foreach (var c in url)
+        {
+            if (char.IsControl(c))
+                return false;
+        }
 
         return true;
     }
