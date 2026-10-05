@@ -124,7 +124,7 @@ internal sealed class HandleTokenRequestHandler : IOpenIddictServerHandler<Handl
                     result.User!, result.SubjectGuid, result.OidcProps, context.Request.GetScopes());
             }
 
-            _logger.LogDebug("Issued ClaimsPrincipal for password grant: {Username}", username);
+            _logger.LogTrace("Issued ClaimsPrincipal for password grant: {Username}", username);
             return;
         }
 

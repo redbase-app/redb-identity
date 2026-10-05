@@ -34,6 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > NuGet publication follows the source cut.
 
 
+## [4.2.2] — 2026-10-04
+
+### Security — the password grant logged the username at `Debug`; it logs it at `Trace`
+
+Building the `ClaimsPrincipal` for the password grant (ROPC) wrote
+`Issued ClaimsPrincipal for password grant: {Username}` at `Debug`. A default production configuration leaves
+`Debug` off, but a deployment that keeps it on accumulates account identifiers next to the fact of a
+successful password sign-in, and matching a person to a time then takes nothing but a log read. The line
+moved to `Trace`; the message, its fields and its position are unchanged, so nothing else in the flow moves
+with it.
+
 ## [4.2.0] — 2026-09-30
 
 ### Security — `/connect/logout` acts on the browser's own session; a `userId` in the request no longer chooses whom to sign out
