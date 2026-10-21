@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Core.Models;
 using redb.Identity.Core.Services;
 using redb.Identity.Tests.Infrastructure;
@@ -90,7 +90,7 @@ public sealed class MeSessionsRevokeOthersTests
 
             var body = await ParseJsonAsync(resp);
             body.GetProperty("success").GetBoolean().Should().BeTrue();
-            body.GetProperty("revoked").GetInt32().Should().BeGreaterOrEqualTo(2,
+            body.GetProperty("revoked").GetInt32().Should().BeGreaterThanOrEqualTo(2,
                 "extra1 and extra2 must be counted as revoked; current session must not");
 
             // 5. Verify the post-state: current is still listed, extras are gone.
@@ -147,7 +147,7 @@ public sealed class MeSessionsRevokeOthersTests
 
             var body = await ParseJsonAsync(resp);
             body.GetProperty("success").GetBoolean().Should().BeTrue();
-            body.GetProperty("revoked").GetInt32().Should().BeGreaterOrEqualTo(2,
+            body.GetProperty("revoked").GetInt32().Should().BeGreaterThanOrEqualTo(2,
                 "both seeded sessions must be counted as revoked");
 
             var remaining = await ListSessionIdsAsync(accessToken);

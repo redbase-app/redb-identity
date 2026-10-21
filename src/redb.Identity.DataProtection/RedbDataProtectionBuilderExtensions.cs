@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 namespace redb.Identity.DataProtection;
 
@@ -20,10 +22,17 @@ public static class RedbDataProtectionBuilderExtensions
     /// Persists ASP.NET DataProtection XML keys in redb.
     /// <para>Usage: <c>services.AddDataProtection().PersistKeysToRedb();</c></para>
     /// <para>
-    /// The repository is registered as Singleton (KeyManager resolves
-    /// <see cref="IXmlRepository"/> from the root container). Persistence opens a
-    /// fresh <see cref="IServiceScopeFactory"/> scope per call to avoid capturing a
-    /// Scoped <see cref="redb.Core.IRedbService"/> (A1 captive-dependency rule).
+    /// The key manager reads its repository from <see cref="KeyManagementOptions.XmlRepository"/>
+    /// only; a repository merely registered in DI is ignored and the key ring falls back to the file
+    /// system of the process user. So the repository is set on the options, as
+    /// <c>PersistKeysToFileSystem</c> and <c>PersistKeysToDbContext</c> do. An XML encryptor set on
+    /// the same options (<c>ProtectKeysWith*</c>) keeps working: the repository stores what it is
+    /// given.
+    /// </para>
+    /// <para>
+    /// The repository is a Singleton. Persistence opens a fresh <see cref="IServiceScopeFactory"/>
+    /// scope per call to avoid capturing a Scoped <see cref="redb.Core.IRedbService"/>
+    /// (A1 captive-dependency rule).
     /// </para>
     /// </summary>
     public static IDataProtectionBuilder PersistKeysToRedb(this IDataProtectionBuilder builder)
@@ -32,6 +41,17 @@ public static class RedbDataProtectionBuilderExtensions
         builder.Services.TryAddSingleton<RedbXmlRepository>();
         builder.Services.TryAddSingleton<IXmlRepository>(
             sp => sp.GetRequiredService<RedbXmlRepository>());
+        builder.Services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IConfigureOptions<KeyManagementOptions>, RedbKeyManagementOptionsSetup>());
         return builder;
+    }
+
+    private sealed class RedbKeyManagementOptionsSetup : IConfigureOptions<KeyManagementOptions>
+    {
+        private readonly RedbXmlRepository _repository;
+
+        public RedbKeyManagementOptionsSetup(RedbXmlRepository repository) => _repository = repository;
+
+        public void Configure(KeyManagementOptions options) => options.XmlRepository = _repository;
     }
 }

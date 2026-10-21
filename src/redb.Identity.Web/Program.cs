@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.IdentityModel.Logging;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
@@ -23,7 +24,10 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseSerilog((ctx, cfg) => cfg
     .ReadFrom.Configuration(ctx.Configuration)
     .WriteTo.Console()
-    .WriteTo.File("Logs/identity-web-.log", rollingInterval: RollingInterval.Day));
+    .WriteTo.File(
+        Path.Combine(ctx.Configuration["Identity:LogsPath"] is { Length: > 0 } logsPath ? logsPath : "Logs",
+            "identity-web-.log"),
+        rollingInterval: RollingInterval.Day));
 
 // --- Options ---
 builder.Services.Configure<IdentityWebOptions>(builder.Configuration.GetSection("Identity"));
@@ -32,6 +36,14 @@ builder.Services.Configure<SecurityHeadersOptions>(builder.Configuration.GetSect
 builder.Services.Configure<IdentityWebLinksOptions>(builder.Configuration.GetSection("Identity:Web:Links"));
 var idOpts = builder.Configuration.GetSection("Identity").Get<IdentityWebOptions>()
     ?? throw new InvalidOperationException("Missing 'Identity' configuration section");
+
+// --- DataProtection: the key ring behind the auth cookie and antiforgery tokens ---
+// A key ring that dies with the process (or the container) signs every user out on restart.
+if (!string.IsNullOrWhiteSpace(idOpts.DataProtectionKeysPath))
+{
+    builder.Services.AddDataProtection()
+        .PersistKeysToFileSystem(new DirectoryInfo(idOpts.DataProtectionKeysPath));
+}
 
 // DEV ONLY: when the Identity host presents a self-signed dev cert on localhost (the bundled
 // standalone/Docker default), the BFF's backchannel HttpClients would reject it. This applies an

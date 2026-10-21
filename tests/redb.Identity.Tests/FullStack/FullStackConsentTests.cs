@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Core.Models;
 using redb.Identity.Core.Services;
 using redb.Identity.Tests.Infrastructure;
@@ -129,7 +129,7 @@ public class FullStackConsentTests
 
         var json = await ParseJson(resp);
         json.GetProperty("success").GetBoolean().Should().BeTrue();
-        json.GetProperty("revoked").GetInt32().Should().BeGreaterOrEqualTo(1);
+        json.GetProperty("revoked").GetInt32().Should().BeGreaterThanOrEqualTo(1);
 
         // Verify revoked in its own scope
         await _fx.UseRedbAsync(async redb =>

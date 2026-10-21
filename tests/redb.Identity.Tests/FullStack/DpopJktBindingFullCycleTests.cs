@@ -2,7 +2,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using redb.Identity.Tests.Infrastructure;
@@ -68,7 +68,7 @@ public class DpopJktBindingFullCycleTests
         req.Headers.Add("DPoP", proof);
 
         var resp = await _fx.Http.SendAsync(req);
-        ((int)resp.StatusCode).Should().BeGreaterOrEqualTo(400,
+        ((int)resp.StatusCode).Should().BeGreaterThanOrEqualTo(400,
             "RFC 9449 §10.1: token must be refused when proof's jkt differs from the bound dpop_jkt");
         var body = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;
         body.GetProperty("error").GetString().Should().Be("invalid_grant");
@@ -84,7 +84,7 @@ public class DpopJktBindingFullCycleTests
         using var req = BuildTokenRequest(code, verifier); // no DPoP header
 
         var resp = await _fx.Http.SendAsync(req);
-        ((int)resp.StatusCode).Should().BeGreaterOrEqualTo(400);
+        ((int)resp.StatusCode).Should().BeGreaterThanOrEqualTo(400);
         var body = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;
         body.GetProperty("error").GetString().Should().Be("invalid_grant");
     }
@@ -110,7 +110,7 @@ public class DpopJktBindingFullCycleTests
         }
         else
         {
-            ((int)resp.StatusCode).Should().BeGreaterOrEqualTo(400);
+            ((int)resp.StatusCode).Should().BeGreaterThanOrEqualTo(400);
         }
     }
 

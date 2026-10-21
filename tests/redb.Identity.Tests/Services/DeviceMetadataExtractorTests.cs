@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using MyCSharp.HttpUserAgentParser;
 using MyCSharp.HttpUserAgentParser.Providers;
 using redb.Identity.Core.Services;

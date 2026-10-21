@@ -18,7 +18,12 @@ public class TokenProps
     /// <summary>"valid", "revoked", "redeemed", or "inactive".</summary>
     public string? Status { get; set; }
 
-    /// <summary>"access_token", "refresh_token", "id_token", or "authorization_code".</summary>
+    /// <summary>
+    /// Token type as OpenIddict writes it. From OpenIddict 7 a URI-style identifier
+    /// (<c>urn:ietf:params:oauth:token-type:refresh_token</c>, <c>urn:openiddict:params:oauth:token-type:authorization_code</c>, ...);
+    /// rows written by OpenIddict 6 keep the short form (<c>refresh_token</c>, <c>authorization_code</c>, ...),
+    /// which <c>OpenIddictTokenManager.GetTypeAsync</c> maps to the URI form on read.
+    /// </summary>
     public string? Type { get; set; }
 
     /// <summary>

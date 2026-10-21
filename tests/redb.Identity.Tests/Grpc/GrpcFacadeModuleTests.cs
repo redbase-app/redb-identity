@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
-using FluentAssertions;
+using AwesomeAssertions;
 using Grpc.Core;
 using Google.Protobuf;
 using Grpc.Net.Client;

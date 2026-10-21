@@ -1,6 +1,6 @@
 using System.Text;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Contracts.Routes;
 using redb.Identity.Tests.Infrastructure;
 using Xunit;
@@ -56,7 +56,7 @@ public class ProductionClientCredentialsTests
 
         // Parse JWT manually (no System.IdentityModel.Tokens.Jwt dependency)
         var parts = accessToken.Split('.');
-        parts.Length.Should().BeGreaterOrEqualTo(3, "access_token should be a JWT with header.payload.signature");
+        parts.Length.Should().BeGreaterThanOrEqualTo(3, "access_token should be a JWT with header.payload.signature");
 
         var payloadJson = Encoding.UTF8.GetString(
             Convert.FromBase64String(PadBase64(parts[1])));

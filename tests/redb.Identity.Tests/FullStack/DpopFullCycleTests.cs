@@ -3,7 +3,7 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using redb.Identity.Tests.Infrastructure;
@@ -67,6 +67,31 @@ public class DpopFullCycleTests
     }
 
     [Fact]
+    public async Task Userinfo_Accepts_A_DPoP_Bound_Access_Token()
+    {
+        // OpenIddict 7 checks cnf on every token it validates and throws on a DPoP jkt (it knows only mTLS),
+        // which surfaced as server_error on /connect/userinfo.
+        using var ec = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var tokenUrl = $"{_fx.BaseUrl.TrimEnd('/')}/connect/token";
+        using var tokenReq = BuildPasswordTokenRequest();
+        tokenReq.Headers.Add("DPoP", BuildDpopProof(ec, "POST", tokenUrl));
+        var tokenResp = await _fx.Http.SendAsync(tokenReq);
+        var tokenBody = await tokenResp.Content.ReadAsStringAsync();
+        tokenResp.StatusCode.Should().Be(HttpStatusCode.OK, tokenBody);
+        var accessToken = JsonDocument.Parse(tokenBody).RootElement.GetProperty("access_token").GetString()!;
+
+        var userinfoUrl = $"{_fx.BaseUrl.TrimEnd('/')}/connect/userinfo";
+        using var req = new HttpRequestMessage(HttpMethod.Get, "/connect/userinfo");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        req.Headers.Add("DPoP", BuildDpopProof(ec, "GET", userinfoUrl));
+
+        var resp = await _fx.Http.SendAsync(req);
+        var body = await resp.Content.ReadAsStringAsync();
+        resp.StatusCode.Should().Be(HttpStatusCode.OK, "a DPoP-bound access token must be accepted by userinfo: {0}", body);
+        JsonDocument.Parse(body).RootElement.TryGetProperty("sub", out _).Should().BeTrue();
+    }
+
+    [Fact]
     public async Task Token_With_Replayed_DPoP_Proof_Is_Rejected()
     {
         using var ec = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -81,7 +106,7 @@ public class DpopFullCycleTests
         using var req2 = BuildPasswordTokenRequest();
         req2.Headers.Add("DPoP", proof);
         var second = await _fx.Http.SendAsync(req2);
-        ((int)second.StatusCode).Should().BeGreaterOrEqualTo(400,
+        ((int)second.StatusCode).Should().BeGreaterThanOrEqualTo(400,
             "RFC 9449 §11.1: replayed DPoP proof must be rejected");
         var body = JsonDocument.Parse(await second.Content.ReadAsStringAsync()).RootElement;
         body.GetProperty("error").GetString().Should().Be("invalid_dpop_proof");
@@ -111,7 +136,7 @@ public class DpopFullCycleTests
         using var req = BuildPasswordTokenRequest();
         req.Headers.Add("DPoP", proof);
         var resp = await _fx.Http.SendAsync(req);
-        ((int)resp.StatusCode).Should().BeGreaterOrEqualTo(400);
+        ((int)resp.StatusCode).Should().BeGreaterThanOrEqualTo(400);
         var body = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;
         body.GetProperty("error").GetString().Should().Be("invalid_dpop_proof");
     }
@@ -158,7 +183,7 @@ public class DpopFullCycleTests
         req.Headers.Add("DPoP", proof);
 
         var resp = await _fx.Http.SendAsync(req);
-        ((int)resp.StatusCode).Should().BeGreaterOrEqualTo(400);
+        ((int)resp.StatusCode).Should().BeGreaterThanOrEqualTo(400);
         var body = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;
         body.GetProperty("error").GetString().Should().Be("invalid_dpop_proof");
     }

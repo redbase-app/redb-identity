@@ -1,5 +1,5 @@
 using System.Reflection;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Management.Controllers;
 using redb.Route.Controllers.Attributes;
 using Xunit;

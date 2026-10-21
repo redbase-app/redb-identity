@@ -98,7 +98,7 @@ internal sealed class HandleAuthorizationRequestHandler : IOpenIddictServerHandl
             if (!maxAge.HasValue)
             {
                 var rawParam = context.Request.GetParameter("max_age");
-                var raw = rawParam.HasValue ? rawParam.Value.Value?.ToString() : null;
+                var raw = rawParam?.ToString();
                 if (long.TryParse(raw, System.Globalization.NumberStyles.Integer,
                                   System.Globalization.CultureInfo.InvariantCulture, out var rawMaxAge)
                     && rawMaxAge >= 0)

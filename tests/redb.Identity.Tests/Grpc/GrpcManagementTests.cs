@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using redb.Identity.Core.Models;
-using FluentAssertions;
+using AwesomeAssertions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;

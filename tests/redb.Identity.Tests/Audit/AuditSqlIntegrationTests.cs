@@ -1,5 +1,5 @@
 using System.Data.Common;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -278,7 +278,7 @@ DELETE FROM identity_audit_log;";
         await Task.Delay(500);
 
         var rows = await QueryAuditRows("ScopeCreated");
-        rows.Should().HaveCountGreaterOrEqualTo(1);
+        rows.Should().HaveCountGreaterThanOrEqualTo(1);
         rows.Last()["event_type"].Should().Be("ScopeCreated");
         rows.Last()["event_id"].Should().NotBeNull();
     }
@@ -322,7 +322,7 @@ DELETE FROM identity_audit_log;";
         await Task.Delay(500);
 
         var rows = await QueryAuditRows("ScopeCreated");
-        rows.Should().HaveCountGreaterOrEqualTo(1);
+        rows.Should().HaveCountGreaterThanOrEqualTo(1);
 
         var row = rows.Last();
         row["event_id"].Should().NotBeNull();

@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Xunit;
 using OpenIddict.Abstractions;
 using redb.Core.Models.Entities;
@@ -181,7 +181,7 @@ public class TokenStoreTests
         await _store.CreateAsync(token, CancellationToken.None);
 
         var count = await _store.RevokeByApplicationIdAsync(app.id.ToString(), CancellationToken.None);
-        count.Should().BeGreaterOrEqualTo(1);
+        count.Should().BeGreaterThanOrEqualTo(1);
 
         var found = await _store.FindByIdAsync(token.id.ToString(), CancellationToken.None);
         found!.Props.Status.Should().Be(OpenIddictConstants.Statuses.Revoked);
@@ -196,7 +196,7 @@ public class TokenStoreTests
         await _store.CreateAsync(token, CancellationToken.None);
 
         var count = await _store.RevokeByAuthorizationIdAsync(auth.id.ToString(), CancellationToken.None);
-        count.Should().BeGreaterOrEqualTo(1);
+        count.Should().BeGreaterThanOrEqualTo(1);
 
         var found = await _store.FindByIdAsync(token.id.ToString(), CancellationToken.None);
         found!.Props.Status.Should().Be(OpenIddictConstants.Statuses.Revoked);
@@ -212,7 +212,7 @@ public class TokenStoreTests
         await _store.CreateAsync(token, CancellationToken.None);
 
         var count = await _store.RevokeBySubjectAsync(subjectGuid.ToString("D"), CancellationToken.None);
-        count.Should().BeGreaterOrEqualTo(1);
+        count.Should().BeGreaterThanOrEqualTo(1);
 
         var found = await _store.FindByIdAsync(token.id.ToString(), CancellationToken.None);
         found!.Props.Status.Should().Be(OpenIddictConstants.Statuses.Revoked);
@@ -313,7 +313,7 @@ public class TokenStoreTests
         var threshold = DateTimeOffset.UtcNow.AddMinutes(1);
         var pruned = await _store.PruneAsync(threshold, ct);
 
-        pruned.Should().BeGreaterOrEqualTo(1);
+        pruned.Should().BeGreaterThanOrEqualTo(1);
         (await _store.FindByIdAsync(revoked.id.ToString(), ct)).Should().BeNull();
     }
 
@@ -335,7 +335,7 @@ public class TokenStoreTests
         var threshold = DateTimeOffset.UtcNow.AddMinutes(1);
         var pruned = await _store.PruneAsync(threshold, ct);
 
-        pruned.Should().BeGreaterOrEqualTo(1);
+        pruned.Should().BeGreaterThanOrEqualTo(1);
         (await _store.FindByIdAsync(token.id.ToString(), ct)).Should().BeNull();
     }
 
@@ -357,7 +357,7 @@ public class TokenStoreTests
         var threshold = DateTimeOffset.UtcNow.AddMinutes(1);
         var pruned = await _store.PruneAsync(threshold, ct);
 
-        pruned.Should().BeGreaterOrEqualTo(1);
+        pruned.Should().BeGreaterThanOrEqualTo(1);
         (await _store.FindByIdAsync(token.id.ToString(), ct)).Should().BeNull();
     }
 

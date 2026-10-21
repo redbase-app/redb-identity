@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using redb.Identity.Core.Services;
 using redb.Identity.Ldap;

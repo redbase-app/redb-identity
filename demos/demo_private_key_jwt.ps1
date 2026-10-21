@@ -90,7 +90,10 @@ $registrationResponse = Measure-Step "1. DCR /connect/register (private_key_jwt 
 }
 $clientId = $registrationResponse.client_id
 
-# ── Helper: build + sign RS256 JWT client assertion (RFC 7523 §3) ──────────────
+# ── Helper: build + sign RS256 JWT client assertion (RFC 7523 §3, draft-ietf-oauth-rfc7523bis) ──
+# The audience is the issuer and the type is client-authentication+jwt, for every endpoint: the
+# server rejects an assertion aimed at an endpoint URL or typed plain JWT (since OpenIddict 7).
+$issuerAud = (Invoke-RestMethod -Uri "$BASE/.well-known/openid-configuration").issuer
 function New-ClientAssertion {
     param(
         [string]$ClientId,
@@ -98,7 +101,7 @@ function New-ClientAssertion {
         [int]$Lifetime = 60
     )
     $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-    $header = [ordered]@{ alg = "RS256"; typ = "JWT"; kid = $kid }
+    $header = [ordered]@{ alg = "RS256"; typ = "client-authentication+jwt"; kid = $kid }
     $payload = [ordered]@{
         iss = $ClientId
         sub = $ClientId
@@ -122,7 +125,7 @@ function New-ClientAssertion {
 # ── 2. POST /connect/token (client_credentials via JWT assertion) ─────────────
 $tokenAud  = "$BASE/connect/token"
 $accessTok = Measure-Step "2. /connect/token client_credentials + JWT assertion" {
-    $assertion = New-ClientAssertion -ClientId $clientId -Audience $tokenAud
+    $assertion = New-ClientAssertion -ClientId $clientId -Audience $issuerAud
     $form = @{
         grant_type            = "client_credentials"
         client_id             = $clientId
@@ -142,7 +145,7 @@ $accessTok = Measure-Step "2. /connect/token client_credentials + JWT assertion"
 # ── 3. POST /connect/introspect (also auth'd via private_key_jwt) ──────────────
 Measure-Step "3. /connect/introspect with JWT assertion" {
     $introAud  = "$BASE/connect/introspect"
-    $assertion = New-ClientAssertion -ClientId $clientId -Audience $introAud
+    $assertion = New-ClientAssertion -ClientId $clientId -Audience $issuerAud
     $form = @{
         token                 = $accessTok
         token_type_hint       = "access_token"
@@ -169,7 +172,7 @@ Measure-Step "3. /connect/introspect with JWT assertion" {
 
 # ── 4. Negative: tampered assertion → invalid_client ──────────────────────────
 Measure-Step "4. NEGATIVE tampered signature → invalid_client" {
-    $assertion = New-ClientAssertion -ClientId $clientId -Audience $tokenAud
+    $assertion = New-ClientAssertion -ClientId $clientId -Audience $issuerAud
     # Flip the last char of the signature (still valid base64url shape).
     $tampered  = $assertion.Substring(0, $assertion.Length - 1) +
                  ([char]([byte]([char]$assertion[-1]) -bxor 0x01))

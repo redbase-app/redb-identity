@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using OpenIddict.Abstractions;
 using redb.Core.Models.Entities;
 using redb.Identity.Core.Models;

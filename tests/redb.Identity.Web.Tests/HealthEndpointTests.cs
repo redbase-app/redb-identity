@@ -1,6 +1,6 @@
 using System.Net;
 using System.Net.Http;
-using FluentAssertions;
+using AwesomeAssertions;
 using Xunit;
 
 namespace redb.Identity.Web.Tests;

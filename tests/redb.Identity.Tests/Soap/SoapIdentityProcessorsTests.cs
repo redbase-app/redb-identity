@@ -1,5 +1,5 @@
 using System.Xml.Linq;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Contracts.Routes;
 using redb.Identity.Soap;
 using redb.Identity.Soap.Processors;

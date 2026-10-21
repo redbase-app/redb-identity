@@ -341,7 +341,8 @@ redb.Identity/
 │   └── pack-tpkg.ps1                   Build + pack both .tpkg into Tsak Worker/Libs
 ├── doc/                                Architecture notes, RFC mappings, sprint plans (internal — not published)
 ├── README.md                           This file
-└── Directory.Build.props
+├── Directory.Build.props
+└── Directory.Packages.props            Central package versions (projects name no version)
 ```
 
 ---

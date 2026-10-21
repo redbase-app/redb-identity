@@ -1,5 +1,5 @@
 using System.Xml.Linq;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Tests.Infrastructure;
 using Xunit;
 

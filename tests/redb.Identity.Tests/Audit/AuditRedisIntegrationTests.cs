@@ -1,5 +1,5 @@
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -145,7 +145,7 @@ public class AuditRedisIntegrationTests : IAsyncLifetime
 
         var db = _redis.GetDatabase();
         var length = await db.ListLengthAsync(RedisKey);
-        length.Should().BeGreaterOrEqualTo(1);
+        length.Should().BeGreaterThanOrEqualTo(1);
 
         var value = await db.ListGetByIndexAsync(RedisKey, 0);
         value.HasValue.Should().BeTrue();

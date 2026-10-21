@@ -1,5 +1,5 @@
 using System.Net;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Client.Tests.TestKit;
 using redb.Identity.Contracts.Common;
 using redb.Identity.Contracts.Users;

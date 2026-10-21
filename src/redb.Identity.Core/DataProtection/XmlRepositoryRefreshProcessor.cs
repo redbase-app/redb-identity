@@ -1,5 +1,3 @@
-using System.Collections.Immutable;
-using System.Xml.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using redb.Core;
@@ -35,24 +33,10 @@ internal sealed class XmlRepositoryRefreshProcessor : IProcessor
             .GetRequiredService<ILoggerFactory>()
             .CreateLogger<XmlRepositoryRefreshProcessor>();
 
-        // Bounded read: most recent N keys. DataProtection key-ring rarely exceeds a
-        // handful of active keys; cap protects against unbounded growth.
-        var keys = await redb.Query<DataProtectionKeyProps>()
-            .OrderByDescendingRedb(o => o.DateCreate)
-            .Take(100)
-            .ToListAsync()
-            .ConfigureAwait(false);
-
-        var elements = ImmutableArray.CreateBuilder<XElement>(keys.Count);
-        foreach (var key in keys)
-        {
-            if (!string.IsNullOrEmpty(key.Props.XmlContent))
-                elements.Add(XElement.Parse(key.Props.XmlContent));
-        }
-        repo.ReplaceSnapshot(elements.ToImmutable());
+        var count = await repo.ReloadAsync(redb, ct).ConfigureAwait(false);
 
         logger.LogDebug(
             "redb.Identity: DataProtection key-ring snapshot refreshed ({Count} keys)",
-            elements.Count);
+            count);
     }
 }

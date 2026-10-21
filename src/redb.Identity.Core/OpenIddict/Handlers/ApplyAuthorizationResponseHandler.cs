@@ -126,7 +126,8 @@ internal sealed class ApplyAuthorizationResponseHandler
 
         foreach (var p in response.GetParameters())
         {
-            var value = p.Value.Value?.ToString();
+            if (p.Value.GetRawValue() is null) continue;
+            var value = p.Value.ToString();
             if (value is null) continue;
             sb.Append("<input type=\"hidden\" name=\"");
             sb.Append(WebUtility.HtmlEncode(p.Key));
@@ -151,7 +152,8 @@ internal sealed class ApplyAuthorizationResponseHandler
         var first = true;
         foreach (var p in response.GetParameters())
         {
-            var value = p.Value.Value?.ToString();
+            if (p.Value.GetRawValue() is null) continue;
+            var value = p.Value.ToString();
             if (value is null) continue;
             if (!first) sb.Append('&');
             first = false;

@@ -1,6 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Tests.Infrastructure;
 using Xunit;
 

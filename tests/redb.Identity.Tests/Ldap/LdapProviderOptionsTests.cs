@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Ldap;
 using Xunit;
 

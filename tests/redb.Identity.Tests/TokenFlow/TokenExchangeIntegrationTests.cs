@@ -1,6 +1,6 @@
 using System.Text;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Contracts.Routes;
 using redb.Identity.Tests.Infrastructure;
 using Xunit;

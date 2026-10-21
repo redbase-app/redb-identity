@@ -1,5 +1,5 @@
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Contracts.Configuration;
 using redb.Route.Abstractions;
 using redb.Route.Core;

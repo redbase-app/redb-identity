@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using Xunit;
 using redb.Core.Models.Entities;
 using redb.Identity.Core.Models;
@@ -191,7 +191,7 @@ public class ApplicationStoreTests
         await foreach (var r in _store.ListAsync(2, 0, CancellationToken.None))
             page.Add(r);
 
-        page.Should().HaveCountLessOrEqualTo(2);
+        page.Should().HaveCountLessThanOrEqualTo(2);
     }
 
     [Fact]

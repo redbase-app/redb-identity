@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Fido2NetLib;
 using Fido2NetLib.Objects;
 using AssertionOptions = Fido2NetLib.AssertionOptions;

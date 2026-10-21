@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Confluent.Kafka;
 using Confluent.Kafka.Admin;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -195,7 +195,7 @@ public class AuditKafkaIntegrationTests : IAsyncLifetime
         exchange.Exception.Should().BeNull("Events route should not throw: {0}", exchange.Exception?.ToString());
 
         var messages = await ConsumeMessages(1);
-        messages.Should().HaveCountGreaterOrEqualTo(1);
+        messages.Should().HaveCountGreaterThanOrEqualTo(1);
 
         var evt = JsonSerializer.Deserialize<JsonElement>(messages[0]);
         evt.GetProperty("eventType").GetString().Should().Be("TestKafkaDirect");
@@ -246,7 +246,7 @@ public class AuditKafkaIntegrationTests : IAsyncLifetime
         exchange.Exception.Should().BeNull();
 
         var messages = await ConsumeMessages(1);
-        messages.Should().HaveCountGreaterOrEqualTo(1);
+        messages.Should().HaveCountGreaterThanOrEqualTo(1);
 
         var evt = JsonSerializer.Deserialize<JsonElement>(messages[0]);
         evt.GetProperty("eventType").GetString().Should().Be("TestKafkaFields");

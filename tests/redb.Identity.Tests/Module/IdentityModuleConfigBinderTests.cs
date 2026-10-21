@@ -1,5 +1,5 @@
 using System.Net;
-using FluentAssertions;
+using AwesomeAssertions;
 using NSubstitute;
 using redb.Identity.Contracts.Configuration;
 using redb.Identity.Core.Configuration;

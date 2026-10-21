@@ -267,7 +267,8 @@ public sealed class RedbRouteOpenIddictServerHandler
         var first = true;
         foreach (var p in response.GetParameters())
         {
-            var value = p.Value.Value?.ToString();
+            if (p.Value.GetRawValue() is null) continue;
+            var value = p.Value.ToString();
             if (value is null) continue;
             if (!first) sb.Append('&');
             first = false;

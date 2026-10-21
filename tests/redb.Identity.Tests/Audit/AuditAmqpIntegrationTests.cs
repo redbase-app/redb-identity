@@ -1,6 +1,6 @@
 using System.Text;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -177,7 +177,7 @@ public class AuditAmqpIntegrationTests : IAsyncLifetime
         await Task.Delay(500);
 
         var messages = await ReceiveMessages(1);
-        messages.Should().HaveCountGreaterOrEqualTo(1);
+        messages.Should().HaveCountGreaterThanOrEqualTo(1);
 
         var evt = JsonSerializer.Deserialize<JsonElement>(messages[0]);
         evt.GetProperty("eventType").GetString().Should().Be("TestAmqpDirect");
@@ -232,7 +232,7 @@ public class AuditAmqpIntegrationTests : IAsyncLifetime
         await Task.Delay(500);
 
         var messages = await ReceiveMessages(1);
-        messages.Should().HaveCountGreaterOrEqualTo(1);
+        messages.Should().HaveCountGreaterThanOrEqualTo(1);
 
         var evt = JsonSerializer.Deserialize<JsonElement>(messages[0]);
         evt.GetProperty("eventType").GetString().Should().Be("TestAmqpFields");

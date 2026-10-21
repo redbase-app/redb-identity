@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Core.Models;
 using redb.Identity.Core.Services;
 using redb.Identity.Tests.Infrastructure;
@@ -133,7 +133,7 @@ public class GroupServiceTests
 
         var children = await svc.GetChildGroupsAsync(parent.id);
 
-        children.Should().HaveCountGreaterOrEqualTo(2);
+        children.Should().HaveCountGreaterThanOrEqualTo(2);
         children.Should().Contain(c => c.name == "Child1");
         children.Should().Contain(c => c.name == "Child2");
     }
@@ -179,7 +179,7 @@ public class GroupServiceTests
 
         var path = await svc.GetPathToRootAsync(team.id);
 
-        path.Should().HaveCountGreaterOrEqualTo(2);
+        path.Should().HaveCountGreaterThanOrEqualTo(2);
         path.Select(p => p.id).Should().Contain(root.id);
     }
 
@@ -295,7 +295,7 @@ public class GroupServiceTests
 
         var groups = await svc.GetUserGroupsAsync(userId);
 
-        groups.Should().HaveCountGreaterOrEqualTo(2);
+        groups.Should().HaveCountGreaterThanOrEqualTo(2);
         groups.Should().Contain(g => g.GroupId == group1.id && g.Role == "member");
         groups.Should().Contain(g => g.GroupId == group2.id && g.Role == "admin");
     }

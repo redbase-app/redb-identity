@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.AspNetCore.DataProtection;
 using OtpNet;
 using redb.Identity.Core.Models;

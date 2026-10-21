@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Contracts.Routes;
 using redb.Identity.Tests.Infrastructure;
 using System.Security.Cryptography;
@@ -93,7 +93,7 @@ public class AddressAndCustomClaimsTests
 
         // Decode JWT payload (access_token is a JWS)
         var parts = accessToken.Split('.');
-        parts.Length.Should().BeGreaterOrEqualTo(3, "access_token should be a JWT");
+        parts.Length.Should().BeGreaterThanOrEqualTo(3, "access_token should be a JWT");
 
         var payload = parts[1];
         // Fix base64url padding
@@ -118,7 +118,7 @@ public class AddressAndCustomClaimsTests
         accessToken.Should().NotBeNullOrEmpty();
 
         var parts = accessToken.Split('.');
-        parts.Length.Should().BeGreaterOrEqualTo(3);
+        parts.Length.Should().BeGreaterThanOrEqualTo(3);
 
         var payload = parts[1].Replace('-', '+').Replace('_', '/');
         switch (payload.Length % 4)

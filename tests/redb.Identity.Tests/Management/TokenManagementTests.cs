@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using NSubstitute;
 using redb.Core;
 using redb.Core.Models.Entities;

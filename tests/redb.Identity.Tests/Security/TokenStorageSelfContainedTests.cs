@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
+using OpenIddict.Abstractions;
 using redb.Identity.Core.Models;
 using redb.Identity.Tests.Infrastructure;
 using Xunit;
@@ -62,11 +63,11 @@ public sealed class TokenStorageSelfContainedTests
 
             var refreshRows = await redb.Query<TokenProps>()
                 .WhereRedb(o => o.ValueGuid == subject)
-                .Where(p => p.Type == "refresh_token")
+                .Where(p => p.Type == OpenIddictConstants.TokenTypeIdentifiers.RefreshToken)
                 .ToListAsync();
             var accessRows = await redb.Query<TokenProps>()
                 .WhereRedb(o => o.ValueGuid == subject)
-                .Where(p => p.Type == "access_token")
+                .Where(p => p.Type == OpenIddictConstants.TokenTypeIdentifiers.AccessToken)
                 .ToListAsync();
             refreshRows.Should().NotBeEmpty("OpenIddict keeps an entry per refresh token for redemption and reuse detection");
             accessRows.Should().NotBeEmpty("OpenIddict keeps an entry per access token for revocation");

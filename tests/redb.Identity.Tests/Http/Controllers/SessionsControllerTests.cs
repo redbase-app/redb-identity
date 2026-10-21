@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using NSubstitute;
 using redb.Identity.Contracts.Routes;
 using redb.Identity.Management.Controllers;using redb.Route.Abstractions;

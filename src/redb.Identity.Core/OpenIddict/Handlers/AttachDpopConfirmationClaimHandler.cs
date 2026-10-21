@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text.Json;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
@@ -7,45 +8,45 @@ namespace redb.Identity.Core.OpenIddict.Handlers;
 
 /// <summary>
 /// Z4 (RFC 9449 §6.1 / RFC 7800): when a DPoP proof was validated for the current
-/// /token request, attaches the JWK thumbprint to the principal as the <c>cnf</c>
-/// claim so the issued access token carries the proof-of-possession binding.
-/// Hooks into <see cref="HandleTokenRequestContext"/> AFTER our own
-/// <see cref="HandleTokenRequestHandler"/> (which sets <c>context.Principal</c>)
-/// and BEFORE OpenIddict dispatches SignIn to mint the access token.
+/// /token request, attaches the JWK thumbprint as the <c>cnf</c> claim of the access token
+/// so it carries the proof-of-possession binding.
+/// <para>
+/// Runs on <see cref="ProcessSignInContext"/> after OpenIddict has prepared the per-token
+/// principals and before it generates the tokens. OpenIddict 7 strips <c>cnf</c> from the
+/// sign-in principal when it clones the access token principal (a confirmation must never be
+/// inherited from a parent token), so the claim is set on <c>AccessTokenPrincipal</c> itself,
+/// and on <c>IssuedTokenPrincipal</c> when token exchange issues an access token.
+/// </para>
 /// </summary>
 internal sealed class AttachDpopConfirmationClaimHandler
-    : IOpenIddictServerHandler<HandleTokenRequestContext>
+    : IOpenIddictServerHandler<ProcessSignInContext>
 {
     public static OpenIddictServerHandlerDescriptor Descriptor { get; }
-        = OpenIddictServerHandlerDescriptor.CreateBuilder<HandleTokenRequestContext>()
+        = OpenIddictServerHandlerDescriptor.CreateBuilder<ProcessSignInContext>()
             .UseSingletonHandler<AttachDpopConfirmationClaimHandler>()
-            // Run AFTER HandleTokenRequestHandler (which sets context.Principal at
-            // OpenIddictServerHandlers.Exchange.AttachPrincipal.Descriptor.Order + 100)
-            // but BEFORE the request leaves HandleTokenRequest.
-            .SetOrder(OpenIddictServerHandlers.Exchange.AttachPrincipal.Descriptor.Order + 200)
+            // After the last Prepare*Principal handler, long before GenerateAccessToken (100_000).
+            .SetOrder(OpenIddictServerHandlers.PrepareUserCodePrincipal.Descriptor.Order + 500)
+            .SetType(OpenIddictServerHandlerType.Custom)
             .Build();
 
-    public ValueTask HandleAsync(HandleTokenRequestContext context)
+    public ValueTask HandleAsync(ProcessSignInContext context)
     {
+        ArgumentNullException.ThrowIfNull(context);
+
         if (!context.Transaction.Properties.TryGetValue("dpop:jkt", out var jktObj) ||
             jktObj is not string jkt || string.IsNullOrEmpty(jkt))
         {
             return default;
         }
 
-        if (context.Principal is null)
-            return default;
-
         var cnf = JsonSerializer.SerializeToElement(new { jkt });
-        context.Principal.SetClaim("cnf", cnf);
 
-        // Required for OpenIddict 6: claims without an explicit destination are
-        // stripped from issued tokens. Send cnf to the access token only.
-        var cnfClaim = context.Principal.FindFirst("cnf");
-        if (cnfClaim is not null)
-        {
-            cnfClaim.SetDestinations(OpenIddictConstants.Destinations.AccessToken);
-        }
+        if (context.AccessTokenPrincipal is ClaimsPrincipal access)
+            access.SetClaim(OpenIddictConstants.Claims.Confirmation, cnf);
+
+        if (context.IssuedTokenPrincipal is ClaimsPrincipal issued &&
+            context.IssuedTokenType is OpenIddictConstants.TokenTypeIdentifiers.AccessToken)
+            issued.SetClaim(OpenIddictConstants.Claims.Confirmation, cnf);
 
         return default;
     }

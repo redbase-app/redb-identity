@@ -44,8 +44,9 @@ internal sealed class AttachInternalUserIdToIntrospectionResponse
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        // Rejected / active=false paths skip Principal entirely.
-        var principal = context.Principal;
+        // Rejected / active=false paths skip the principal entirely. OpenIddict 7 names it after the
+        // token it came from; the introspected token can be of any type, hence the generic one.
+        var principal = context.GenericTokenPrincipal;
         if (principal is null) return default;
 
         var uid = principal.FindFirst(IdentityPrincipalBuilder.InternalUserIdClaim)?.Value;

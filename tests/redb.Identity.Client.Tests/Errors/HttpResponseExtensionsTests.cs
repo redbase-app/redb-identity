@@ -1,6 +1,6 @@
 using System.Net;
 using System.Text;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Client.Internal;
 using redb.Identity.Client.Tests.TestKit;
 using Xunit;

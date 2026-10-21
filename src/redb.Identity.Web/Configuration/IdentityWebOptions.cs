@@ -30,6 +30,21 @@ public sealed class IdentityWebOptions
 
     /// <summary>W6-0 — polling client config for the revoked-sids cache.</summary>
     public RevokedSidsClientOptions RevokedSids { get; set; } = new();
+
+    /// <summary>
+    /// Directory of the BFF's DataProtection key ring (the keys behind its auth cookie and antiforgery
+    /// tokens). Set it to a persistent location (a container volume) so sessions survive a restart or a
+    /// recreated container. Empty keeps the ASP.NET Core default, the user profile of the process. The BFF
+    /// takes no project reference on the server, so it cannot share the redb-backed key ring of the
+    /// Identity host; the directory is its own.
+    /// </summary>
+    public string? DataProtectionKeysPath { get; set; }
+
+    /// <summary>
+    /// Directory of the rolling file log (<c>identity-web-YYYYMMDD.log</c>). Relative paths resolve
+    /// against the working directory. Default <c>Logs</c>.
+    /// </summary>
+    public string LogsPath { get; set; } = "Logs";
 }
 
 /// <summary>W6-0 — service-account creds used by <c>RevokedSidsPollHostedService</c>.</summary>

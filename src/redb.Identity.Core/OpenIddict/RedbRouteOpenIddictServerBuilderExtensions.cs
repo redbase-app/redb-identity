@@ -118,10 +118,18 @@ public static class RedbRouteOpenIddictServerBuilderExtensions
         // Z4 P2 (RFC 9449 \u00a710): dpop_jkt binding on /authorize \u2194 enforcement at /token
         BindDpopJktAtAuthorizeHandler.Descriptor,
         EnforceDpopJktBindingHandler.Descriptor,
+        // OpenIddict 7 validates only the mTLS cnf form and throws on a DPoP jkt.
+        DpopConfirmationServerPassThroughHandler.Descriptor,
 
         // Z7 (RFC 9101): JAR \u2014 replaces OpenIddict's built-in rejection of 'request' /
         // 'request_uri' (removed in RedbRouteOpenIddictServerConfiguration).
         ValidateRequestObjectHandler.Descriptor,
+
+        // RFC 8707: 'resource' must be listed by a scope. Takes the slot of OpenIddict's static
+        // resource check, which AddRedbIdentityServer turns off (DisableResourceValidation).
+        ValidateAuthorizationResourcesHandler.Descriptor,
+        ValidatePushedAuthorizationResourcesHandler.Descriptor,
+        ValidateTokenResourcesHandler.Descriptor,
     ];
 
     /// <summary>

@@ -1061,6 +1061,14 @@ public sealed class DataProtectionOptions
     public Func<IServiceProvider, Microsoft.AspNetCore.DataProtection.XmlEncryption.IXmlEncryptor>? CustomEncryptorFactory { get; set; }
 
     /// <summary>
+    /// A file key ring directory to import into redb at startup, in addition to the ASP.NET Core default
+    /// directory of the process user. Up to 4.3 the key ring was written to the file system instead of
+    /// redb; set this when that ring was kept somewhere else (for example a volume mounted on a custom
+    /// path). Keys already in redb are skipped, so leaving it set is harmless.
+    /// </summary>
+    public string? ImportKeysFromPath { get; set; }
+
+    /// <summary>
     /// True when at least one of the three variants is configured.
     /// </summary>
     public bool HasEncryptorConfigured =>

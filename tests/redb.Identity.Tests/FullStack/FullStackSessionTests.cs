@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Core.Models;
 using redb.Identity.Core.Services;
 using redb.Identity.Tests.Infrastructure;
@@ -137,7 +137,7 @@ public class FullStackSessionTests
 
         var json = await ParseJson(resp);
         json.GetProperty("success").GetBoolean().Should().BeTrue();
-        json.GetProperty("revoked").GetInt32().Should().BeGreaterOrEqualTo(2);
+        json.GetProperty("revoked").GetInt32().Should().BeGreaterThanOrEqualTo(2);
 
         // Verify list is empty
         var listReq = WithAuth(new HttpRequestMessage(HttpMethod.Get,

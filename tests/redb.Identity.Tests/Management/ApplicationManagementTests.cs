@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using NSubstitute;
 using OpenIddict.Abstractions;
 using redb.Core;

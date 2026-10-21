@@ -1,6 +1,6 @@
 using System.Net;
 using System.Net.Http;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using OtpNet;
 using redb.Core;

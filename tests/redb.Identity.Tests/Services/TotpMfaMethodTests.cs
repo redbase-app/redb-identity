@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.AspNetCore.DataProtection;
 using OtpNet;
 using redb.Identity.Core.Models;
@@ -39,7 +39,7 @@ public sealed class TotpMfaMethodTests
 
         result.MethodId.Should().Be("totp");
         result.SecretBase32.Should().NotBeNullOrEmpty();
-        result.SecretBase32!.Length.Should().BeGreaterOrEqualTo(16, "20-byte key → 32 base32 chars");
+        result.SecretBase32!.Length.Should().BeGreaterThanOrEqualTo(16, "20-byte key → 32 base32 chars");
         result.QrUri.Should().StartWith("otpauth://totp/");
         result.QrUri.Should().Contain("MyIssuer");
         result.QrUri.Should().Contain("alice");

@@ -13,7 +13,7 @@
       See doc/PHASE-8-FACADE-ISOLATION-PLAN-RU.md and doc/gRPC/ARCHITECTURE.md.
     -->
     <ProjectReference Include="..\redb.Identity.Contracts\redb.Identity.Contracts.csproj" />
-    <PackageReference Include="redb.Route.Grpc" Version="4.3.0" />
+    <PackageReference Include="redb.Route.Grpc" />
   </ItemGroup>
 
   <ItemGroup>
@@ -34,15 +34,11 @@
       the contract, and the copy that drifts is the one that accepts what the other rejects.
     -->
     <ProjectReference Include="..\redb.Identity.Management\redb.Identity.Management.csproj" />
-    <PackageReference Include="redb.Route.Controllers" Version="4.3.0" />
-    <Protobuf Include="..\redb.Identity.Contracts\Protos\identity.v1.proto"
-              ProtoRoot="..\redb.Identity.Contracts\Protos"
-              GrpcServices="None" />
-    <Protobuf Include="..\redb.Identity.Contracts\Protos\identity.management.v1.proto"
-              ProtoRoot="..\redb.Identity.Contracts\Protos"
-              GrpcServices="None" />
-    <PackageReference Include="Google.Protobuf" Version="3.31.1" />
-    <PackageReference Include="Grpc.Tools" Version="2.76.0" PrivateAssets="all" />
+    <PackageReference Include="redb.Route.Controllers" />
+    <Protobuf Include="..\redb.Identity.Contracts\Protos\identity.v1.proto" ProtoRoot="..\redb.Identity.Contracts\Protos" GrpcServices="None" />
+    <Protobuf Include="..\redb.Identity.Contracts\Protos\identity.management.v1.proto" ProtoRoot="..\redb.Identity.Contracts\Protos" GrpcServices="None" />
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
@@ -60,5 +56,4 @@
   </ItemGroup>
 
 </Project>
-
 

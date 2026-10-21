@@ -1,6 +1,6 @@
 using System.Text;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -264,7 +264,7 @@ public class AuditIbmMqIntegrationTests : IAsyncLifetime
         await Task.Delay(500);
 
         var messages = await ReceiveMessages("TestWmqDirect", 1);
-        messages.Should().HaveCountGreaterOrEqualTo(1,
+        messages.Should().HaveCountGreaterThanOrEqualTo(1,
             "the Events route must publish TestWmqDirect to the audit queue");
 
         var evt = JsonSerializer.Deserialize<JsonElement>(messages[0]);
@@ -321,7 +321,7 @@ public class AuditIbmMqIntegrationTests : IAsyncLifetime
         await Task.Delay(500);
 
         var messages = await ReceiveMessages("TestWmqFields", 1);
-        messages.Should().HaveCountGreaterOrEqualTo(1,
+        messages.Should().HaveCountGreaterThanOrEqualTo(1,
             "the Events route must publish TestWmqFields to the audit queue");
 
         var evt = JsonSerializer.Deserialize<JsonElement>(messages[0]);

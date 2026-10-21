@@ -1,4 +1,6 @@
+using System.Collections.Immutable;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
 using redb.Route.Abstractions;
@@ -110,17 +112,17 @@ internal static class RedbRouteOpenIddictServerHelpers
     /// </summary>
     private static object? NormalizeParameterValue(OpenIddictParameter parameter)
     {
-        var value = parameter.Value;
-
-        if (value is null)
-            return null;
-
-        if (value is JsonElement element)
+        // OpenIddict 7 keeps arrays as ImmutableArray<string?> and complex values as either
+        // JsonElement or JsonNode. Arrays leave as string?[] (the shape the transports had
+        // before 7); a JsonNode goes through the same JsonElement normalisation.
+        return parameter.GetRawValue() switch
         {
-            return NormalizeJsonElement(element);
-        }
-
-        return value;
+            null => null,
+            JsonElement element => NormalizeJsonElement(element),
+            JsonNode node => NormalizeJsonElement(JsonSerializer.SerializeToElement(node)),
+            ImmutableArray<string?> array => array.ToArray(),
+            var value => value
+        };
     }
 
     private static object? NormalizeJsonElement(JsonElement element)

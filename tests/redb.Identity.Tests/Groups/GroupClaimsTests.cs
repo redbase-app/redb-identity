@@ -1,5 +1,5 @@
 using System.Security.Claims;
-using FluentAssertions;
+using AwesomeAssertions;
 using OpenIddict.Abstractions;
 using redb.Core;
 using redb.Identity.Core.Models;

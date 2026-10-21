@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Contracts.Routes;
 using redb.Identity.Tests.Infrastructure;
 using Xunit;
@@ -86,7 +86,7 @@ public class SessionIntegrationTests
         ((bool)revokeResponse["success"]!).Should().BeTrue();
 
         var revoked = Convert.ToInt32(revokeResponse["revoked"]);
-        revoked.Should().BeGreaterOrEqualTo(1);
+        revoked.Should().BeGreaterThanOrEqualTo(1);
         _output.WriteLine($"Revoked {revoked} sessions");
 
         // List should be empty

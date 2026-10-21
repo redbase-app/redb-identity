@@ -1,6 +1,6 @@
 using System.Net.Http.Json;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -196,7 +196,7 @@ public class AuditElasticsearchIntegrationTests : IAsyncLifetime
         result.Should().NotBeNull();
 
         var hits = result!.Value.GetProperty("hits").GetProperty("hits");
-        hits.GetArrayLength().Should().BeGreaterOrEqualTo(1);
+        hits.GetArrayLength().Should().BeGreaterThanOrEqualTo(1);
 
         var source = hits[0].GetProperty("_source");
         source.GetProperty("eventType").GetString().Should().Be("TestEsDirect");
@@ -253,7 +253,7 @@ public class AuditElasticsearchIntegrationTests : IAsyncLifetime
         result.Should().NotBeNull();
 
         var hits = result!.Value.GetProperty("hits").GetProperty("hits");
-        hits.GetArrayLength().Should().BeGreaterOrEqualTo(1);
+        hits.GetArrayLength().Should().BeGreaterThanOrEqualTo(1);
 
         var source = hits[0].GetProperty("_source");
         source.GetProperty("eventType").GetString().Should().Be("TestEsFields");

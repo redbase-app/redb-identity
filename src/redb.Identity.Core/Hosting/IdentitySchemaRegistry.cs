@@ -24,6 +24,8 @@ public static class IdentitySchemaRegistry
         typeof(GroupMemberProps),
         typeof(IdempotencyRecordProps),
         typeof(DataProtectionKeyProps),
+        // 4.4: when the key ring moved from the file system into redb (cutoff of the one-off import).
+        typeof(DataProtectionKeyImportProps),
         typeof(SigningKeyProps),
         typeof(MfaOtpProps),
         typeof(WebAuthnConsumedChallengeProps),

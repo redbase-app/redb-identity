@@ -1,6 +1,6 @@
 using System.Reflection;
 using System.Runtime.ExceptionServices;
-using FluentAssertions;
+using AwesomeAssertions;
 using Grpc.Core;
 using redb.Route.Abstractions;
 using redb.Route.Core;

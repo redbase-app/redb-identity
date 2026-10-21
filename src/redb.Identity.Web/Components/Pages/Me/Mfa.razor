@@ -125,7 +125,7 @@
 
     private static string GenerateQrSvg(string content)
     {
-        // QRCoder 1.6.0 has no SvgQRCodeOptions type; use the (pixelsPerModule, darkHex, lightHex,
+        // QRCoder (1.6 through 1.8) has no SvgQRCodeOptions type; use the (pixelsPerModule, darkHex, lightHex,
         // drawQuietZones, sizingMode, logo) overload directly.
         using var gen = new QRCodeGenerator();
         var data = gen.CreateQrCode(content, QRCodeGenerator.ECCLevel.Q);

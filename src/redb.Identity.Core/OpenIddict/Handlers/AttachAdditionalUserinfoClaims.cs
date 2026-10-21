@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text.Json;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
@@ -23,12 +24,15 @@ internal sealed class AttachAdditionalUserinfoClaims
 
     public async ValueTask HandleAsync(HandleUserInfoRequestContext context)
     {
-        if (context.Principal is null)
+        // OpenIddict 7 names the principal after the token it came from: on the userinfo
+        // endpoint that is the access token.
+        var principal = context.AccessTokenPrincipal;
+        if (principal is null)
             return;
 
         // The full OIDC Core §5.1 `profile` claim set. The suite (oidcc-scope-profile /
         // oidcc-scope-all) diffs userinfo against exactly this list, so emit every one we hold.
-        if (context.Principal.HasScope(Scopes.Profile))
+        if (principal.HasScope(Scopes.Profile))
         {
             foreach (var type in new[]
                      {
@@ -38,36 +42,36 @@ internal sealed class AttachAdditionalUserinfoClaims
                          Claims.Zoneinfo, Claims.Locale
                      })
             {
-                var value = context.Principal.GetClaim(type);
+                var value = principal.GetClaim(type);
                 if (!string.IsNullOrEmpty(value))
                     context.Claims[type] = value;
             }
 
             // updated_at is a JSON NUMBER (seconds since the epoch), not a string — emit it typed,
             // otherwise it would go out quoted via the generic custom-claim copy below.
-            var updatedAt = context.Principal.GetClaim(Claims.UpdatedAt);
+            var updatedAt = principal.GetClaim(Claims.UpdatedAt);
             if (!string.IsNullOrEmpty(updatedAt) && long.TryParse(updatedAt, out var epoch))
                 context.Claims[Claims.UpdatedAt] = epoch;
         }
 
-        if (context.Principal.HasScope(Scopes.Email))
+        if (principal.HasScope(Scopes.Email))
         {
-            var emailVerified = context.Principal.GetClaim(Claims.EmailVerified);
+            var emailVerified = principal.GetClaim(Claims.EmailVerified);
             if (!string.IsNullOrEmpty(emailVerified) && bool.TryParse(emailVerified, out var ev))
                 context.EmailVerified = ev;
         }
 
-        if (context.Principal.HasScope(Scopes.Phone))
+        if (principal.HasScope(Scopes.Phone))
         {
-            var phoneVerified = context.Principal.GetClaim(Claims.PhoneNumberVerified);
+            var phoneVerified = principal.GetClaim(Claims.PhoneNumberVerified);
             if (!string.IsNullOrEmpty(phoneVerified) && bool.TryParse(phoneVerified, out var pv))
                 context.PhoneNumberVerified = pv;
         }
 
         // Address scope: emit structured JSON from the claim stored by IdentityPrincipalBuilder
-        if (context.Principal.HasScope(Scopes.Address))
+        if (principal.HasScope(Scopes.Address))
         {
-            var addressJson = context.Principal.GetClaim(Claims.Address);
+            var addressJson = principal.GetClaim(Claims.Address);
             if (!string.IsNullOrEmpty(addressJson))
             {
                 var addressObj = JsonSerializer.Deserialize<JsonElement>(addressJson);
@@ -80,14 +84,14 @@ internal sealed class AttachAdditionalUserinfoClaims
         // else: an RP that asked for `name` with scope=openid gets `name` here, while an RP that
         // asked for nothing still gets no profile data, exactly as before. The scope blocks above
         // may already have emitted some of these — hence TryAdd semantics, not overwrite.
-        var requested = context.Principal.GetClaim(IdentityPrincipalBuilder.RequestedUserInfoClaims);
+        var requested = principal.GetClaim(IdentityPrincipalBuilder.RequestedUserInfoClaims);
         if (!string.IsNullOrEmpty(requested))
         {
             foreach (var type in requested.Split(' ', StringSplitOptions.RemoveEmptyEntries))
             {
                 if (context.Claims.ContainsKey(type)) continue;
 
-                var value = context.Principal.GetClaim(type);
+                var value = principal.GetClaim(type);
                 if (string.IsNullOrEmpty(value)) continue;
 
                 // Same JSON typing rules as the scope path (§5.1): numbers stay numbers, booleans
@@ -116,7 +120,7 @@ internal sealed class AttachAdditionalUserinfoClaims
         // So: skip anything already emitted above, anything OpenIddict-internal (oi_ prefix), and
         // the token/protocol claims. What's left is exactly what this handler was meant for — the
         // RP's own custom claims (e.g. redb:user_id, tenant, department).
-        if (context.Principal.Identity is System.Security.Claims.ClaimsIdentity identity)
+        if (principal.Identity is System.Security.Claims.ClaimsIdentity identity)
         {
             var alreadyEmitted = new HashSet<string>(new[]
             {
@@ -158,22 +162,22 @@ internal sealed class AttachAdditionalUserinfoClaims
         }
 
         // Groups/Roles scope claims: read from principal (set by GroupClaimsResolver)
-        if (context.Principal.HasScope(GroupClaimsResolver.GroupsScope))
+        if (principal.HasScope(GroupClaimsResolver.GroupsScope))
         {
-            var groupClaims = context.Principal.FindAll(GroupClaimsResolver.GroupsClaim)
-                .Select(c => c.Value).Distinct().ToArray();
+            var groupClaims = principal.FindAll(GroupClaimsResolver.GroupsClaim)
+                .Select(c => (string?)c.Value).Distinct().ToImmutableArray();
             if (groupClaims.Length > 0)
                 context.Claims[GroupClaimsResolver.GroupsClaim] = groupClaims;
 
-            var orgClaim = context.Principal.FindFirst(GroupClaimsResolver.OrgClaim);
+            var orgClaim = principal.FindFirst(GroupClaimsResolver.OrgClaim);
             if (orgClaim is not null)
                 context.Claims[GroupClaimsResolver.OrgClaim] = orgClaim.Value;
         }
 
-        if (context.Principal.HasScope(GroupClaimsResolver.RolesScope))
+        if (principal.HasScope(GroupClaimsResolver.RolesScope))
         {
-            var roleClaims = context.Principal.FindAll(GroupClaimsResolver.RolesClaim)
-                .Select(c => c.Value).Distinct().ToArray();
+            var roleClaims = principal.FindAll(GroupClaimsResolver.RolesClaim)
+                .Select(c => (string?)c.Value).Distinct().ToImmutableArray();
             if (roleClaims.Length > 0)
                 context.Claims[GroupClaimsResolver.RolesClaim] = roleClaims;
         }

@@ -1,5 +1,5 @@
 using System.Collections.Immutable;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Abstractions;
 using redb.Core.Models.Entities;
@@ -168,7 +168,7 @@ public class FourScopesManagerTest
                 AuthorizationId = authId,
                 Subject = userId,
                 Status = OpenIddictConstants.Statuses.Valid,
-                Type = OpenIddictConstants.TokenTypeHints.AuthorizationCode,
+                Type = OpenIddictConstants.TokenTypeIdentifiers.Private.AuthorizationCode,
             };
             token = await tokenManager.CreateAsync(tokenDescriptor);
             var tokenId = await tokenManager.GetIdAsync(token);

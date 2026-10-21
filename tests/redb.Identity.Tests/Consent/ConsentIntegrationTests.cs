@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Core.Models;
 using redb.Identity.Contracts.Routes;
 using redb.Identity.Core.Services;

@@ -141,11 +141,12 @@ public static class IdentityPrincipalBuilder
             }
         }
 
-        // Address scope claim (OIDC §5.1.1 — structured JSON object)
+        // Address scope claim (OIDC §5.1.1 — structured JSON object). Set as a JSON-typed claim:
+        // OpenIddict 7 rejects a sign-in whose `address` is not a JSON object claim.
         if (scopeList.Contains(Scopes.Address) && oidcProps?.Address is not null)
         {
-            var addressJson = JsonSerializer.Serialize(oidcProps.Address, AddressJsonOptions);
-            identity.SetClaim(Claims.Address, addressJson);
+            identity.SetClaim(Claims.Address,
+                JsonSerializer.SerializeToElement(oidcProps.Address, AddressJsonOptions));
         }
 
         // Custom claims (arbitrary key-value pairs, always emitted if present)
@@ -403,6 +404,11 @@ public static class IdentityPrincipalBuilder
 
             case Claims.UpdatedAt when long.TryParse(value, out var epoch):
                 identity.SetClaim(type, epoch);
+                break;
+
+            // OIDC §5.1.1: a JSON object, and OpenIddict 7 requires the JSON claim value type.
+            case Claims.Address:
+                identity.SetClaim(type, JsonSerializer.Deserialize<JsonElement>(value));
                 break;
 
             default:

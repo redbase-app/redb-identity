@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Core.Models;
 using redb.Identity.Core.Services;
 using redb.Identity.Tests.Infrastructure;
@@ -53,7 +53,7 @@ public class SessionServiceTests
 
         var sessions = await svc.ListAsync(userId);
 
-        sessions.Should().HaveCountGreaterOrEqualTo(2);
+        sessions.Should().HaveCountGreaterThanOrEqualTo(2);
         sessions.Should().OnlyContain(s => s.Status == "active");
         sessions.Should().OnlyContain(s => s.UserId == userId);
 
@@ -143,7 +143,7 @@ public class SessionServiceTests
         await svc.RevokeAllAsync(user1);
 
         var user2Sessions = await svc.ListAsync(user2);
-        user2Sessions.Should().HaveCountGreaterOrEqualTo(1);
+        user2Sessions.Should().HaveCountGreaterThanOrEqualTo(1);
     }
 
     [Fact]
@@ -192,7 +192,7 @@ public class SessionServiceTests
 
         // Perform logout
         var sessionsRevoked = await svc.LogoutAsync(userId);
-        sessionsRevoked.Should().BeGreaterOrEqualTo(1);
+        sessionsRevoked.Should().BeGreaterThanOrEqualTo(1);
 
         // Verify sessions are revoked
         var sessions = await svc.ListAsync(userId);

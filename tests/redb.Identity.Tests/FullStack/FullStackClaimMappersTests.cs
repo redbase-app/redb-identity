@@ -1,6 +1,6 @@
 using System.Net;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.IdentityModel.JsonWebTokens;
 using redb.Core;
 using redb.Core.Models.Entities;

@@ -2,7 +2,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Tests.Infrastructure;
 using Xunit;
 
@@ -49,7 +49,7 @@ public class PushedAuthorizationFullCycleTests
         });
         var resp = await _fx.Http.PostAsync("/connect/par", parForm);
 
-        ((int)resp.StatusCode).Should().BeGreaterOrEqualTo(400,
+        ((int)resp.StatusCode).Should().BeGreaterThanOrEqualTo(400,
             "PAR for a PKCE-required public client without code_challenge must fail");
         var json = await ParseJson(resp);
         json.TryGetProperty("error", out _).Should().BeTrue();
@@ -204,7 +204,7 @@ public class PushedAuthorizationFullCycleTests
         }
         else
         {
-            ((int)second.StatusCode).Should().BeGreaterOrEqualTo(400,
+            ((int)second.StatusCode).Should().BeGreaterThanOrEqualTo(400,
                 "replayed request_uri must be rejected, got status {0}: {1}",
                 second.StatusCode, await second.Content.ReadAsStringAsync());
         }

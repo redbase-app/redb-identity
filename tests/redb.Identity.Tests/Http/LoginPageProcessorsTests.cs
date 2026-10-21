@@ -1,5 +1,5 @@
 using System.Net;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Http.Processors;
 using redb.Route.Abstractions;
 using redb.Route.Core;

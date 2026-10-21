@@ -10,24 +10,24 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.0.2">
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="FluentAssertions" Version="6.12.2" />
-    <PackageReference Include="NSubstitute" Version="5.3.0" />
-    <PackageReference Include="coverlet.collector" Version="6.0.4">
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="NSubstitute" />
+    <PackageReference Include="coverlet.collector">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.3" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.3" />
-    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.3" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
     <!-- NU1603: 10.0.3 didn't ship; resolved to 10.1.0. Pin the actual version. -->
-    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.1.0" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
   </ItemGroup>
 
   <ItemGroup>
@@ -37,38 +37,38 @@
     <ProjectReference Include="..\..\src\redb.Identity.Ldap\redb.Identity.Ldap.csproj" />
     <ProjectReference Include="..\..\src\redb.Identity.Resource.Dpop\redb.Identity.Resource.Dpop.csproj" />
     <ProjectReference Include="..\..\src\redb.Identity.Soap\redb.Identity.Soap.csproj" />
-    <PackageReference Include="redb.Core.Pro" Version="4.3.0" />
-    <PackageReference Include="redb.Postgres" Version="4.3.0" />
-    <PackageReference Include="redb.Postgres.Pro" Version="4.3.0" />
+    <PackageReference Include="redb.Core.Pro" />
+    <PackageReference Include="redb.Postgres" />
+    <PackageReference Include="redb.Postgres.Pro" />
     <!-- SQLite provider — the default for the test suite. Postgres / MSSQL
          remain available via REDB_PROVIDER={postgres|mssql} for integration
          scenarios that specifically need them (broker tests, prod-shape
          probes). All three project references are required so the runtime
          can select any of the three. -->
-    <PackageReference Include="redb.SQLite" Version="4.3.0" />
-    <PackageReference Include="redb.SQLite.Pro" Version="4.3.0" />
-    <PackageReference Include="redb.MSSql" Version="4.3.0" />
-    <PackageReference Include="redb.MSSql.Pro" Version="4.3.0" />
-    <PackageReference Include="redb.Route" Version="4.3.0" />
-    <PackageReference Include="redb.Route.Sql" Version="4.3.0" />
-    <PackageReference Include="redb.Route.Elasticsearch" Version="4.3.0" />
-    <PackageReference Include="redb.Route.RabbitMQ" Version="4.3.0" />
-    <PackageReference Include="redb.Route.Kafka" Version="4.3.0" />
-    <PackageReference Include="redb.Route.Redis" Version="4.3.0" />
-    <PackageReference Include="redb.Route.MqttNet" Version="4.3.0" />
-    <PackageReference Include="redb.Route.Amqp" Version="4.3.0" />
-    <PackageReference Include="redb.Route.IbmMq" Version="4.3.0" />
-    <PackageReference Include="redb.Route.Ldap" Version="4.3.0" />
+    <PackageReference Include="redb.SQLite" />
+    <PackageReference Include="redb.SQLite.Pro" />
+    <PackageReference Include="redb.MSSql" />
+    <PackageReference Include="redb.MSSql.Pro" />
+    <PackageReference Include="redb.Route" />
+    <PackageReference Include="redb.Route.Sql" />
+    <PackageReference Include="redb.Route.Elasticsearch" />
+    <PackageReference Include="redb.Route.RabbitMQ" />
+    <PackageReference Include="redb.Route.Kafka" />
+    <PackageReference Include="redb.Route.Redis" />
+    <PackageReference Include="redb.Route.MqttNet" />
+    <PackageReference Include="redb.Route.Amqp" />
+    <PackageReference Include="redb.Route.IbmMq" />
+    <PackageReference Include="redb.Route.Ldap" />
     <!-- N-4 (Session C): greenmail-backed SMTP integration test exercises the
          redb.Route.Mail DSL end-to-end through SmtpEmailNotificationChannel. -->
-    <PackageReference Include="redb.Route.Mail" Version="4.3.0" />
+    <PackageReference Include="redb.Route.Mail" />
     <!--
       Tsak host SPI used by tests (e.g. IModuleHealthContributor / HealthStatus). The
       Identity production projects exclude these at runtime (host provides them); tests
       bring them in normally so unit tests can construct contributor instances.
     -->
-    <PackageReference Include="redb.Tsak.Core" Version="4.3.0" />
-    <PackageReference Include="redb.Tsak.Contracts" Version="4.3.0" />
+    <PackageReference Include="redb.Tsak.Core" />
+    <PackageReference Include="redb.Tsak.Contracts" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Time.Testing;
 using redb.Identity.Core.Configuration;

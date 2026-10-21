@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Grpc.Core;
 using redb.Identity.Grpc.V1;
 using redb.Identity.Tests.Infrastructure;

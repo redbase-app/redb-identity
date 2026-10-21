@@ -57,25 +57,14 @@ internal sealed class DisabledUserRejectionHandler
         var principal = context.AccessTokenPrincipal;
         if (principal is null) return;
 
-        // Look for the internal numeric user id — IdentityPrincipalBuilder emits it
-        // as `redb:user_id` for end-user grants. CC tokens carry only Claims.Subject
-        // (the client id), no redb:user_id → skip them.
-        var rawUserId = principal.GetClaim("redb:user_id");
-        if (string.IsNullOrEmpty(rawUserId)) return;
-        if (!long.TryParse(rawUserId, out var userId) || userId <= 0) return;
-
         try
         {
-            using var scope = _sp.CreateScope();
-            var redb = scope.ServiceProvider.GetService<IRedbService>();
-            if (redb is null) return;  // misconfigured DI — fail open rather than block all
-
-            var user = await redb.UserProvider.GetUserByIdAsync(userId).ConfigureAwait(false);
-            if (user is null || !user.Enabled)
+            var (userId, state) = await GetUserStateAsync(_sp, principal).ConfigureAwait(false);
+            if (state is TokenUserState.Missing or TokenUserState.Disabled)
             {
                 _logger.LogInformation(
                     "Bearer rejected: user {UserId} is {State}",
-                    userId, user is null ? "missing" : "disabled");
+                    userId, state is TokenUserState.Missing ? "missing" : "disabled");
 
                 context.Reject(
                     error: Errors.InvalidToken,
@@ -87,10 +76,50 @@ internal sealed class DisabledUserRejectionHandler
             // Don't fail-open on unexpected errors — surface as invalid_token so the
             // caller gets a clear 401 rather than masquerading as a successful auth.
             _logger.LogWarning(ex,
-                "Bearer validation failed for user {UserId} — store unavailable", userId);
+                "Bearer validation failed for user {UserId} — store unavailable",
+                principal.GetClaim(UserIdClaim));
             context.Reject(
                 error: Errors.ServerError,
                 description: "Token validation failed due to an internal error.");
         }
     }
+
+    private const string UserIdClaim = "redb:user_id";
+
+    /// <summary>
+    /// Resolves the redb user behind a token principal. Also used by the token exchange grant, whose
+    /// subject and actor tokens are validated by the OpenIddict server stack, where this handler
+    /// does not run. Store errors propagate to the caller.
+    /// </summary>
+    internal static async Task<(long UserId, TokenUserState State)> GetUserStateAsync(
+        IServiceProvider sp, ClaimsPrincipal principal)
+    {
+        // Look for the internal numeric user id — IdentityPrincipalBuilder emits it
+        // as `redb:user_id` for end-user grants. CC tokens carry only Claims.Subject
+        // (the client id), no redb:user_id → skip them.
+        var rawUserId = principal.GetClaim(UserIdClaim);
+        if (string.IsNullOrEmpty(rawUserId)) return (0, TokenUserState.NotAUser);
+        if (!long.TryParse(rawUserId, out var userId) || userId <= 0) return (0, TokenUserState.NotAUser);
+
+        using var scope = sp.CreateScope();
+        var redb = scope.ServiceProvider.GetService<IRedbService>();
+        if (redb is null) return (userId, TokenUserState.Unknown);  // misconfigured DI — fail open rather than block all
+
+        var user = await redb.UserProvider.GetUserByIdAsync(userId).ConfigureAwait(false);
+        return (userId, user is null ? TokenUserState.Missing
+                      : user.Enabled ? TokenUserState.Enabled
+                      : TokenUserState.Disabled);
+    }
+}
+
+/// <summary>State of the redb user a token principal points to.</summary>
+internal enum TokenUserState
+{
+    /// <summary>No redb user id on the principal (client_credentials token).</summary>
+    NotAUser,
+    /// <summary>The user store could not be resolved; callers fail open.</summary>
+    Unknown,
+    Enabled,
+    Disabled,
+    Missing
 }

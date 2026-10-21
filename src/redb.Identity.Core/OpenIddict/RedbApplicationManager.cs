@@ -29,10 +29,10 @@ internal sealed class RedbApplicationManager<TApplication> : OpenIddictApplicati
         IOpenIddictApplicationCache<TApplication> cache,
         ILogger<OpenIddictApplicationManager<TApplication>> logger,
         IOptionsMonitor<OpenIddictCoreOptions> options,
-        IOpenIddictApplicationStoreResolver resolver,
+        IOpenIddictApplicationStore<TApplication> store,
         IOptions<RedbIdentityOptions> identityOptions,
         ILogger<RedbApplicationManager<TApplication>> log)
-        : base(cache, logger, options, resolver)
+        : base(cache, logger, options, store)
     {
         _identityOptions = identityOptions.Value;
         _log = log;

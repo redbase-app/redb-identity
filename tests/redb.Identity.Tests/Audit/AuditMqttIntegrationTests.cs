@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -177,7 +177,7 @@ public class AuditMqttIntegrationTests : IAsyncLifetime
 
         await WaitForMessages(1);
 
-        _received.Should().HaveCountGreaterOrEqualTo(1);
+        _received.Should().HaveCountGreaterThanOrEqualTo(1);
 
         var evt = JsonSerializer.Deserialize<JsonElement>(_received.First());
         evt.GetProperty("eventType").GetString().Should().Be("TestMqttDirect");
@@ -230,7 +230,7 @@ public class AuditMqttIntegrationTests : IAsyncLifetime
 
         await WaitForMessages(1);
 
-        _received.Should().HaveCountGreaterOrEqualTo(1);
+        _received.Should().HaveCountGreaterThanOrEqualTo(1);
 
         var evt = JsonSerializer.Deserialize<JsonElement>(_received.First());
         evt.GetProperty("eventType").GetString().Should().Be("TestMqttFields");

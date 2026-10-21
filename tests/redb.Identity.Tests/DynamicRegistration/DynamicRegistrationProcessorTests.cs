@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -272,7 +272,7 @@ public class DynamicRegistrationProcessorTests
         var body = exchange.Out!.Body as IDictionary<string, object?>;
         var issuedAtElement = (System.Text.Json.JsonElement)body!["client_id_issued_at"]!;
         var issuedAt = issuedAtElement.GetInt64();
-        issuedAt.Should().BeGreaterOrEqualTo(before);
+        issuedAt.Should().BeGreaterThanOrEqualTo(before);
     }
 
     // ── Validation errors ──

@@ -1,6 +1,6 @@
 using System.Text;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Contracts.Routes;
 using redb.Identity.Tests.Infrastructure;
 using Xunit;
@@ -62,7 +62,7 @@ public class ProductionPasswordFlowTests
         var accessToken = response["access_token"]!.ToString()!;
 
         var parts = accessToken.Split('.');
-        parts.Length.Should().BeGreaterOrEqualTo(3, "access_token should be a JWT");
+        parts.Length.Should().BeGreaterThanOrEqualTo(3, "access_token should be a JWT");
 
         var payloadJson = Encoding.UTF8.GetString(
             Convert.FromBase64String(PadBase64(parts[1])));

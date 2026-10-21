@@ -1,7 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -184,7 +184,7 @@ public class AuditRabbitMqIntegrationTests : IAsyncLifetime
         await Task.Delay(500); // RabbitMQ publish is async
 
         var messages = await GetQueueMessages();
-        messages.Should().HaveCountGreaterOrEqualTo(1);
+        messages.Should().HaveCountGreaterThanOrEqualTo(1);
 
         // Decode payload — it's base64 or raw string
         var payload = messages[0].GetProperty("payload").GetString();
@@ -243,7 +243,7 @@ public class AuditRabbitMqIntegrationTests : IAsyncLifetime
         await Task.Delay(500);
 
         var messages = await GetQueueMessages();
-        messages.Should().HaveCountGreaterOrEqualTo(1);
+        messages.Should().HaveCountGreaterThanOrEqualTo(1);
 
         var payload = messages[0].GetProperty("payload").GetString()!;
         var evt = JsonSerializer.Deserialize<JsonElement>(payload);

@@ -2,7 +2,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Tests.Infrastructure;
 using Xunit;
 
@@ -125,7 +125,7 @@ public class FullStackBrowserFlowTests
         else
         {
             // OpenIddict returns login_required which maps to 400
-            ((int)resp.StatusCode).Should().BeGreaterOrEqualTo(400);
+            ((int)resp.StatusCode).Should().BeGreaterThanOrEqualTo(400);
         }
     }
 
@@ -366,7 +366,7 @@ public class FullStackBrowserFlowTests
         else
         {
             // login_required error (mapped to 400+)
-            ((int)resp2.StatusCode).Should().BeGreaterOrEqualTo(400,
+            ((int)resp2.StatusCode).Should().BeGreaterThanOrEqualTo(400,
                 "authorize after logout should fail");
         }
     }

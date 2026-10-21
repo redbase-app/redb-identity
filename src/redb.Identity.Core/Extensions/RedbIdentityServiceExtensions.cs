@@ -179,9 +179,29 @@ public static class RedbIdentityServiceExtensions
                 if (options.EnablePasswordFlow)
                     server.AllowPasswordFlow();
 
-                // Token Exchange: grant_type=urn:ietf:params:oauth:grant-type:token-exchange (opt-in, RFC 8693)
+                // Token Exchange: grant_type=urn:ietf:params:oauth:grant-type:token-exchange (opt-in, RFC 8693).
+                // OpenIddict's built-in grant validates the subject / actor tokens; HandleTokenRequestHandler
+                // builds the issued principal. Only access tokens go in and come out.
                 if (options.EnableTokenExchange)
-                    server.AllowCustomFlow("urn:ietf:params:oauth:grant-type:token-exchange");
+                {
+                    server.AllowTokenExchangeFlow();
+                    server.Configure(o =>
+                    {
+                        o.SubjectTokenTypes.Clear();
+                        o.SubjectTokenTypes.Add(OpenIddictConstants.TokenTypeIdentifiers.AccessToken);
+                        o.ActorTokenTypes.Clear();
+                        o.ActorTokenTypes.Add(OpenIddictConstants.TokenTypeIdentifiers.AccessToken);
+                        o.RequestedTokenTypes.Clear();
+                        o.RequestedTokenTypes.Add(OpenIddictConstants.TokenTypeIdentifiers.AccessToken);
+                        o.DefaultRequestedTokenType = OpenIddictConstants.TokenTypeIdentifiers.AccessToken;
+                    });
+                }
+
+                // RFC 8707 resource indicators (OpenIddict 7). The known resources are the Resources of the
+                // scopes, edited at runtime, so the static RegisterResources set is not used: the built-in
+                // check against it is off and ValidateResourcesAgainstScopes checks the scope store instead.
+                // The format check and the client permission check (rsrc:<resource>) stay built in.
+                server.DisableResourceValidation();
 
                 // Token lifetimes
                 server.SetAccessTokenLifetime(options.AccessTokenLifetime);
@@ -352,6 +372,10 @@ public static class RedbIdentityServiceExtensions
                 // the bearer must stop authorizing protected endpoints immediately.
                 validation.AddEventHandler(redb.Identity.Core.Services.DisabledUserRejectionHandler.Descriptor);
 
+                // DPoP-bound access tokens carry cnf.jkt, which OpenIddict 7's proof-of-possession check
+                // (mTLS only) throws on; the DPoP proof is checked by Identity's own handlers.
+                validation.AddEventHandler(OpenIddict.Handlers.DpopConfirmationValidationPassThroughHandler.Descriptor);
+
                 // **Batch 12 diagnostic.** Class-based handler dumps key picture on
                 // every rejected validation so we can see which layer holds the stale
                 // snapshot after rotate. Registered via DI for proper IOptionsMonitor access.
@@ -359,6 +383,7 @@ public static class RedbIdentityServiceExtensions
             });
 
         services.AddSingleton<redb.Identity.Core.Services.DisabledUserRejectionHandler>();
+        services.AddSingleton<OpenIddict.Handlers.DpopConfirmationValidationPassThroughHandler>();
         services.AddSingleton<redb.Identity.Core.Keys.JwksRefreshDiagnosticHandler>();
 
         // Identity options (used by RouteBuilder for timer interval, retention, etc.)
@@ -606,8 +631,8 @@ public static class RedbIdentityServiceExtensions
                     : options.WebAuthn.RpName!;
                 var cfg = new Fido2NetLib.Fido2Configuration
                 {
-                    ServerDomain = options.WebAuthn.RpId!,
-                    ServerName = rpName,
+                    RPID = options.WebAuthn.RpId!,
+                    RPName = rpName,
                     Origins = new HashSet<string>(options.WebAuthn.Origins, StringComparer.Ordinal),
                     Timeout = (uint)options.WebAuthn.TimeoutMs,
                 };

@@ -1,5 +1,5 @@
 using System.Collections.Immutable;
-using FluentAssertions;
+using AwesomeAssertions;
 using Xunit;
 using OpenIddict.Abstractions;
 using redb.Core.Models.Entities;
@@ -162,7 +162,7 @@ public class AuthorizationStoreTests
         var revoked = await _store.RevokeAsync(
             subjectGuid.ToString("D"), app.id.ToString(), null, null, CancellationToken.None);
 
-        revoked.Should().BeGreaterOrEqualTo(1);
+        revoked.Should().BeGreaterThanOrEqualTo(1);
 
         var found = await _store.FindByIdAsync(auth.id.ToString(), CancellationToken.None);
         found!.Props.Status.Should().Be(OpenIddictConstants.Statuses.Revoked);

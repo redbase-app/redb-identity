@@ -1,5 +1,5 @@
 using System.Collections.Immutable;
-using FluentAssertions;
+using AwesomeAssertions;
 using Xunit;
 using redb.Core.Models.Entities;
 using redb.Identity.Core.Models;

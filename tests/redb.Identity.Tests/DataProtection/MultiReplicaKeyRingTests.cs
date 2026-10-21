@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 using System.Xml.Linq;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -182,7 +182,7 @@ public class MultiReplicaKeyRingTests : IAsyncLifetime
         snapB.Should().Contain(e => HasId(e, newId), "B's own write is reflected in its snapshot immediately (ImmutableInterlocked.Update)");
     }
 
-    // Expression-tree-safe helper: FluentAssertions' Contain/NotContain accepts Expression<Func<T,bool>>,
+    // Expression-tree-safe helper: AwesomeAssertions' Contain/NotContain accepts Expression<Func<T,bool>>,
     // which forbids null-conditional operators (CS8072). Keep the null-check explicit.
     private static bool HasId(XElement e, string id)
     {

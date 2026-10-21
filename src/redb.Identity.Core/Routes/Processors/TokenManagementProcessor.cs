@@ -93,7 +93,13 @@ internal sealed class TokenManagementProcessor : IProcessor
 
             if (filters.TryGetValue("type", out var typeVal) && typeVal is string type
                 && !string.IsNullOrEmpty(type))
-                query = query.Where(t => t.Type == type);
+            {
+                // Rows written before OpenIddict 7 hold the short type ("refresh_token"), newer rows
+                // the URI ("urn:ietf:params:oauth:token-type:refresh_token"). Either spelling of the
+                // filter matches both.
+                var (shortType, uriType) = TokenTypeForms(type);
+                query = query.Where(t => t.Type == shortType || t.Type == uriType);
+            }
         }
 
         var offset = 0;
@@ -252,6 +258,32 @@ internal sealed class TokenManagementProcessor : IProcessor
 
         exchange.Properties["identity-event-type"] = IdentityAuditEventIds.TokensRevokedByUser;
         exchange.Properties["identity-event-data"] = new { UserId = userId, Count = tokens.Count };
+    }
+
+    /// <summary>
+    /// The short (OpenIddict 6) and URI (OpenIddict 7) spelling of a stored token type. A value with
+    /// no counterpart is returned as both.
+    /// </summary>
+    private static (string Short, string Uri) TokenTypeForms(string type)
+    {
+        (string, string)[] forms =
+        [
+            ("access_token",       TokenTypeIdentifiers.AccessToken),
+            ("authorization_code", TokenTypeIdentifiers.Private.AuthorizationCode),
+            ("device_code",        TokenTypeIdentifiers.Private.DeviceCode),
+            ("id_token",           TokenTypeIdentifiers.IdentityToken),
+            ("refresh_token",      TokenTypeIdentifiers.RefreshToken),
+            ("user_code",          TokenTypeIdentifiers.Private.UserCode),
+        ];
+
+        foreach (var (shortForm, uriForm) in forms)
+        {
+            if (string.Equals(type, shortForm, StringComparison.Ordinal)
+                || string.Equals(type, uriForm, StringComparison.Ordinal))
+                return (shortForm, uriForm);
+        }
+
+        return (type, type);
     }
 
     private static TokenInfoResponse MapToResponse(RedbObject<TokenProps> token) =>

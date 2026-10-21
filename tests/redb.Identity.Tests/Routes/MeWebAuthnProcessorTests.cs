@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Core.Routes.Processors;
 using redb.Route.Core;
 using Xunit;

@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Contracts.Sessions;
 using redb.Identity.Web.Services;
 using Xunit;

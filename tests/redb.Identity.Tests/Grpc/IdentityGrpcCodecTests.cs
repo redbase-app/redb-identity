@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Grpc;
 using redb.Identity.Grpc.V1;
 using Xunit;

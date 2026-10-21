@@ -1,6 +1,6 @@
 using System.Diagnostics.Metrics;
 using System.Globalization;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using redb.Identity.Core.Configuration;

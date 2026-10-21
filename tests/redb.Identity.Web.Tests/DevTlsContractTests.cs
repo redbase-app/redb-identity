@@ -1,7 +1,7 @@
 using System.IO;
 using System.Linq;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using Xunit;
 
 namespace redb.Identity.Web.Tests;

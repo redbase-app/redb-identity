@@ -2,7 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Tests.Infrastructure;
 using Xunit;
 using Xunit.Abstractions;
@@ -161,7 +161,7 @@ public class FullStackGroupTests
         childrenResp.StatusCode.Should().Be(HttpStatusCode.OK);
         var children = await ParseJson(childrenResp);
         children.ValueKind.Should().Be(JsonValueKind.Array);
-        children.GetArrayLength().Should().BeGreaterOrEqualTo(2);
+        children.GetArrayLength().Should().BeGreaterThanOrEqualTo(2);
     }
 
     [Fact]
@@ -183,7 +183,7 @@ public class FullStackGroupTests
         pathResp.StatusCode.Should().Be(HttpStatusCode.OK);
         var path = await ParseJson(pathResp);
         path.ValueKind.Should().Be(JsonValueKind.Array);
-        path.GetArrayLength().Should().BeGreaterOrEqualTo(2, "path should include ancestors");
+        path.GetArrayLength().Should().BeGreaterThanOrEqualTo(2, "path should include ancestors");
 
         _output.WriteLine($"Path for team {teamId}: {path.GetArrayLength()} ancestors");
     }

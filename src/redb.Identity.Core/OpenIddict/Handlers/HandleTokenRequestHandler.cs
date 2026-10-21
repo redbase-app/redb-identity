@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
-using OpenIddict.Validation;
 using redb.Core;
 using redb.Identity.Core.Configuration;
 using redb.Identity.Core.Services;
@@ -19,9 +18,8 @@ namespace redb.Identity.Core.OpenIddict.Handlers;
 /// Handles <see cref="HandleTokenRequestContext"/> for client_credentials, device_code,
 /// password (ROPC), and token exchange (RFC 8693) grant types.
 /// For authorization_code and refresh_token, OpenIddict resolves the principal from
-/// the stored code/token automatically — no custom handler needed.
-/// Note: OpenIddict 6.3.0's built-in AttachPrincipal only handles authorization_code
-/// and refresh_token. Device code principal must be copied explicitly.
+/// the stored code/token automatically — no custom handler needed; the same holds for
+/// device_code since OpenIddict 7.
 /// </summary>
 internal sealed class HandleTokenRequestHandler : IOpenIddictServerHandler<HandleTokenRequestContext>
 {
@@ -45,22 +43,10 @@ internal sealed class HandleTokenRequestHandler : IOpenIddictServerHandler<Handl
 
     public async ValueTask HandleAsync(HandleTokenRequestContext context)
     {
-        // OpenIddict 6.3.0's built-in AttachPrincipal only copies the principal for
-        // authorization_code and refresh_token grants. For device_code, we need to
-        // copy it ourselves from the ValidateTokenRequestContext stored in the transaction.
+        // device_code: OpenIddict's built-in AttachPrincipal (ordered before this handler) restores
+        // the principal from the device code, as it does for authorization_code and refresh_token.
         if (context.Request.IsDeviceCodeGrantType())
-        {
-            var validateCtx = context.Transaction.GetProperty<ValidateTokenRequestContext>(
-                typeof(ValidateTokenRequestContext).FullName!);
-
-            if (validateCtx?.Principal is not null)
-            {
-                context.Principal ??= validateCtx.Principal;
-                _logger.LogDebug("Attached device code principal for token exchange");
-            }
-
             return;
-        }
 
         // ROPC: grant_type=password (opt-in via EnablePasswordFlow)
         if (context.Request.IsPasswordGrantType())
@@ -130,7 +116,7 @@ internal sealed class HandleTokenRequestHandler : IOpenIddictServerHandler<Handl
 
         // Only handle client_credentials — auth_code and refresh_token are handled
         // by OpenIddict's built-in handlers that restore the principal from the stored token/code
-        if (context.Request.GrantType == "urn:ietf:params:oauth:grant-type:token-exchange")
+        if (context.Request.IsTokenExchangeGrantType())
         {
             await HandleTokenExchangeAsync(context);
             return;
@@ -158,110 +144,42 @@ internal sealed class HandleTokenRequestHandler : IOpenIddictServerHandler<Handl
     }
 
     /// <summary>
-    /// Handles the Token Exchange grant type (RFC 8693).
-    /// Validates the subject_token via OpenIddict Validation (server-local),
-    /// then builds a new principal for the exchanged token. Supports delegation
-    /// (with <c>act</c> claim chain) and optionally impersonation.
+    /// Handles the Token Exchange grant type (RFC 8693) on top of OpenIddict's built-in support.
+    /// <para>
+    /// OpenIddict has already checked the parameters (subject, actor and requested token types are
+    /// restricted to access tokens in <c>AddRedbIdentityServer</c>), validated the subject_token and
+    /// the optional actor_token, and required the caller to be an audience or presenter of a token
+    /// bound to both. This builds the principal of the issued token: delegation with an
+    /// <c>act</c> claim chain, or impersonation when allowed.
+    /// </para>
     /// </summary>
     private async Task HandleTokenExchangeAsync(HandleTokenRequestContext context)
     {
-        const string AccessTokenTypeId = "urn:ietf:params:oauth:token-type:access_token";
         const string ActClaimType = "act";
 
         var options = _sp.GetRequiredService<IOptions<RedbIdentityOptions>>().Value;
 
-        // ── 1. Extract subject_token ──
-        var subjectToken = (string?)context.Request["subject_token"];
-        if (string.IsNullOrEmpty(subjectToken))
+        var subjectPrincipal = context.SubjectTokenPrincipal;
+        if (subjectPrincipal is null)
         {
-            context.Reject(Errors.InvalidRequest, "The subject_token parameter is required.");
+            context.Reject(Errors.InvalidGrant, "The subject_token is invalid or expired.");
             return;
         }
 
-        var subjectTokenType = (string?)context.Request["subject_token_type"];
-        if (string.IsNullOrEmpty(subjectTokenType))
-        {
-            context.Reject(Errors.InvalidRequest, "The subject_token_type parameter is required.");
-            return;
-        }
-
-        // We only accept access tokens as subject_token
-        if (subjectTokenType != AccessTokenTypeId)
-        {
-            context.Reject(Errors.InvalidRequest,
-                $"The subject_token_type '{subjectTokenType}' is not supported. " +
-                $"Only '{AccessTokenTypeId}' is accepted.");
-            return;
-        }
-
-        // ── 2. Validate subject_token via OpenIddict Validation (server-local) ──
-        var factory = _sp.GetRequiredService<IOpenIddictValidationFactory>();
-        var dispatcher = _sp.GetRequiredService<IOpenIddictValidationDispatcher>();
-
-        var transaction = await factory.CreateTransactionAsync();
-        transaction.Properties[Routes.Processors.ManagementBearerAuthProcessor.TokenPropertyKey] = subjectToken;
-
-        var authContext = new OpenIddictValidationEvents.ProcessAuthenticationContext(transaction);
-        await dispatcher.DispatchAsync(authContext);
-
-        if (authContext.IsRejected || authContext.AccessTokenPrincipal is null)
-        {
-            context.Reject(Errors.InvalidGrant,
-                authContext.ErrorDescription ?? "The subject_token is invalid or expired.");
-            return;
-        }
-
-        var subjectPrincipal = authContext.AccessTokenPrincipal;
         var originalSubject = subjectPrincipal.GetClaim(Claims.Subject);
-
         if (string.IsNullOrEmpty(originalSubject))
         {
             context.Reject(Errors.InvalidGrant, "The subject_token does not contain a valid subject claim.");
             return;
         }
 
-        // ── 3. Determine requested_token_type (default: access_token) ──
-        var requestedTokenType = (string?)context.Request["requested_token_type"];
-        if (!string.IsNullOrEmpty(requestedTokenType) &&
-            requestedTokenType != AccessTokenTypeId)
-        {
-            context.Reject(Errors.InvalidRequest,
-                $"The requested_token_type '{requestedTokenType}' is not supported. " +
-                $"Only '{AccessTokenTypeId}' is allowed.");
+        var actorPrincipal = context.ActorTokenPrincipal;
+
+        // The server stack validates these tokens, so the bearer-side DisabledUserRejectionHandler
+        // never sees them: a disabled or deleted user must not be able to exchange a token either.
+        if (await RejectDisabledUserAsync(context, subjectPrincipal, "subject_token")
+            || (actorPrincipal is not null && await RejectDisabledUserAsync(context, actorPrincipal, "actor_token")))
             return;
-        }
-
-        // ── 4. Check actor_token (optional — for delegation) ──
-        var actorToken = (string?)context.Request["actor_token"];
-        ClaimsPrincipal? actorPrincipal = null;
-
-        if (!string.IsNullOrEmpty(actorToken))
-        {
-            var actorTokenType = (string?)context.Request["actor_token_type"];
-            if (string.IsNullOrEmpty(actorTokenType) ||
-                actorTokenType != AccessTokenTypeId)
-            {
-                context.Reject(Errors.InvalidRequest,
-                    "When actor_token is provided, actor_token_type must be " +
-                    $"'{AccessTokenTypeId}'.");
-                return;
-            }
-
-            var actorTransaction = await factory.CreateTransactionAsync();
-            actorTransaction.Properties[Routes.Processors.ManagementBearerAuthProcessor.TokenPropertyKey] = actorToken;
-
-            var actorAuthCtx = new OpenIddictValidationEvents.ProcessAuthenticationContext(actorTransaction);
-            await dispatcher.DispatchAsync(actorAuthCtx);
-
-            if (actorAuthCtx.IsRejected || actorAuthCtx.AccessTokenPrincipal is null)
-            {
-                context.Reject(Errors.InvalidGrant,
-                    actorAuthCtx.ErrorDescription ?? "The actor_token is invalid or expired.");
-                return;
-            }
-
-            actorPrincipal = actorAuthCtx.AccessTokenPrincipal;
-        }
 
         // ── 5. Determine delegation vs impersonation ──
         // If actor_token is provided → delegation (act claim chain)
@@ -356,6 +274,33 @@ internal sealed class HandleTokenRequestHandler : IOpenIddictServerHandler<Handl
         _logger.LogDebug(
             "Token exchange completed: subject={Subject}, client={ClientId}, delegation={IsDelegation}",
             originalSubject, context.Request.ClientId, isDelegation);
+    }
+
+    /// <summary>
+    /// Rejects the request with invalid_grant when the token points to a disabled or deleted redb user,
+    /// and with server_error when the user store fails. Returns true when the request was rejected.
+    /// </summary>
+    private async Task<bool> RejectDisabledUserAsync(
+        HandleTokenRequestContext context, ClaimsPrincipal principal, string parameter)
+    {
+        try
+        {
+            var (userId, state) = await DisabledUserRejectionHandler.GetUserStateAsync(_sp, principal);
+            if (state is not (TokenUserState.Missing or TokenUserState.Disabled))
+                return false;
+
+            _logger.LogInformation("Token exchange rejected: {Parameter} user {UserId} is {State}",
+                parameter, userId, state is TokenUserState.Missing ? "missing" : "disabled");
+            context.Reject(Errors.InvalidGrant,
+                $"The user account associated with the {parameter} has been disabled or deleted.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Token exchange: user lookup for the {Parameter} failed", parameter);
+            context.Reject(Errors.ServerError, "Token validation failed due to an internal error.");
+            return true;
+        }
     }
 
     /// <summary>

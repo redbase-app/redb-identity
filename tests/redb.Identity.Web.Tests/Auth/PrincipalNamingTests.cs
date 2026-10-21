@@ -1,5 +1,5 @@
 using System.Security.Claims;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Identity.Web.Auth;
 using Xunit;
 

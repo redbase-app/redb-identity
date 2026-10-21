@@ -1,5 +1,3 @@
-using System.Collections.Immutable;
-using System.Xml.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using redb.Core;
@@ -37,24 +35,14 @@ internal sealed class IdentityHttpXmlRepositoryInitListener : IRouteLifecycleLis
             .GetRequiredService<ILoggerFactory>()
             .CreateLogger<IdentityHttpXmlRepositoryInitListener>();
 
-        // Bounded read: most recent N keys. DataProtection key-ring rarely exceeds a
-        // handful of active keys; cap protects against unbounded growth.
-        var keys = await redb.Query<DataProtectionKeyProps>()
-            .OrderByDescendingRedb(o => o.DateCreate)
-            .Take(100)
-            .ToListAsync()
+        // The file key ring the process wrote up to 4.3 goes into redb first (idempotent with the
+        // Core context, which runs the same import), then the snapshot is loaded.
+        await RedbXmlRepository.ImportFileKeyRingsAsync(redb, DefaultFileKeyRing.Directories(), logger, ct)
             .ConfigureAwait(false);
-
-        var elements = ImmutableArray.CreateBuilder<XElement>(keys.Count);
-        foreach (var key in keys)
-        {
-            if (!string.IsNullOrEmpty(key.Props.XmlContent))
-                elements.Add(XElement.Parse(key.Props.XmlContent));
-        }
-        repo.ReplaceSnapshot(elements.ToImmutable());
+        var count = await repo.ReloadAsync(redb, ct).ConfigureAwait(false);
 
         logger.LogInformation(
             "redb.Identity.Http: DataProtection key-ring snapshot loaded ({Count} keys)",
-            elements.Count);
+            count);
     }
 }

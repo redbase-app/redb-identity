@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
-using FluentAssertions;
+using AwesomeAssertions;
 using redb.Core.Models.Entities;
 using redb.Identity.Core.Models;
 using redb.Identity.Contracts.Routes;
