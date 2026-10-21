@@ -38,7 +38,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Pending changes live in `changelog/unreleased/` until the release; `pwsh scripts/changelog.ps1 -Preview` shows them.
 
+## [4.4.1] — 2026-10-21
+
+### Changed
+
+- **Rebuilt on redb.Route 4.4.1.** No changes of its own: the packages, images and archives are built on redb.Route 4.4.1, which fixes `seda:` after a context restart. 4.4.0 was withdrawn on the day of release.
+
 ## [4.4.0] — 2026-10-21
+
+> **Withdrawn on the day of release because of the seda restart bug in redb.Route; use 4.4.1.**
 
 ### Breaking
 
