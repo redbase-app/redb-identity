@@ -3,14 +3,12 @@
 > **A transport-agnostic OAuth 2.1 / OpenID Connect server for the redb ecosystem.**
 > Built on [OpenIddict](https://documentation.openiddict.com/) and [redb.Route](https://github.com/redbase-app/redb-route). Every endpoint is a `direct-vm://` route — call it over HTTP, gRPC, RabbitMQ, SignalR, or **straight from another in-process module with zero network overhead**. Ships as `.tpkg` packages for [redb.Tsak](https://github.com/redbase-app/redb-tsak). REDB-backed, cluster-ready, standards-compliant.
 
-[![License: Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-blue)](../LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-blue)](https://github.com/redbase-app/redb-identity/blob/main/LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8%20%7C%209%20%7C%2010-purple)](https://dotnet.microsoft.com)
-[![Tests](https://img.shields.io/badge/tests-1767%20passing%20(PG%20%7C%20MSSQL%20%7C%20SQLite)-brightgreen)](#testing)
 [![Providers](https://img.shields.io/badge/storage-PostgreSQL%20%7C%20MSSQL%20%7C%20SQLite-336791)](#provider-matrix-zero-code-changes-between-rows)
 [![NuGet: redb.Identity.Core](https://img.shields.io/nuget/v/redb.Identity.Core?label=nuget%3A%20Core&color=004880)](https://www.nuget.org/packages/redb.Identity.Core)
 [![NuGet: redb.Identity.Http](https://img.shields.io/nuget/v/redb.Identity.Http?label=nuget%3A%20Http&color=004880)](https://www.nuget.org/packages/redb.Identity.Http)
 [![NuGet: redb.Identity.Client](https://img.shields.io/nuget/v/redb.Identity.Client?label=nuget%3A%20Client&color=004880)](https://www.nuget.org/packages/redb.Identity.Client)
-[![Status](https://img.shields.io/badge/status-1.0.1-orange)](#)
 [![OIDC](https://img.shields.io/badge/OpenID_Connect-Core_1.0-1F4E79)](#openid-connect)
 [![OAuth](https://img.shields.io/badge/OAuth-2.1_%2B_RFC_6749-4A148C)](#oauth-2x-core)
 [![DPoP](https://img.shields.io/badge/DPoP-RFC_9449-1565C0)](#oauth-2x-core)
@@ -21,6 +19,20 @@
 [![FIDO2](https://img.shields.io/badge/FIDO2-WebAuthn_L2-006064)](#mfa)
 [![Engine](https://img.shields.io/badge/engine-OpenIddict-512BD4)](#)
 [![Runtime](https://img.shields.io/badge/runtime-redb.Route-FF6F00)](#)
+
+---
+
+## Contents
+
+- [TL;DR](#tldr) · [Install](#install) · [Quick start](#quick-start) · [What's new in 4.4](#whats-new-in-44)
+- [Why redb.Identity exists](#why-redbidentity-exists) · [In-process direct-vm calls](#the-killer-feature-in-process-direct-vm-calls) · [Architecture](#architecture) · [Project structure](#project-structure)
+- [Endpoint catalogue](#endpoint-catalogue) · [Standards compliance](#standards-compliance) · [Storage model](#storage-model--built-on-the-redb-object-engine)
+- [Cluster-readiness](#cluster-readiness) · [Observability](#observability) · [Security highlights](#security-highlights) · [Audit event catalogue](#audit-event-catalogue)
+- [Runnable demos](#runnable-demos-demos) · [Typed SDK](#typed-sdk-iidentityclient) · [Reference BFF](#reference-bff--admin-ui-redbidentityweb) · [Testing](#testing) · [Roadmap](#roadmap-excerpt)
+
+Further documents: [DEPLOYMENT.md](DEPLOYMENT.md) (images, archives, ports, secrets), [HTTPS.md](HTTPS.md) (TLS),
+[UPGRADING.md](UPGRADING.md) (what to change per version), [CHANGELOG.md](CHANGELOG.md),
+[OPENID_CERTIFICATION.md](OPENID_CERTIFICATION.md), [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
@@ -38,12 +50,14 @@
 | Federation | OIDC / GitHub external providers, stored as redb props objects, admin CRUD. |
 | Backchannel logout that works across replicas | RFC 8417-style revoked-SID list (`/revoked-sids/add` + `/since`) + push-and-poll fallback. |
 | SCIM 2.0 provisioning | Users + Groups + Bulk endpoints (RFC 7644). |
-| RFC compliance | OIDC Core, OAuth 2.1, RFC 7662 (Introspection), RFC 7591/7592 (DCR), RFC 8628 (Device Code), RFC 9126 (PAR), **RFC 9101 (JAR — JWT-Secured Authorization Request, opt-in)**, RFC 9068 (JWT access-token profile — `at+jwt`, full claim set, `aud` issued and verified), RFC 9449 (DPoP), RFC 8417 / OIDC Backchannel Logout. |
-| Conformance you can check | Passes the **official OpenID Foundation conformance suite** — Config OP **0 failures**, Basic OP **0 failures** (29 pass / 3 review / 1 deliberate warning / 2 skipped). The two skips are the server **refusing unsigned `alg:none` request objects** — the secure answer FAPI 2.0 mandates, not a missing feature. [Details.](OPENID_CERTIFICATION.md) |
+| RFC compliance | OIDC Core, OAuth 2.1, RFC 7662 (Introspection), RFC 7591/7592 (DCR), RFC 8628 (Device Code), RFC 9126 (PAR), **RFC 9101 (JAR — JWT-Secured Authorization Request, opt-in)**, RFC 9068 (JWT access-token profile — `at+jwt`, full claim set, `aud` issued and verified), RFC 8707 (Resource Indicators), RFC 8693 (Token Exchange, opt-in), RFC 9449 (DPoP), RFC 8417 / OIDC Backchannel Logout. |
+| Conformance you can check | Exercised against the **official OpenID Foundation conformance suite** (Config OP, Basic OP). Unsigned `alg:none` request objects are refused, as FAPI 2.0 requires. Per-module results: [OPENID_CERTIFICATION.md](OPENID_CERTIFICATION.md). |
 
-## Install (NuGet)
+## Install
 
-Published as of **`1.0.1`**. Add the pieces you need — the provider is chosen by the host:
+### NuGet packages
+
+Add the pieces you need; the storage provider is chosen by the host:
 
 ```pwsh
 # Core OIDC / OAuth 2.1 engine (OpenIddict on redb.Route) + a storage provider
@@ -71,7 +85,131 @@ dotnet add package redb.Identity.Client
 | [`redb.Identity.Ldap`](https://www.nuget.org/packages/redb.Identity.Ldap) | LDAP / Active Directory federation provider |
 | [`redb.Identity.Resource.Dpop`](https://www.nuget.org/packages/redb.Identity.Resource.Dpop) | Resource-server DPoP (RFC 9449) validator for downstream APIs |
 
-> The reference BFF + Blazor admin UI (`redb.Identity.Web`) ships as **source** in this repo, not as a package — clone and run it, or lift it as a starting point.
+> The reference BFF + Blazor admin UI (`redb.Identity.Web`) is not a NuGet package: it ships as source in this
+> repository and as the `redb-identity-web` image.
+
+### Docker images and archives
+
+Four images on `ghcr.io/redbase-app`, all signed with cosign:
+
+| Image | Contents |
+|---|---|
+| `redb-identity-backend` | Tsak Worker + Identity modules (OIDC only) |
+| `redb-identity-managed` | + Tsak dashboard |
+| `redb-identity-full` | + Identity Web BFF (login, consent, admin UI) |
+| `redb-identity-web` | Identity Web BFF only |
+
+Each GitHub release also carries a standalone archive per runtime (no Docker) and a modules archive (the `.tpkg`
+packages + `context.json`) for an existing Tsak worker. Ports, volumes, secrets and signature checks:
+[DEPLOYMENT.md](DEPLOYMENT.md).
+
+### Upgrading
+
+[UPGRADING.md](UPGRADING.md) lists what to check and change for each version; [CHANGELOG.md](CHANGELOG.md) has the
+full list of changes.
+
+---
+
+## Quick start
+
+### Run the image
+
+```bash
+docker run -d --name identity -p 5002:5002 -v identity_data:/app/data ghcr.io/redbase-app/redb-identity-backend:latest
+curl -k https://localhost:5002/.well-known/openid-configuration
+```
+
+The image runs on SQLite with a bundled self-signed certificate for `localhost`, so call it with `curl -k`. For a
+real deployment replace the certificate, set the public issuer and pick the store as described in
+[DEPLOYMENT.md](DEPLOYMENT.md) and [HTTPS.md](HTTPS.md).
+
+### Host the modules in your own Tsak worker
+
+Take the `.tpkg` packages and `context.json` from the modules archive of a release, or build them from source:
+
+```pwsh
+pwsh scripts/pack-tpkg.ps1 -TsakModules <tsak-worker>/modules
+```
+
+| Package | Tsak context | Contains |
+|---|---|---|
+| `redb.Identity.Contracts.tpkg` | `identity.contracts` | The shared DTO assembly every Identity module resolves against |
+| `redb.Identity.Core.Module.tpkg` | `identity.core` | OIDC engine, redb stores, MFA, federation, signing keys |
+| `redb.Identity.Http.tpkg` | `identity.http` | HTTP facade: protocol endpoints, management API, SCIM, `/me` |
+| `redb.Identity.Grpc.tpkg` | `identity.grpc` | gRPC facade (optional) |
+| `redb.Identity.Soap.tpkg` | `identity.soap` | WS-Trust facade (optional) |
+
+The worker loads every package it finds in `modules/` together with `context.json`.
+
+### Configure
+
+Settings come from the Tsak layered configuration, one bucket per context. The full annotated file ships as
+`context.sample.json`; the minimum is the issuer, which both the engine and the HTTP facade need:
+
+```jsonc
+{
+  "Contexts": {
+    "identity.core": {
+      "Identity": {
+        "Issuer": "https://identity.example.com",
+        "Features": { "EnableScim": true, "EnableDeviceCodeFlow": true, "EnablePushedAuthorization": true }
+      }
+    },
+    "identity.http": {
+      "IdentityTransport": {
+        "Issuer": "https://identity.example.com",
+        "Http": { "PublicPort": 5002 }
+      }
+    }
+  }
+}
+```
+
+Secrets go to environment variables, never to `context.json`:
+
+```
+Tsak__Contexts__identity.core__Override__Identity__RecoveryCodePepper=...
+Tsak__Contexts__identity.core__Override__Identity__FederationProviders__0__ClientSecret=...
+Tsak__Contexts__identity.core__Override__Identity__Ldap__Providers__0__BindPassword=...
+```
+
+### First administrator
+
+A fresh database has the user `admin` with the password `admin`, and the server logs a warning at every start
+while that password is in use. Change it at once, or set `Identity:SeedAdmin:Password` (or
+`Identity:SeedAdmin:Enabled=false`) before the first start.
+
+For an unattended setup there is a one-time endpoint that creates an administrator, the `identity-admins` group and
+the Web console client. It is off by default; enable it with `Identity:Bootstrap:Enabled=true` and a secret of at
+least 32 characters in `Identity:Bootstrap:Secret`:
+
+```bash
+curl -k -X POST https://localhost:5002/internal/bootstrap-admin \
+  -H "Content-Type: application/json" -H "X-Bootstrap-Secret: $BOOTSTRAP_SECRET" \
+  -d '{ "email": "admin@example.com", "password": "..." }'
+# A second call returns 410 Gone.
+```
+
+---
+
+## What's new in 4.4
+
+Each item links to the migration steps in [UPGRADING.md](UPGRADING.md).
+
+- **OpenIddict 7**, with the Microsoft.Extensions and ASP.NET Core 10 packages on every target framework. Sessions and
+  refresh tokens issued by earlier versions stay valid.
+  [OpenIddict 7](UPGRADING.md#openiddict-7)
+- **`resource` (RFC 8707) is validated** on authorize, PAR and token exchange against the scopes' `Resources`.
+  [resource parameter](UPGRADING.md#resource-parameter)
+- **JWT client assertions follow rfc7523bis**: `typ` header `client-authentication+jwt` and the issuer as `aud`.
+  [Client assertions](UPGRADING.md#client-assertions-private_key_jwt-client_secret_jwt)
+- **Token exchange (RFC 8693)** runs on OpenIddict's built-in grant and checks the calling client and the user.
+- **DPoP-bound tokens at third-party resource servers** need OpenIddict's proof-of-possession check switched off for
+  `cnf.jkt`. [DPoP](UPGRADING.md#dpop-bound-access-tokens-at-third-party-resource-servers)
+- **The DataProtection key ring lives in redb**; the first start imports the old file ring once.
+  [DataProtection key ring](UPGRADING.md#dataprotection-key-ring)
+- **Images**: `redb-identity-web` runs as a non-root user and keeps its key ring and log on volumes; the `managed`
+  and `full` compose stacks keep the Tsak key rings on a volume. See [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ---
 
@@ -172,31 +310,34 @@ The only OAuth interaction that fundamentally requires a browser is the **author
 
 | Flow / endpoint | Needs HTTP + browser | Works on any transport |
 |---|---|---|
-| `client_credentials` (M2M) | — | ✅ |
-| `authorization_code` — redirect to `/authorize` | ✅ | — |
-| `authorization_code` — `code → token` exchange | — | ✅ |
-| `refresh_token`, `revoke`, `introspect`, `userinfo` | — | ✅ |
-| `device_code` — initial request | — | ✅ |
-| `device_code` — user verification URL | ✅ | — |
-| Management API, SCIM 2.0, audit query | — | ✅ |
+| `client_credentials` (M2M) | — | yes |
+| `authorization_code` — redirect to `/authorize` | yes | — |
+| `authorization_code` — `code → token` exchange | — | yes |
+| `refresh_token`, `revoke`, `introspect`, `userinfo` | — | yes |
+| `device_code` — initial request | — | yes |
+| `device_code` — user verification URL | yes | — |
+| Management API, SCIM 2.0, audit query | — | yes |
 
 ---
 
 ## Architecture
 
-### Two contexts, hosted in one Tsak worker
+### Engine and facade contexts, hosted in one Tsak worker
+
+The gRPC and WS-Trust facades (`identity.grpc`, `identity.soap`) sit next to `identity.http` the same way; the
+`identity.contracts` carrier holds the shared DTO assembly.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────┐
 │                                Tsak worker                                    │
 │                                                                               │
 │  ┌─────────────────────────────────────────────────────────────────────────┐ │
-│  │  RouteContext "identity"   ← redb.Identity.Core.Module.tpkg              │ │
+│  │  RouteContext "identity.core"  ← redb.Identity.Core.Module.tpkg          │ │
 │  │  ────────────────────────────────────────────────────────────────────── │ │
 │  │  • IdentityCoreRouteBuilder — ~50 direct-vm:// routes                   │ │
 │  │  • OpenIddict server pipeline (token, authorize, userinfo, ...)         │ │
 │  │  • redb stores: Users, Apps, Scopes, Tokens, Sessions, Audit, ...      │ │
-│  │  • DataProtection key-ring  (RedbXmlRepository)                         │ │
+│  │  • DataProtection key-ring in redb (RedbXmlRepository)                  │ │
 │  │  • Signing keys           (PropsSigningKeyStore — RSA 2048, encrypted) │ │
 │  │  • MFA: TOTP / SMS-Email OTP / WebAuthn / Recovery codes                │ │
 │  │  • Cleanup timers (.Cluster(true) → leader-only in a cluster):          │ │
@@ -237,17 +378,17 @@ The only OAuth interaction that fundamentally requires a browser is the **author
                         │  - Tokens, Authorizations     │
                         │  - Sessions, MFA, Federation  │
                         │  - DataProtection keys, JWKS  │
-                        │  - Audit trail (H9)           │
-                        │  - Idempotency cache (E2)     │
+                        │  - Audit trail                │
+                        │  - Idempotency cache          │
                         └───────────────────────────────┘
 ```
 
-### Project-reference isolation (Phase 8)
+### Project-reference isolation
 
 ```
-redb.Identity.Http  ─project-ref→  redb.Identity.Contracts          ✅
-redb.Identity.Http  ─project-ref→  redb.Identity.DataProtection     ✅
-redb.Identity.Http  ─project-ref→  redb.Identity.Core               ❌ FORBIDDEN
+redb.Identity.Http  ─project-ref→  redb.Identity.Contracts          allowed
+redb.Identity.Http  ─project-ref→  redb.Identity.DataProtection     allowed
+redb.Identity.Http  ─project-ref→  redb.Identity.Core               FORBIDDEN
 ```
 
 The HTTP facade compiles **without seeing a single type from Identity.Core**. It only sees:
@@ -266,7 +407,7 @@ This is what makes the `.tpkg` story honest: the two packages are independently 
 ├────────────────────────────────────────────────────────────────────────────┤
 │  Browser:   POST /connect/token  (form-encoded)                            │
 │  In-proc:   exchange.To("direct-vm://identity-token")                      │
-│  Future:    grpc client.Token(request) — same direct-vm under the hood     │
+│  gRPC:      client.Token(request) — same direct-vm under the hood          │
 └────────────────────────────────────────────────────────────────────────────┘
                                   │
                                   ▼
@@ -279,9 +420,9 @@ This is what makes the `.tpkg` story honest: the two packages are independently 
 ┌────────────────────────────────────────────────────────────────────────────┐
 │  IdentityCoreRouteBuilder.tokenRoute  (RouteId: identity-token)            │
 │                                                                            │
-│  WithRedbTx(...)                  ← E1: atomic write boundary              │
-│    .Process(trustedProxy)         ← C2: sanitize X-Forwarded-For           │
-│    .Process(perIpThrottle)        ← C1: per-IP rate limit (optional)       │
+│  WithRedbTx(...)                  ← atomic write boundary                  │
+│    .Process(trustedProxy)         ← sanitize X-Forwarded-For               │
+│    .Process(perIpThrottle)        ← per-IP rate limit (optional)           │
 │    .OnException<InvalidOperation> ← RFC 6749 error mapping                 │
 │    .Throttle(clientId, ...)       ← per-client token bucket                │
 │    .Traced("identity.token-request")                                       │
@@ -292,7 +433,7 @@ This is what makes the `.tpkg` story honest: the two packages are independently 
 │        ↑                                                                   │
 │        redb stores (RedbTokenStore, RedbApplicationStore, ...)             │
 │    .EndTraced()                                                            │
-│    .WireTap("direct-vm://identity-events")  ← H9: audit + multicast        │
+│    .WireTap("direct-vm://identity-events")  ← audit + multicast            │
 └────────────────────────────────────────────────────────────────────────────┘
                                   │
                                   ▼
@@ -320,11 +461,13 @@ redb.Identity/
 │   │                                   controllers over direct-vm://identity-manage-*,
 │   │                                   shared by the Http and Grpc facades
 │   ├── redb.Identity.Http/             HTTP facade — Kestrel + RedbControllers,
-│   │                                   project-ref-isolated from Core (Phase 8)
+│   │                                   project-ref-isolated from Core
 │   ├── redb.Identity.Grpc/             gRPC facade — the service-to-service subset
 │   │                                   (token, introspect, revoke, userinfo,
 │   │                                   discovery, jwks) over the same direct-vm
 │   │                                   routes; contract in Contracts/Protos
+│   ├── redb.Identity.Soap/             WS-Trust facade — Issue / Validate / Cancel /
+│   │                                   Renew over SOAP on the same core routes
 │   ├── redb.Identity.DataProtection/   RedbXmlRepository — ASP.NET DP keys in redb
 │   ├── redb.Identity.Resource.Dpop/    RFC 9449 DPoP resource-server validation
 │   ├── redb.Identity.Ldap/             LDAP external provider + sync (optional)
@@ -332,15 +475,17 @@ redb.Identity/
 │   │                                   per area (Users, Apps, MFA, SCIM, Audit, …)
 │   └── redb.Identity.Web/              Reference BFF + Blazor admin UI
 │                                       (only refs Contracts + Client — HARDLINE)
-├── tests/                              1767 passing / 1 skipped on PG · MSSQL · SQLite
+├── tests/                              Same suite on PostgreSQL · MSSQL · SQLite
 │   ├── redb.Identity.Tests/            Unit + integration (multi-provider harness)
 │   ├── redb.Identity.Client.Tests/     SDK transport contract tests
 │   └── redb.Identity.Web.Tests/        BFF smoke acceptance
-├── demos/                              ~55 live-server RFC-conformance probes + run_all.ps1
+├── demos/                              Live-server RFC-conformance probes + run_all.ps1
 ├── scripts/
-│   └── pack-tpkg.ps1                   Build + pack both .tpkg into Tsak Worker/Libs
-├── doc/                                Architecture notes, RFC mappings, sprint plans (internal — not published)
+│   └── pack-tpkg.ps1                   Build + pack the .tpkg modules into a Tsak worker's modules/
+├── context.sample.json                 Annotated configuration for every Identity context
 ├── README.md                           This file
+├── DEPLOYMENT.md, HTTPS.md             Images, archives, ports, secrets; TLS
+├── UPGRADING.md, CHANGELOG.md          Migration steps per version; changes
 ├── Directory.Build.props
 └── Directory.Packages.props            Central package versions (projects name no version)
 ```
@@ -349,7 +494,7 @@ redb.Identity/
 
 ## Endpoint catalogue
 
-**44 HTTP endpoints across 5 surfaces.** Every protocol endpoint (`/connect/*`) is *also* registered on `direct-vm://identity-*` for zero-network in-process calls — see [IdentityEndpoints.cs](src/redb.Identity.Contracts/Routes/IdentityEndpoints.cs).
+Every protocol endpoint (`/connect/*`) is *also* registered on `direct-vm://identity-*` for zero-network in-process calls — see [IdentityEndpoints.cs](src/redb.Identity.Contracts/Routes/IdentityEndpoints.cs).
 
 ### OAuth 2.1 / OIDC protocol surface (`/connect/*`, `/.well-known/*`)
 
@@ -357,9 +502,9 @@ Wired in [HttpFacadeRouteBuilder.cs](src/redb.Identity.Http/HttpFacadeRouteBuild
 
 | Path | Method | Auth | Purpose |
 |---|---|---|---|
-| `/connect/token` | POST | `client_credentials` / `password` / `refresh_token` / `device_code` | OAuth 2.1 token endpoint |
-| `/connect/authorize` | GET, POST | session cookie | Authorization endpoint (browser redirect) |
-| `/connect/par` | POST | `client_credentials` | Pushed Authorization Request (RFC 9126) |
+| `/connect/token` | POST | client authentication; grants `authorization_code` / `client_credentials` / `password` / `refresh_token` / `device_code` / token exchange (opt-in) | OAuth 2.1 token endpoint |
+| `/connect/authorize` | GET, POST | session cookie | Authorization endpoint (browser redirect); validates `resource` (RFC 8707) |
+| `/connect/par` | POST | `client_credentials` | Pushed Authorization Request (RFC 9126); validates `resource` |
 | `/connect/userinfo` | GET, POST | Bearer | OpenID Connect userinfo |
 | `/connect/introspect` | POST | `client_credentials` | RFC 7662 token introspection |
 | `/connect/revocation` | POST | `client_credentials` | RFC 7009 token revocation |
@@ -380,19 +525,19 @@ Wired in [HttpFacadeRouteBuilder.cs](src/redb.Identity.Http/HttpFacadeRouteBuild
 | `/users` (+ `/search`, `/{id}/change-password`) | GET/POST/PUT/DELETE | User management | [UsersController.cs](src/redb.Identity.Management/Controllers/UsersController.cs) |
 | `/groups` (+ `/{id}/children`, `/members`, `/move`) | GET/POST/PUT/DELETE | Hierarchical groups & membership | [GroupsController.cs](src/redb.Identity.Management/Controllers/GroupsController.cs) |
 | `/scopes` | GET/POST/PUT/DELETE | OAuth scope catalogue | [ScopesController.cs](src/redb.Identity.Management/Controllers/ScopesController.cs) |
-| `/claim-mappers` | GET/POST/PUT/DELETE | Declarative claim mapping rules (H5) | [ClaimMappersController.cs](src/redb.Identity.Management/Controllers/ClaimMappersController.cs) |
+| `/claim-mappers` | GET/POST/PUT/DELETE | Declarative claim mapping rules | [ClaimMappersController.cs](src/redb.Identity.Management/Controllers/ClaimMappersController.cs) |
 | `/claim-scopes` (+ `/assignments`) | GET/POST/PUT/DELETE | Reusable Client Scope bundles + per-app assignment | [ClaimScopesController.cs](src/redb.Identity.Management/Controllers/ClaimScopesController.cs) |
-| `/audit` | GET | Audit log query (H9) | [AuditController.cs](src/redb.Identity.Management/Controllers/AuditController.cs) |
-| `/tokens` | GET/POST/DELETE | Token lifecycle management | [TokensController.cs](src/redb.Identity.Management/Controllers/TokensController.cs) |
+| `/audit` | GET | Audit log query | [AuditController.cs](src/redb.Identity.Management/Controllers/AuditController.cs) |
+| `/tokens` | GET/POST/DELETE | Token lifecycle management; the type filter accepts the short and the URI form (`refresh_token`, `urn:ietf:params:oauth:token-type:refresh_token`) | [TokensController.cs](src/redb.Identity.Management/Controllers/TokensController.cs) |
 | `/consents` | GET/DELETE | User-consent admin | [ConsentsController.cs](src/redb.Identity.Management/Controllers/ConsentsController.cs) |
 | `/sessions` | GET/POST/DELETE | Admin session control | [SessionsController.cs](src/redb.Identity.Management/Controllers/SessionsController.cs) |
 | `/mfa` | GET/POST/DELETE | Admin MFA lifecycle | [MfaController.cs](src/redb.Identity.Management/Controllers/MfaController.cs) |
-| `/federation-providers` | GET/POST/PUT/DELETE | External IdP CRUD (H8, redb-stored) | [FederationProvidersController.cs](src/redb.Identity.Management/Controllers/FederationProvidersController.cs) |
-| `/revoked-sids` | GET/POST | W6-0 backchannel revoked-SIDs delta feed | [RevokedSidsController.cs](src/redb.Identity.Management/Controllers/RevokedSidsController.cs) |
+| `/federation-providers` | GET/POST/PUT/DELETE | External IdP CRUD (redb-stored) | [FederationProvidersController.cs](src/redb.Identity.Management/Controllers/FederationProvidersController.cs) |
+| `/revoked-sids` | GET/POST | Backchannel revoked-SIDs delta feed | [RevokedSidsController.cs](src/redb.Identity.Management/Controllers/RevokedSidsController.cs) |
 
 ### Self-service (`/me/*`) — requires Bearer + `identity:account` scope
 
-`RequireSelfOrAdminProcessor` guards every `/me/*` route: a token with `identity:account` can never mutate another user's data (B8).
+`RequireSelfOrAdminProcessor` guards every `/me/*` route: a token with `identity:account` can never mutate another user's data.
 
 | Path | Method | Purpose | Source |
 |---|---|---|---|
@@ -400,9 +545,9 @@ Wired in [HttpFacadeRouteBuilder.cs](src/redb.Identity.Http/HttpFacadeRouteBuild
 | `/me/password` | PUT | Self-service password change | [MePasswordController.cs](src/redb.Identity.Management/Controllers/MePasswordController.cs) |
 | `/me/sessions` | GET, DELETE | List/revoke own sessions (SSO) | [MeSessionsController.cs](src/redb.Identity.Management/Controllers/MeSessionsController.cs) |
 | `/me/mfa` | GET/POST/DELETE | Self-service MFA enroll/disable | [MeMfaController.cs](src/redb.Identity.Management/Controllers/MeMfaController.cs) |
-| `/me/webauthn` | GET/POST/PATCH/DELETE | WebAuthn credentials (FIDO2 / MFA-3) | [MeWebAuthnController.cs](src/redb.Identity.Management/Controllers/MeWebAuthnController.cs) |
+| `/me/webauthn` | GET/POST/PATCH/DELETE | WebAuthn credentials (FIDO2) | [MeWebAuthnController.cs](src/redb.Identity.Management/Controllers/MeWebAuthnController.cs) |
 | `/me/consents` | GET, DELETE | Consent dashboard | [MeConsentsController.cs](src/redb.Identity.Management/Controllers/MeConsentsController.cs) |
-| `/me/federated-identities` | GET/POST/DELETE | Link/unlink external IdP accounts (H8) | [MeFederatedIdentitiesController.cs](src/redb.Identity.Management/Controllers/MeFederatedIdentitiesController.cs) |
+| `/me/federated-identities` | GET/POST/DELETE | Link/unlink external IdP accounts | [MeFederatedIdentitiesController.cs](src/redb.Identity.Management/Controllers/MeFederatedIdentitiesController.cs) |
 
 ### gRPC (`identity.v1.Identity`)
 
@@ -446,7 +591,7 @@ an HTTP method and URL. Management operations are not on this transport yet.
 
 ## Standards compliance
 
-RFC compliance is verified by integration tests (`tests/redb.Identity.Tests/`) — every spec below is wired in code, not aspirational. Section references and §-citations live next to the matching assertions. **41 RFCs are cited by number in `src/`, 45 counting `tests/`**; the tables below are exhaustive.
+RFC compliance is verified by integration tests (`tests/redb.Identity.Tests/`) — every spec below is wired in code, not aspirational. Section references and §-citations live next to the matching assertions. **42 RFCs are cited by number in `src/`, 46 counting `tests/`**; the tables below are exhaustive.
 
 ### OAuth 2.x core
 
@@ -457,17 +602,18 @@ RFC compliance is verified by integration tests (`tests/redb.Identity.Tests/`) �
 | **7009** | Token Revocation | Always 200 (§2.1), idempotent re-revocation, refresh-token rotation. |
 | **7591** | Dynamic Client Registration | `POST /connect/register`, optional initial access token (§1.2). |
 | **7592** | DCR Management Protocol | `GET/PUT/DELETE /connect/register/{client_id}` with `registration_access_token`. |
-| **7521 / 7523** | Assertion Framework + JWT Bearer client authentication | `private_key_jwt` — DCR accepts `token_endpoint_auth_method=private_key_jwt` with inline `jwks`; `/connect/token` + `/connect/introspect` authenticate via an RS256-signed client assertion (RFC 7521 §4.2 / RFC 7523 §2.2); advertised in discovery `token_endpoint_auth_methods_supported`. Tampered signature → 401 `invalid_client`. Pinned by `demo_private_key_jwt`. |
+| **7521 / 7523** | Assertion Framework + JWT Bearer client authentication | `private_key_jwt` — DCR accepts `token_endpoint_auth_method=private_key_jwt` with inline `jwks`; `/connect/token` + `/connect/introspect` authenticate via an RS256-signed client assertion (RFC 7521 §4.2 / RFC 7523 §2.2); advertised in discovery `token_endpoint_auth_methods_supported`. Assertions follow draft-ietf-oauth-rfc7523bis: `typ` header `client-authentication+jwt` and the issuer as `aud`, for every endpoint ([UPGRADING.md](UPGRADING.md#client-assertions-private_key_jwt-client_secret_jwt)). Tampered signature → 401 `invalid_client`. Pinned by `demo_private_key_jwt`. |
 | **7636** | PKCE | `S256` mandated; `plain` rejected per OAuth 2.1 / RFC 7636 §4.2. |
 | **7662** | Token Introspection | RS256-signed, audience-checked, scope-filtered. |
-| **8252** | OAuth 2.0 for Native Apps (BCP 212) | Partial — private-use URI scheme redirect (§7.1), `application_type=native` and `token_endpoint_auth_method=none` accepted by DCR (`Register_NativeApp_SetsApplicationType`). Loopback IP redirect (§7.3) not yet specially handled. |
+| **8252** | OAuth 2.0 for Native Apps (BCP 212) | Private-use URI scheme redirect (§7.1); loopback IP redirect (§7.3) on `127.0.0.1` / `[::1]` with any port (`AllowLoopbackRedirectPortWildcard`, on by default); `application_type=native` and `token_endpoint_auth_method=none` accepted by DCR (`Register_NativeApp_SetsApplicationType`). |
 | **8414** | Authorization Server Metadata | `/.well-known/oauth-authorization-server` (separate from OIDC Discovery, for non-OIDC clients) — verified by `DiscoveryD1ConformanceTests`. |
 | **8628** | Device Authorization Grant | `/connect/deviceauthorization`, `/connect/device/verify`, configurable `expires_in` / `interval` (§3.2). |
-| **8693** | Token Exchange (opt-in) | `grant_type=urn:ietf:params:oauth:grant-type:token-exchange` — delegation + impersonation. |
+| **8693** | Token Exchange (opt-in) | `grant_type=urn:ietf:params:oauth:grant-type:token-exchange` on OpenIddict's built-in grant, switched on by `EnableTokenExchange`; delegation + impersonation. Subject and actor tokens are access tokens; a token bound to a presenter can be exchanged only by that client, and a token of a disabled or deleted user is refused with `invalid_grant`. |
+| **8707** | Resource Indicators | `resource` on `/connect/authorize`, `/connect/par` and token exchange: an absolute URI listed in a scope's `Resources`, with the client's `rsrc:<resource>` permission, otherwise `invalid_target` ([UPGRADING.md](UPGRADING.md#resource-parameter)). The access-token `aud` is composed from the same model (see RFC 9068). |
 | **9068** | JWT Profile for OAuth 2.0 Access Tokens | `typ: at+jwt` header (OpenIddict's default for access tokens; id_tokens stay `JWT`, internal tokens carry private `oi_*+jwt` types, so token-type confusion is structurally impossible). Required claims `iss`/`exp`/`aud`/`sub`/`client_id`/`iat`/`jti` plus `auth_time`/`acr`/`amr`, `scope`, and `roles`/`groups` under the §2.2.3 SCIM names. `aud` (§2.2/§3) is composed by `AttachAccessTokenResources`: Resources of the granted scopes ∪ the application's `AccessTokenAudiences`, the OP's own audience for `identity:*` scopes, `{issuer}/resources` (or `DefaultAccessTokenAudience`) as the default resource indicator, plus the requesting `client_id` (so the issuing client may introspect its own token — OpenIddict admits only audience members to introspection). The local validation stack behind the management API verifies `aud` (§4) — a token minted for another API is refused with 401. Pinned by `FullStackAccessTokenAudienceTests`. Note: with the default access-token encryption on, external resource servers see a JWE — set `DisableAccessTokenEncryption` for third-party RFC 9068 validation. |
 | **9101** | JAR — JWT-Secured Authorization Request | `/connect/authorize` accepts a signed `request` object, resolves the client's keys, verifies the signature and takes the parameters from inside the JWT with §6.1 precedence (inner values win; outer values not repeated inside are dropped). `ValidateRequestObjectHandler` **replaces** OpenIddict's built-in `ValidateRequestParameter` / `ValidateRequestUriParameter`, which reject both unconditionally. Opt-in via `Features.EnableJar` (default `false` → `request_not_supported`, byte-identical to releases before the flag existed); `request_uri` fetching is a second switch (`Jar.EnableRequestUri`) behind `OutboundUrlGuard`, while PAR-issued `urn:ietf:params:oauth:request_uri:` values stay with OpenIddict. Unsigned `alg:none` objects are refused with the flag on or off. Discovery advertises `request_parameter_supported` / `request_uri_parameter_supported` / `request_object_signing_alg_values_supported` only while the flag is on — the server never announces a mode it will not serve. Signing-algorithm mismatch against the client's registered hint is `LogOnly` or `Enforce`. Pinned by 15 tests in `ValidateRequestObjectHandlerTests`. |
 | **9126** | Pushed Authorization Requests (PAR) | `POST /connect/par`, configurable `Require PAR`, `request_uri` lifetime (§2.2). |
-| **9449** | DPoP — Demonstrating Proof-of-Possession | Issuance binding + `DPoP-Nonce` (§8) with HMAC-signed stateless nonces + resource-server validator (`redb.Identity.Resource.Dpop`). Per-`jkt` replay store (`DpopConsumedJtiProps`). |
+| **9449** | DPoP — Demonstrating Proof-of-Possession | Issuance binding (`cnf.jkt`) + `DPoP-Nonce` (§8) with HMAC-signed stateless nonces + resource-server validator (`redb.Identity.Resource.Dpop`). Per-`jkt` replay store (`DpopConsumedJtiProps`). A resource server of your own that validates these tokens with OpenIddict.Validation 7 must skip its proof-of-possession check for `cnf.jkt` and verify the DPoP proof itself ([UPGRADING.md](UPGRADING.md#dpop-bound-access-tokens-at-third-party-resource-servers)). |
 
 ### OpenID Connect
 
@@ -482,21 +628,16 @@ RFC compliance is verified by integration tests (`tests/redb.Identity.Tests/`) �
 ### OpenID conformance — tested against the official OIDF suite
 
 redb.Identity is exercised against the **official OpenID Foundation conformance
-suite** — the same suite the OIDF uses to certify providers — over native HTTPS:
-
-- **Config OP** — **0 failures**.
-- **Basic OP** — the authorization-code-flow modules pass; every automatable
-  module is green.
+suite** — the same suite the OIDF uses to certify providers — over native HTTPS,
+with the Config OP and Basic OP plans.
 
 Running that suite (most .NET OAuth stacks never do) surfaced — and fixed — the
 exact RFC-precision points hand-rolled servers trip on: errors delivered via
 the *registered* `redirect_uri` only (RFC 6749 §4.1.2.1), `400 invalid_grant`
 on code reuse (§5.2), `Cache-Control: no-store` on token responses (§5.1),
 boolean `email_verified` (OIDC §5.1), session-id-keyed `prompt=login` /
-`max_age` re-authentication (§3.1.2.1), and id_token hygiene. Full state and
-per-module breakdown: **[`OPENID_CERTIFICATION.md`](OPENID_CERTIFICATION.md)**.
-
-Formal [OpenID Certification](https://openid.net/certification/) is the next step.
+`max_age` re-authentication (§3.1.2.1), and id_token hygiene. Per-module
+breakdown: **[`OPENID_CERTIFICATION.md`](OPENID_CERTIFICATION.md)**.
 
 ### JOSE / JWT cryptography
 
@@ -526,7 +667,7 @@ Formal [OpenID Certification](https://openid.net/certification/) is the next ste
 | RFC / Spec | Coverage |
 |---|---|
 | **4226** | HOTP — the basis for TOTP (20-byte HMAC-SHA1 key per §4). |
-| **6238** | TOTP — with G2 atomicity (`SELECT FOR UPDATE` + `FailedAttempts++`) and G3 replay protection per §5.2 (a code from an already-accepted step is rejected even within skew). Pinned by `TotpReplayTests`. |
+| **6238** | TOTP — with atomic verification (`SELECT FOR UPDATE` + `FailedAttempts++`) and replay protection per §5.2 (a code from an already-accepted step is rejected even within skew). Pinned by `TotpReplayTests`. |
 | **WebAuthn Level 2 / FIDO2** | Registration + assertion (Fido2NetLib), consumed-challenge cleanup timer, per-credential admin. |
 | SMS / Email OTP, Recovery codes | One-shot, marked consumed in the same transaction as session creation. |
 
@@ -561,25 +702,25 @@ Formal [OpenID Certification](https://openid.net/certification/) is the next ste
 | **Argon2id** | Password hashing — PHC string format with unpadded base64 per **RFC 7693 §3.5** (`Argon2idPasswordHasher`). |
 | **PBKDF2 / RFC 2898** | Secret derivation for MFA shared-secret encryption (`MfaService` via `Rfc2898DeriveBytes.Pbkdf2(SHA-256)`). |
 | Recovery codes | One-shot, pepper-encrypted, marked consumed in the same transaction as session creation. |
-| Brute-force defense | Per-IP rate limits (C1), per-`(IP+user)` failure ceiling with security-channel logger (E5). |
-| Trusted proxies | `X-Forwarded-For` sanitized BEFORE rate-limit / lockout sees it (C2). |
+| Brute-force defense | Per-IP rate limits, per-`(IP+user)` failure ceiling with security-channel logger. |
+| Trusted proxies | `X-Forwarded-For` sanitized BEFORE rate-limit / lockout sees it. |
 | **SSRF guard on outbound fetches** | `OutboundUrlGuard` refuses loopback, **RFC 1918** private ranges, link-local (including the `169.254.169.254` cloud metadata address) and **RFC 6598** CGNAT space. It gates the only two URLs a client can make the server fetch: `jwks_uri` (`ClientKeyResolver`) and JAR `request_uri` (`ValidateRequestObjectHandler`). Private targets are reachable only by explicit opt-in (`ClientKeysOptions`), for single-network test hosts. Pinned by `OutboundUrlGuardTests`. |
-| Idempotency | E2 cache placed AFTER authorization — revoked tokens can't unlock cached responses. |
-| Self-vs-admin | `RequireSelfOrAdminProcessor` on every `/me/*` route (B8). |
+| Idempotency | Cache placed AFTER authorization — revoked tokens can't unlock cached responses. |
+| Self-vs-admin | `RequireSelfOrAdminProcessor` on every `/me/*` route. |
 | Constant-time comparisons | All secret comparisons. |
 | **Facade pages: framing, CSRF, consent binding** | Every response through the facade's serializer carries `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy` — the same set the web console's `SecurityHeadersMiddleware` emits. Form POSTs (`/login`, `/consent`, `/mfa`, `/mfa/recovery`) refuse a foreign `Origin`/`Referer` with 403 before reading the body (`AntiForgeryProcessors`; origin-less callers — the console's BFF, demos, API clients — pass). The consent page renders only from a server-signed ticket (`/consent?ct=…`, minted by the authorize endpoint — app name and scopes never come from the URL, so a crafted link cannot dress an attacker's client in a familiar name), and the decision is bound to the session cookie: no session → 401, a ticket minted for another user → 403, the form carries no `user_id`. Pinned by `FullStackFacadeFormHardeningTests`. |
 
 ### Tally
 
-**41 RFCs cited by number on a production code path.** Reproduce with:
+**42 RFCs cited by number in production code.** Reproduce with:
 
 ```sh
 grep -rhoE 'RFC[ -]?[0-9]{4}' --include=*.cs src | tr -d ' -' | sort -u
 ```
 
-> 1918, 4226, 4514, 4515, 6238, 6265, 6598, 6749, 6750, 7009, 7230, 7234, 7235, 7515, 7517, 7519, 7521, 7523, 7591, 7592, 7636, 7638, 7643, 7644, 7662, 7693, 7800, 7807, 8176, 8252, 8259, 8414, 8417, 8628, 8693, 8707, 9068, 9101, 9126, 9449, 9457
+> 1918, 4226, 4514, 4515, 6238, 6265, 6598, 6749, 6750, 7009, 7230, 7234, 7235, 7515, 7517, 7519, 7521, 7523, 7591, 7592, 7636, 7638, 7643, 7644, 7662, 7693, 7800, 7807, 8176, 8252, 8259, 8414, 8417, 8628, 8693, 8705, 8707, 9068, 9101, 9126, 9449, 9457
 
-**Four more are cited only from `tests/`** (45 across `src` + `tests`), because the RFC is what the assertion pins rather than something the production path names:
+**Four more are cited only from `tests/`** (46 across `src` + `tests`), because the RFC is what the assertion pins rather than something the production path names:
 
 > 5737 (TEST-NET-1 — unreachable-host LDAP resilience), 7231 (`Retry-After` delta-seconds format), 7232 (`ETag` / `If-Match` → 412 on SCIM), 7239 (`unknown` as a legal proxy identifier in `X-Forwarded-For` parsing).
 
@@ -588,7 +729,7 @@ grep -rhoE 'RFC[ -]?[0-9]{4}' --include=*.cs src | tr -d ' -' | sort -u
 - **RFC 2898** (PBKDF2) — used through the framework API, `Rfc2898DeriveBytes.Pbkdf2(SHA-256)` in `MfaService`, so the class name carries the number instead of a comment.
 - **RFC 6585** (`429 Too Many Requests`) — emitted by `RateLimitProcessor.EmitTooManyRequests` with a `Retry-After` header; the number is spelled out in the demo that pins it, `demo_throttle_rfc6585`.
 
-One entry in the list above is a **concept reference, not a wired feature**: RFC 8707 (Resource Indicators) names the model behind the access-token audience composition in `AttachAccessTokenResources` (scope → resources, per-application audiences, default indicator), but the explicit `resource` request parameter is not handled — see *Not implemented yet* below.
+One entry in the list above is a **reference, not a feature**: RFC 8705 is named where Identity explains that OpenIddict's own proof-of-possession check knows only certificate-bound tokens (`x5t#S256`); mutual-TLS client authentication is not implemented, see *Not implemented yet* below.
 
 Additional standards referenced without an explicit RFC tag in the source: OIDC Core 1.0, OIDC Discovery 1.0, OIDC RP-Initiated Logout 1.0, OIDC Backchannel Logout 1.0, OIDC Form Post Response Mode, WebAuthn Level 2 / FIDO2, SCIM 2.0, OAuth 2.1 PKCE-required profile, RFC 7515 / 7518 / 7519 (transitively via OpenIddict / `Microsoft.IdentityModel.Tokens`).
 
@@ -597,7 +738,6 @@ Additional standards referenced without an explicit RFC tag in the source: OIDC 
 None are blockers for the core IS profile; PRs welcome:
 
 - RFC 8705 — Mutual-TLS client authentication + certificate-bound access tokens
-- RFC 8707 — Resource Indicators for OAuth 2.0 (the audience composition in `AttachAccessTokenResources` follows its model; the explicit `resource` request parameter is not yet wired)
 - RFC 9207 — `iss` parameter in authorization response
 - RFC 9396 — RAR (Rich Authorization Requests)
 - RFC 9470 — Step-up Authentication Challenge
@@ -629,9 +769,9 @@ None are blockers for the core IS profile; PRs welcome:
 | Microsoft SQL Server 2019+ | `redb.MSSql` | `redb.MSSql.Pro` | Full parity for OAuth / SCIM / MFA / WebAuthn; Service Broker hooks in Pro |
 | SQLite 3.44+ | `redb.SQLite` | `redb.SQLite.Pro` | Single-file / embedded target for dev, edge and small deployments; same schemes, same contracts |
 
-> Identity references only the `redb.Core` OSS abstraction — **the host worker picks the provider**, Identity code never names one. The **same** test suite (1768 tests) runs green on all three: `Passed: 1767, Skipped: 1, Failed: 0` on PostgreSQL, MSSQL **and** SQLite by flipping a single `REDB_PROVIDER` env-var.
+> Identity references only the `redb.Core` OSS abstraction — **the host worker picks the provider**, Identity code never names one. The **same** test suite runs on PostgreSQL, MSSQL **and** SQLite; a single `REDB_PROVIDER` env-var picks the engine.
 
-### The 32 typed redb schemes that compose redb.Identity
+### The 33 typed redb schemes that compose redb.Identity
 
 All defined via `[RedbScheme("identity.*")]` in [src/redb.Identity.Core/Models/](src/redb.Identity.Core/Models/) (+ DataProtection). Enumerate them with:
 
@@ -643,17 +783,17 @@ grep -rhoE '\[RedbScheme\("[^"]+"' --include=*.cs src | sed 's/.*("//; s/"$//' |
 |---|---|
 | OAuth / OIDC core | `identity.application`, `identity.scope`, `identity.token`, `identity.authorization`, `identity.session`, `identity.idempotency_record` |
 | Users & groups | `identity.user`, `identity.group`, `identity.group_member`, `identity.password_history` |
-| Roles & assignments (B.3) | `identity.role`, `identity.user_role_assignment`, `identity.group_role_assignment`, `identity.role_scope_assignment` |
+| Roles & assignments | `identity.role`, `identity.user_role_assignment`, `identity.group_role_assignment`, `identity.role_scope_assignment` |
 | Account-lifecycle tokens | `identity.password_reset_token`, `identity.email_verification_token`, `identity.change_email_token` |
 | MFA / WebAuthn | `identity.mfa`, `identity.mfa_otp`, `identity.webauthn_consumed_challenge` |
-| Federation (H8) | `identity.federation_provider`, `identity.federated_identity` |
-| Claims engine (H5) | `identity.claim_definition`, `identity.claim_mapper`, `identity.claim_scope`, `identity.claim_scope_assignment` |
-| DPoP / replay (Z4) | `identity.dpop_consumed_jti` |
-| Webhooks (W1) | `identity.webhook_subscription` |
-| Cluster / cleanup | `identity.revoked_sid` (W6-0), `identity.system_flag` |
-| Crypto / DP-keys | `identity.signing_key`, `identity.dp_key` |
+| Federation | `identity.federation_provider`, `identity.federated_identity` |
+| Claims engine | `identity.claim_definition`, `identity.claim_mapper`, `identity.claim_scope`, `identity.claim_scope_assignment` |
+| DPoP / replay | `identity.dpop_consumed_jti` |
+| Webhooks | `identity.webhook_subscription` |
+| Cluster / cleanup | `identity.revoked_sid`, `identity.system_flag` |
+| Crypto / DP-keys | `identity.signing_key`, `identity.dp_key`, `identity.dp_key_import` (when the file key ring was moved into redb) |
 
-> **Audit is deliberately not one of them.** It used to be `identity.audit_event`, one props object per event. The R1 refactor moved it to a flat relational table, `identity_audit_log`, provisioned by `IdentityAuditLogTableInitListener`: an audit row is append-only, never queried by prop, and always read as a time-ordered range, so a multi-row props write bought nothing and cost a scan on every query. It is the one place where the object engine was the wrong shape, and saying so is more useful than pretending otherwise.
+> **Audit is deliberately not one of them.** It used to be `identity.audit_event`, one props object per event. It now lives in a flat relational table, `identity_audit_log`, provisioned by `IdentityAuditLogTableInitListener`: an audit row is append-only, never queried by prop, and always read as a time-ordered range, so a multi-row props write bought nothing and cost a scan on every query. It is the one place where the object engine was the wrong shape, and saying so is more useful than pretending otherwise.
 
 ### What a "table" looks like — zero migrations, full IntelliSense
 
@@ -699,12 +839,12 @@ Identity is designed for N-replica deployments where leadership rotates without 
 
 | Concern | Mechanism |
 |---|---|
-| DataProtection key-ring across replicas | `RedbXmlRepository` — redb-persisted XML keys; every replica refreshes its in-memory snapshot every `XmlRepositoryRefreshInterval` (default 60s). **Not** cluster-gated by design — every node must catch keys rotated by others. |
+| DataProtection key-ring across replicas | `RedbXmlRepository` — redb-persisted XML keys, registered as the ring's repository, so every node reads and writes the same ring. Every replica refreshes its in-memory snapshot every `XmlRepositoryRefreshInterval` (default 12 h, half of the 24 h DataProtection refresh of the active key). **Not** cluster-gated by design — every node must catch keys rotated by others. |
 | OAuth signing keys across replicas | `PropsSigningKeyStore` — RSA 2048 PEMs, DataProtection-encrypted at rest, bootstrapped under a distributed lock so only one replica generates the first key. Off by default (`UsePropsSigningKeyStore=false`); switch it on for multi-replica. |
 | Cleanup timers (tokens / sessions / MFA OTP / WebAuthn challenges / revoked SIDs) | Registered with `.Cluster(true)` — leader-only in a clustered Tsak deployment, silently ignored in standalone. Even without the marker, every cleanup uses `IBackgroundDeletionService` (claim pattern), so concurrent execution is safe — `.Cluster(true)` is belt-and-suspenders + log-noise reduction. |
-| MFA atomicity under concurrency | `SELECT FOR UPDATE` on the MFA row + `FailedAttempts++` inside the same transaction (G2). TOTP replay window enforced per RFC 6238 §5.2 (G3). |
+| MFA atomicity under concurrency | `SELECT FOR UPDATE` on the MFA row + `FailedAttempts++` inside the same transaction. TOTP replay window enforced per RFC 6238 §5.2. |
 | Backchannel logout across replicas | `/revoked-sids/add` writes the revocation; `/revoked-sids/since?cursor=` lets every RP replica pull deltas. Push-and-poll, not push-only — survives lost RP nodes and broken network partitions. |
-| OpenIddict per-request scoping | `RedbRouteOpenIddictServerHandler` captures `IServiceScopeFactory` and opens a fresh per-request scope — works correctly under .tpkg child SP isolation (Phase 9g). |
+| OpenIddict per-request scoping | `RedbRouteOpenIddictServerHandler` captures `IServiceScopeFactory` and opens a fresh per-request scope — works correctly under .tpkg child SP isolation. |
 
 ---
 
@@ -741,7 +881,7 @@ All audit-grade events route through a dedicated logger category so SIEM can sub
 
 - **Category:** `RedbIdentity.Security`
 - **Source:** [IdentitySecurityLog.cs](src/redb.Identity.Core/Security/IdentitySecurityLog.cs)
-- **Wired into:** `LoginService`, `MfaService`, `IdentityCoreRouteBuilder`, `BootstrapAdminProcessor`, rate-limit / RBAC rejections (E5)
+- **Wired into:** `LoginService`, `MfaService`, `IdentityCoreRouteBuilder`, `BootstrapAdminProcessor`, rate-limit / RBAC rejections
 
 ### Health checks — module `identity`
 
@@ -759,42 +899,34 @@ Surface under Tsak's aggregated `/api/health/{startup,live,ready}`. Defined in [
 
 | Surface | Defense |
 |---|---|
-| Token endpoint | Per-IP rate limit (C1) + per-`client_id` throttle (token bucket) + RFC 6749 error mapping |
-| Login endpoint | Per-IP rate limit + per-`(IP+username)` failure ceiling with security-channel logger (E5) |
+| Token endpoint | Per-IP rate limit + per-`client_id` throttle (token bucket) + RFC 6749 error mapping |
+| Login endpoint | Per-IP rate limit + per-`(IP+username)` failure ceiling with security-channel logger |
 | Facade HTML forms | `X-Frame-Options: DENY` + `frame-ancestors 'none'` on every page (no clickjacking of the consent "Allow"); cross-site `Origin`/`Referer` on `/login`, `/consent`, `/mfa*` → 403; consent page renders only from a server-signed ticket and the decision is bound to the session cookie, never to a form field |
 | Reserved headers | Never trusted from the wire on any transport: `IdentityReservedInboundHeaders` (Contracts) names the internal-only headers (`session_*`, `reauth_marked_sid`, `client_id`, `client_secret`, `access_token`, `user_id`, `ip_address`, `user_agent`) and each facade — HTTP, gRPC (metadata and envelope headers), SOAP — strips them as its first step, so only the cookie / `Authorization` / Basic / body / path / transport can set them. A forged `session_user_id` cannot impersonate a user and a forged `ip_address`/`user_id`/`client_id` cannot sign the audit log. `operation` is stripped on HTTP only — the gRPC envelope route lets the caller name it by design |
-| Audit attribution | `client_id` comes from Basic **or** the form body (form-authenticated clients, public PKCE included, used to be audited as NULL); `ip_address` falls back to the transport's proxy-sanitized `redbHttp.RemoteAddress` and `user_agent` to the real `User-Agent`; on SQLite the `timestamp` column is `REAL` (Julian day), matching how the provider encodes `DateTimeOffset` |
+| Audit attribution | `client_id` comes from Basic **or** the form body, so form-authenticated and public PKCE clients are attributed too; `ip_address` falls back to the transport's proxy-sanitized `redbHttp.RemoteAddress` and `user_agent` to the real `User-Agent`; on SQLite the `timestamp` column is `REAL` (Julian day), matching how the provider encodes `DateTimeOffset` |
 | Consent page | Renders and grants only from a server-signed consent ticket (`?ct=…`); app name and scopes come from the ticket, not the URL (no trusted-UI phishing), and the ticket is bound to the session user (no cross-session replay). Pinned by `FullStackFacadeFormHardeningTests` |
 | MFA verify | DB row-lock + `IdempotentConsumer` keyed by `(jti, code)` — defeats retransmit / captured-request replay |
 | Recovery codes | One-shot — marked consumed in the same transaction as session creation |
-| Self vs admin | `RequireSelfOrAdminProcessor` on every `/me/*` route — a token with `identity:account` can never mutate another user's MFA, password, sessions, or consents (B8) |
-| Idempotency | E2 cache placed AFTER authorization so a revoked token cannot unlock cached responses |
-| Trusted proxies | `TrustedProxyResolverProcessor` (C2) — `redbHttp.RemoteAddress` is sanitized BEFORE any rate-limit / lockout sees it |
+| Self vs admin | `RequireSelfOrAdminProcessor` on every `/me/*` route — a token with `identity:account` can never mutate another user's MFA, password, sessions, or consents |
+| Idempotency | Cache placed AFTER authorization so a revoked token cannot unlock cached responses |
+| Trusted proxies | `TrustedProxyResolverProcessor` — `redbHttp.RemoteAddress` is sanitized BEFORE any rate-limit / lockout sees it |
 | Password history | Configurable depth, rejects reuse |
 | Federation | OIDC + GitHub, secrets server-side, never returned over the wire |
-| Audit (H9) | Flat `identity_audit_log` table + optional external multicast (Kafka / Elasticsearch / RabbitMQ / log) — typed payloads, then JSON for external transports |
+| Audit | Flat `identity_audit_log` table + optional external multicast (Kafka / Elasticsearch / RabbitMQ / log) — typed payloads, then JSON for external transports |
 | DPoP | RFC 9449 — issuance binding + resource-server `redb.Identity.Resource.Dpop` for downstream APIs |
-| Secrets | Never in `context.json` — only via Tsak L5 override env-vars (`Tsak__Contexts__identity__Override__Identity__*`) |
-
-Critical-severity findings from internal review (CLU-1 .. CLU-5) are closed and pinned by tests:
-
-- **CLU-1** ✅ Singleton + immutable XML snapshot; per-replica refresh
-- **CLU-2** ✅ Per-request scope for OpenIddict handlers
-- **CLU-3** ✅ `AllowEphemeralKeys = false` (default) — prod always uses persisted signing keys
-- **CLU-4** ✅ All cleanup routes carry `.Cluster(true)` — pinned by `ClusteredRouteMarkingTests`
-- **CLU-5** ✅ `LockForUpdateAsync(mfaObjId)` BEFORE `MfaService.VerifyAsync`
+| Secrets | Never in `context.json` — only via Tsak override env-vars (`Tsak__Contexts__identity.core__Override__Identity__*`) |
 
 ---
 
 ## Audit event catalogue
 
-**109 typed audit events across 7 categories** — single source of truth in [IdentityAuditEventIds.cs](src/redb.Identity.Contracts/Routes/IdentityAuditEventIds.cs), with `IdentityAuditCategories.CategoryOf(eventType)` as the one mapping from event to bucket. Every event lands in the flat `identity_audit_log` table (see the storage section — audit is the one part of Identity that is deliberately relational, not props) and, if configured, is multicast to Kafka / Elasticsearch / RabbitMQ / log (H9). Plaintext secrets are never persisted to audit — rotations log a `ClientSecretRotated` marker only.
+**109 typed audit events across 7 categories** — single source of truth in [IdentityAuditEventIds.cs](src/redb.Identity.Contracts/Routes/IdentityAuditEventIds.cs), with `IdentityAuditCategories.CategoryOf(eventType)` as the one mapping from event to bucket. Every event lands in the flat `identity_audit_log` table (see the storage section — audit is the one part of Identity that is deliberately relational, not props) and, if configured, is multicast to Kafka / Elasticsearch / RabbitMQ / log. Plaintext secrets are never persisted to audit — rotations log a `ClientSecretRotated` marker only.
 
 | Category | Count | Examples |
 |---|---:|---|
 | `authentication` | 14 | `UserLoggedIn`, `UserLoggedOut`, `LoginFailed`, `PasswordChanged`, the password-reset chain (`Requested` / `TokenIssued` / `Completed` / `Failed`), email verification (`Sent` / `Completed` / `Failed`), email change (`Requested` / `Completed` / `Failed`) |
 | `authorization` | 14 | `TokenIssued`, `TokenRevoked`, `TokenIntrospected`, `AuthorizationGranted`, `ConsentGranted` / `Revoked` / `AllConsentsRevoked`, `DeviceCodeIssued` / `Verified` / `Denied`, `ParRequestAccepted` / `Rejected`, `DpopBindingApplied`, `DpopReplayDetected` |
-| `admin` | 42 | `ClientRegistered` / `Updated` / `Deleted` / `SecretRotated`, `Scope*`, `ClaimMapper*`, `ClaimScope*` (+ `Assigned` / `Unassigned`), `User*`, `Group*` (+ `Moved`), `Member*`, the B.3 role registry (`RoleCreated` / `Updated` / `Deleted`, `RoleAssignedUser` / `Group`, `RoleScopeAttached` / `Detached`) and W1 webhook subscriptions (`Created` / `Updated` / `Deleted` / `SecretRotated`) |
+| `admin` | 42 | `ClientRegistered` / `Updated` / `Deleted` / `SecretRotated`, `Scope*`, `ClaimMapper*`, `ClaimScope*` (+ `Assigned` / `Unassigned`), `User*`, `Group*` (+ `Moved`), `Member*`, the role registry (`RoleCreated` / `Updated` / `Deleted`, `RoleAssignedUser` / `Group`, `RoleScopeAttached` / `Detached`) and webhook subscriptions (`Created` / `Updated` / `Deleted` / `SecretRotated`) |
 | `federation` | 9 | `FederationChallengeInitiated`, `FederationStateValidationFailed`, `FederatedUserLoggedIn`, `FederatedIdentityLinked` / `Unlinked`, `FederatedEmailConflict`, `FederationProvider*` |
 | `mfa` | 10 | `MfaEnrolled`, `MfaDisabled`, `MfaChallengeIssued`, `MfaVerifyFailed`, `MfaRecoveryCodeUsed` / `CodesDownloaded`, `MfaWebAuthnRegistered` / `Asserted` / `Revoked` / `SignCounterAnomaly` |
 | `scim` | 9 | `ScimUserCreated` / `Replaced` / `Patched` / `Deleted`, `ScimGroupCreated` / `Replaced` / `Patched` / `Deleted`, `ScimBulkProcessed` |
@@ -804,110 +936,9 @@ Critical-severity findings from internal review (CLU-1 .. CLU-5) are closed and 
 
 ---
 
-## Quick start
-
-> Packages are on NuGet (see [Install](#install-nuget)). The steps below build the
-> `.tpkg` modules from source for hosting inside a redb.Tsak worker.
-
-### 1. Build
-
-```pwsh
-cd redb.Identity
-dotnet build redb.Identity.slnx --nologo
-```
-
-### 2. Pack the `.tpkg` modules
-
-```pwsh
-.\scripts\pack-tpkg.ps1                # produces redb.Identity.Core.Module.tpkg + redb.Identity.Http.tpkg
-                                       # and copies both into the Tsak Worker's Libs/ directory
-```
-
-Two `.tpkg` files are produced:
-
-| Package | Contains | Loads into Tsak context |
-|---|---|---|
-| `redb.Identity.Core.Module.tpkg` | Core + Contracts + DataProtection + OpenIddict + Fido2 + Argon2 companion DLLs | `identity` |
-| `redb.Identity.Http.tpkg` | HTTP facade — controllers, Kestrel listener, broker SPIs | `identity.http` |
-
-### 3. Configure (`context.json` overrides)
-
-Identity reads its configuration from the merged 5-layer Tsak config under the `Identity` key. A minimal `context.json` for the `identity` Tsak context:
-
-```jsonc
-{
-  "Identity": {
-    "Shared": {
-      "Issuer": "https://identity.local/"
-    },
-    // optional — the OP's own access-token audience (RFC 9068); default "{Issuer}/resources"
-    "DefaultAccessTokenAudience": "https://identity.local/resources",
-    "Features": {
-      "EnableScim": true,
-      "EnableDeviceCodeFlow": true,
-      "EnablePushedAuthorization": true,
-      "EnableDynamicRegistration": false
-    },
-    "TokenCleanupInterval": "01:00:00",
-    "SessionCleanupInterval": "01:00:00",
-    "RevokedSidsCleanupInterval": "01:00:00",
-    "MfaOtpCleanupInterval": "00:15:00",
-    "XmlRepositoryRefreshInterval": "00:01:00",
-    "WebAuthn": { "Enabled": true, "RpId": "identity.local" }
-  }
-}
-```
-
-Secrets live ONLY in L5 env-vars (never in `context.json`):
-
-```
-Tsak__Contexts__identity__Override__Identity__RecoveryCodePepper=...
-Tsak__Contexts__identity__Override__Identity__FederationProviders__0__ClientSecret=...
-Tsak__Contexts__identity__Override__Identity__Ldap__Providers__0__BindPassword=...
-```
-
-### 4. Start the Tsak worker
-
-```pwsh
-cd ..\redb.Tsak\src\redb.Tsak.Worker
-dotnet run
-```
-
-```
-[INF] Tsak worker starting…
-[INF] Loaded package redb.Identity.Core.Module (1.0.0)
-[INF] Loaded package redb.Identity.Http (1.0.0)
-[INF] redb.Identity: redb base schema ready (22 scheme types synced)
-[INF] redb.Identity: unique indexes bootstrap complete (PostgreSQL) — applied=12 skipped=0
-[INF] redb.Identity: DataProtection key-ring snapshot loaded (3 keys)
-[INF] context 'identity' started
-[INF] context 'identity.http' started, listening on http://0.0.0.0:5000
-[INF] Ready
-```
-
-### 5. Verify
-
-```bash
-curl http://localhost:5000/.well-known/openid-configuration | jq
-curl http://localhost:5000/.well-known/jwks | jq
-```
-
-### 6. Bootstrap the first admin user (one-shot)
-
-The first admin / first OAuth client is created atomically through a one-time endpoint that self-locks via a `SystemFlag(bootstrap_completed)` sentinel:
-
-```bash
-curl -X POST http://localhost:5000/internal/bootstrap-admin \
-  -H "Content-Type: application/json" \
-  -d '{ "username": "admin", "password": "...", "email": "admin@local" }'
-# Second call returns 410 Gone.
-```
-
----
-
 ## Runnable demos (`demos/`)
 
-Beyond the xUnit suite, `demos/` holds **~55 self-contained PowerShell probes** that drive a **live** Identity server over its real HTTP surface — one `demo_*.ps1` per protocol contract. They double as executable RFC documentation and as a black-box regression net: each script sets up its own client (via DCR), runs the flow end-to-end, and asserts the wire-level result (status codes, headers, token/JWKS shape, replay rejection, …). Most print an `N/N PASS` line and exit non-zero on the first broken assertion.
+Beyond the xUnit suite, `demos/` holds **self-contained PowerShell probes** that drive a **live** Identity server over its real HTTP surface — one `demo_*.ps1` per protocol contract. They double as executable RFC documentation and as a black-box regression net: each script sets up its own client (via DCR), runs the flow end-to-end, and asserts the wire-level result (status codes, headers, token/JWKS shape, replay rejection, …). Most print an `N/N PASS` line and exit non-zero on the first broken assertion.
 
 A sampling of what they pin (see the directory for the full set):
 
@@ -929,13 +960,13 @@ A sampling of what they pin (see the directory for the full set):
 ### Run them all
 
 ```pwsh
-cd redb.Identity\demos
+cd demos
 pwsh -File .\run_all.ps1                 # run every demo_*.ps1 in canonical order
 pwsh -File .\run_all.ps1 -Only mfa       # only demos whose name matches "mfa"
 pwsh -File .\run_all.ps1 -StopOnFail     # bail out on the first failing demo
 ```
 
-`run_all.ps1` executes each demo in its own `pwsh` child process (a hard failure in one can't abort the rest), streams stdout live, captures a per-demo transcript to `demos/_logs/<demo>.log`, and prints a final pass/fail summary table. Browser-in-the-loop demos (e.g. `demo_device_code.ps1`) are skipped unless `-IncludeInteractive` is passed. Point the demos at a running worker (default `http://localhost:5000`) started per the [Quick start](#quick-start) above.
+`run_all.ps1` executes each demo in its own `pwsh` child process (a hard failure in one can't abort the rest), streams stdout live, captures a per-demo transcript to `demos/_logs/<demo>.log`, and prints a final pass/fail summary table. Browser-in-the-loop demos (e.g. `demo_device_code.ps1`) are skipped unless `-IncludeInteractive` is passed. Point the demos at a running server with `IDENTITY_BASE` (default `https://127.0.0.1:5002`), started per the [Quick start](#quick-start) above.
 
 ---
 
@@ -999,46 +1030,38 @@ Pages cover both self-service (`/Me/*`) and admin (`/Admin/*`) surfaces:
 
 ```pwsh
 # default provider (SQLite)
-dotnet test redb.Identity\tests\redb.Identity.Tests\redb.Identity.Tests.csproj --nologo
+dotnet test tests\redb.Identity.Tests\redb.Identity.Tests.csproj --nologo
 
 # pick the storage engine with one env-var — the same suite runs on all three
 $env:REDB_PROVIDER = "postgres"   # or "mssql" or "sqlite" (default)
 $env:REDB_USE_PRO  = "true"       # Pro tier (ChangeTracking); "false" for Free
-dotnet test redb.Identity\tests\redb.Identity.Tests\redb.Identity.Tests.csproj --nologo
+dotnet test tests\redb.Identity.Tests\redb.Identity.Tests.csproj --nologo
 ```
 
-**The full suite is green on all three redb providers from one identical codebase:**
+Provider selection is a runtime env-var; no Identity source changes between providers.
 
-```
-Test Run Successful.
-Total tests: 1768
-     Passed: 1767
-    Skipped: 1
-```
-
-…on **PostgreSQL**, **Microsoft SQL Server** and **SQLite** alike (the single skip is a known PostgreSQL-specific test-host teardown probe). Provider selection is a runtime env-var; no Identity source changes between rows.
-
-| Project | Count | Notes |
-|---|---:|---|
-| `redb.Identity.Tests` | **1767 passing / 1 skipped** | Unit + integration; real PostgreSQL / MSSQL / SQLite via `HttpIdentityFixture` for HTTP E2E |
-| `redb.Identity.Client.Tests` | 136 passing | SDK transport / serialization contract |
-| `redb.Identity.Web.Tests` | 7 passing | BFF smoke acceptance |
+| Project | Notes |
+|---|---|
+| `redb.Identity.Tests` | Unit + integration; real PostgreSQL / MSSQL / SQLite via `HttpIdentityFixture` for HTTP E2E |
+| `redb.Identity.Client.Tests` | SDK transport / serialization contract |
+| `redb.Identity.Web.Tests` | BFF smoke acceptance |
 
 Key invariants pinned by tests (non-exhaustive):
 
 - **Cluster-route marking**: only cleanup routes are `.Cluster(true)` (`ClusteredRouteMarkingTests`)
-- **Multi-replica key-ring**: two `RedbXmlRepository` instances against the same DB see each other's keys (G1)
-- **MFA concurrency**: parallel verify never double-spends a recovery code, atomic `FailedAttempts++` (G2)
-- **TOTP replay**: identical code rejected within RFC 6238 §5.2 window (G3)
-- **DataProtection at rest**: AES-GCM via DP, not plaintext PEMs (C10)
-- **Project-reference isolation**: zero `using redb.Identity.Core;` under `redb.Identity.Http/` (Phase 8)
+- **Multi-replica key-ring**: two `RedbXmlRepository` instances against the same DB see each other's keys
+- **Key-ring import**: a file key ring from before the move into redb is imported once, and only keys older than the move
+- **MFA concurrency**: parallel verify never double-spends a recovery code, atomic `FailedAttempts++`
+- **TOTP replay**: identical code rejected within RFC 6238 §5.2 window
+- **DataProtection at rest**: AES-GCM via DP, not plaintext PEMs
+- **Project-reference isolation**: zero `using redb.Identity.Core;` under `redb.Identity.Http/`
 - **DTO validation boundary**: comprehensive `DtoValidationTests` over every wire DTO
 
 ---
 
 ## Roadmap (excerpt)
 
-Shipped today: HTTP facade, **gRPC facade**, **SOAP / WS-Trust facade**, LDAP / Active Directory federation, full management API, SCIM 2.0, MFA (TOTP / SMS / Email OTP / WebAuthn), federation (OIDC + GitHub), backchannel logout (push + pull), DPoP, PAR, DCR, JAR (opt-in), impersonation, outgoing webhooks, audit (`identity_audit_log` + multicast). Core packages are on NuGet as of `1.0.1`.
+Shipped today: HTTP facade, **gRPC facade**, **SOAP / WS-Trust facade**, LDAP / Active Directory federation, full management API, SCIM 2.0, MFA (TOTP / SMS / Email OTP / WebAuthn), federation (OIDC + GitHub), backchannel logout (push + pull), DPoP, PAR, DCR, JAR (opt-in), impersonation, outgoing webhooks, audit (`identity_audit_log` + multicast), NuGet packages, signed Docker images and release archives.
 
 Planned facades & integrations (same `.tpkg` pattern, no Core changes):
 
@@ -1048,21 +1071,20 @@ Planned facades & integrations (same `.tpkg` pattern, no Core changes):
 
 Planned protocol work, in rough order of demand:
 
-- Formal [OpenID Certification](https://openid.net/certification/) submission — the conformance runs are already green, see [`OPENID_CERTIFICATION.md`](OPENID_CERTIFICATION.md)
-- SAML 2.0 — currently **not implemented** in either direction (no IdP, no SP). The reasoning and the conditions that would change it are written down in `doc/rewiewFix/SPRINT-Z-rfc-missing/Z-DEFERRED-saml.md`
+- Formal [OpenID Certification](https://openid.net/certification/) submission; conformance results in [`OPENID_CERTIFICATION.md`](OPENID_CERTIFICATION.md)
+- SAML 2.0 — **not implemented** in either direction (no IdP, no SP)
 - Risk-adaptive authentication and trusted-device records — the inputs (session IP, user agent, device label, failure counters, audit trail) are already stored; the scoring and step-up policy on top of them are not
 - The RFCs listed under *Not implemented yet* above
-
-Docker images (Worker + Web stack) and signed release artifacts will follow.
 
 ---
 
 ## Contributing & license
 
-- License: [Apache 2.0](LICENSE)
+- License: [Apache 2.0](https://github.com/redbase-app/redb-identity/blob/main/LICENSE)
 - Engine: [OpenIddict](https://documentation.openiddict.com/) (Apache 2.0)
 - Runtime: [redb.Route](https://github.com/redbase-app/redb-route)
 - Container: [redb.Tsak](https://github.com/redbase-app/redb-tsak)
 - Storage: [redb.Core](https://github.com/redbase-app/redb)
 
-Contributions welcome once the repository is public. Until then, internal contribution guide lives in `doc/`.
+Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities as described in
+[SECURITY.md](SECURITY.md).

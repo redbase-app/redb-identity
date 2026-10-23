@@ -38,6 +38,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Pending changes live in `changelog/unreleased/` until the release; `pwsh scripts/changelog.ps1 -Preview` shows them.
 
+## [4.4.2] — 2026-10-23
+
+### Changed
+
+- **The `backend`, `managed` and `full` Dockerfiles build without `--build-arg TSAK_VERSION`.** The base Tsak image
+  defaults to the Tsak release it was built with, and Docker no longer warns about an empty base image name. `publish/docker/DOCKER.md` now
+  describes the 4.4 build: .NET 10 SDK, Tsak base images of the same release, `-net10` tags.
+
 ## [4.4.1] — 2026-10-21
 
 ### Changed
