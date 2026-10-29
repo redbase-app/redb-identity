@@ -7,10 +7,10 @@
 #   4. attach the scope to the role
 #   5. create user, assign user to role
 #   6. DCR a ROPC client that's ALLOWED 'shop:orders.read'
-#   7. ROPC scope='openid email' (deliberately NOT requesting shop:orders.read)
-#   8. introspect access_token, assert scope contains 'shop:orders.read'
-#   9. detach scope, re-ROPC, assert 'shop:orders.read' gone
-#   10. cleanup
+#   7. ROPC scope='openid email' (NOT requesting shop:orders.read): assert it is absent
+#      (a role entitles a requested scope, it never adds one)
+#   8. ROPC requesting shop:orders.read: assert it is granted
+#   9. cleanup
 #
 #requires -Version 7
 
@@ -127,38 +127,32 @@ $ropcReg = Measure-Step "9. POST /applications (ROPC client + scp:$scopeName all
     return @{ client_id = $ropcClientId; client_secret = $ropcSecret }
 }
 
-# Step 10 — ROPC NOT requesting the role-attached scope; expect server to ADD it
-# Token endpoint response carries the granted scope set verbatim — including
-# anything our AttachRoleRegistryClaims handler added via SetScopes on the
-# principal. Asserting here (vs introspect) avoids depending on OpenIddict's
-# default introspect-payload narrowing for scope.
+# Step 10 — ROPC NOT requesting the role-attached scope: a role entitles a requested scope, it does not
+# add one, so the scope must be absent.
 Measure-Step "10. ROPC scope='openid profile email' (no $scopeName in request)" {
     $tok = Invoke-RestMethod -Method Post "$BASE/connect/token" -ContentType "application/x-www-form-urlencoded" `
       -Body @{ grant_type = "password"; client_id = $ropcReg.client_id; client_secret = $ropcReg.client_secret;
                username = $userLogin; password = "Test1234Pass!"; scope = "openid profile email" }
     Write-Host "  granted scope = $($tok.scope)" -ForegroundColor Gray
-    if ($tok.scope -notmatch [Regex]::Escape($scopeName)) {
-        throw "expected '$scopeName' in granted scope (auto-added by role attachment)"
+    if ($tok.scope -match [Regex]::Escape($scopeName)) {
+        throw "'$scopeName' was granted without being requested"
     }
 } | Out-Null
 
-# Step 11 — detach + re-ROPC; should be gone
-Measure-Step "11. DELETE /roles/$RoleId/scopes/$ScopeId (detach)" {
-    Invoke-RestMethod -Method Delete "$BASE/api/v1/identity/roles/$RoleId/scopes/$ScopeId" -Headers $H | Out-Null
-} | Out-Null
-
-Measure-Step "12. ROPC after detach; expect '$scopeName' GONE from granted set" {
+# Step 11 — ROPC requesting it: the client is allowed the scope and the user's role carries it.
+Measure-Step "11. ROPC scope='openid $scopeName' (requested)" {
     $tok = Invoke-RestMethod -Method Post "$BASE/connect/token" -ContentType "application/x-www-form-urlencoded" `
       -Body @{ grant_type = "password"; client_id = $ropcReg.client_id; client_secret = $ropcReg.client_secret;
-               username = $userLogin; password = "Test1234Pass!"; scope = "openid profile email" }
+               username = $userLogin; password = "Test1234Pass!"; scope = "openid $scopeName" }
     Write-Host "  granted scope = $($tok.scope)" -ForegroundColor Gray
-    if ($tok.scope -match [Regex]::Escape($scopeName)) {
-        throw "scope '$scopeName' still present after detach"
+    if ($tok.scope -and $tok.scope -notmatch [Regex]::Escape($scopeName)) {
+        throw "expected '$scopeName' in granted scope"
     }
 } | Out-Null
 
-# Cleanup
-Measure-Step "13. cleanup" {
+# Cleanup (detach first, then the objects)
+Measure-Step "12. cleanup" {
+    try { Invoke-RestMethod -Method Delete "$BASE/api/v1/identity/roles/$RoleId/scopes/$ScopeId" -Headers $H | Out-Null } catch {}
     try { Invoke-RestMethod -Method Delete "$BASE/api/v1/identity/users/$UserId" -Headers $H | Out-Null } catch {}
     try { Invoke-RestMethod -Method Delete "$BASE/api/v1/identity/roles/$RoleId" -Headers $H | Out-Null } catch {}
     try { Invoke-RestMethod -Method Delete "$BASE/api/v1/identity/scopes/$ScopeId" -Headers $H | Out-Null } catch {}

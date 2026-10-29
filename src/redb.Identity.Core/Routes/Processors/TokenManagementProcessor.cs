@@ -213,8 +213,20 @@ internal sealed class TokenManagementProcessor : IProcessor
         exchange.Out ??= new redb.Route.Core.Message();
         exchange.Out.Body = new { success = true };
 
+        // The token's owner, so the event names the user: the subject column (value_guid) is the
+        // public sub, the user's internal id is the key of their UserProps. A client token has no
+        // subject and the event carries no user.
+        long? userId = null;
+        if (token.value_guid is { } subject && subject != Guid.Empty)
+        {
+            var user = await _redb.Query<UserProps>()
+                .WhereRedb(o => o.ValueGuid == subject)
+                .FirstOrDefaultAsync();
+            userId = user?.key;
+        }
+
         exchange.Properties["identity-event-type"] = IdentityAuditEventIds.TokenRevoked;
-        exchange.Properties["identity-event-data"] = new { TokenId = tokenId };
+        exchange.Properties["identity-event-data"] = new { TokenId = tokenId, UserId = userId };
     }
 
     private async Task RevokeByUser(IRedbService _redb, IExchange exchange, CancellationToken ct)

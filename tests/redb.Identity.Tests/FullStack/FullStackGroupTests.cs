@@ -287,6 +287,39 @@ public class FullStackGroupTests
     }
 
     [Fact]
+    public async Task GroupWithNameOnly_UserGroupsAndReadsWork()
+    {
+        // No groupType, no description: redb stores no props rows for this group.
+        var groupResp = await SendJson(HttpMethod.Post, "/api/v1/identity/groups",
+            new { name = "HttpNameOnly-" + Guid.NewGuid().ToString("N")[..8] });
+        groupResp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var groupId = (await ParseJson(groupResp)).GetProperty("id").GetInt64();
+        var userId = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        (await SendJson(HttpMethod.Post, $"/api/v1/identity/groups/{groupId}/members",
+            new { userId })).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var userGroupsResp = await SendAuth(HttpMethod.Get, $"/api/v1/identity/groups/users/{userId}/groups");
+        var userGroupsBody = await userGroupsResp.Content.ReadAsStringAsync();
+        userGroupsResp.StatusCode.Should().Be(HttpStatusCode.OK, "user-groups: {0}", userGroupsBody);
+        var userGroups = JsonDocument.Parse(userGroupsBody).RootElement;
+        userGroups.ValueKind.Should().Be(JsonValueKind.Array, "user-groups: {0}", userGroupsBody);
+        userGroups.EnumerateArray().Should().Contain(g => g.GetProperty("groupId").GetInt64() == groupId);
+
+        var read = await ParseJson(await SendAuth(HttpMethod.Get, $"/api/v1/identity/groups/{groupId}"));
+        read.TryGetProperty("error", out _).Should().BeFalse("get: {0}", read.ToString());
+        read.GetProperty("id").GetInt64().Should().Be(groupId);
+
+        var tree = await ParseJson(await SendAuth(HttpMethod.Get, $"/api/v1/identity/groups/{groupId}/tree"));
+        tree.TryGetProperty("error", out _).Should().BeFalse("tree: {0}", tree.ToString());
+
+        (await SendJson(HttpMethod.Put, $"/api/v1/identity/groups/{groupId}",
+            new { groupType = "team" })).StatusCode.Should().Be(HttpStatusCode.OK);
+        var reRead = await ParseJson(await SendAuth(HttpMethod.Get, $"/api/v1/identity/groups/{groupId}"));
+        reRead.GetProperty("groupType").GetString().Should().Be("team");
+    }
+
+    [Fact]
     public async Task IsMember_Check_ReturnsCorrectResult()
     {
         var groupResp = await SendJson(HttpMethod.Post, "/api/v1/identity/groups",

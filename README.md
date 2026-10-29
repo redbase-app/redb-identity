@@ -175,9 +175,15 @@ Tsak__Contexts__identity.core__Override__Identity__Ldap__Providers__0__BindPassw
 
 ### First administrator
 
-A fresh database has the user `admin` with the password `admin`, and the server logs a warning at every start
-while that password is in use. Change it at once, or set `Identity:SeedAdmin:Password` (or
-`Identity:SeedAdmin:Enabled=false`) before the first start.
+A fresh database has the user `admin` with the password `admin`. Set `Identity:SeedAdmin:Password` before the
+first start (or `Identity:SeedAdmin:Enabled=false`): Identity applies it while the stored password is empty or still
+`admin`, and never overwrites a password that was changed. While the configured password is the default, the server
+logs a warning at every start.
+
+When Identity runs in a Tsak worker that shares its database with the Tsak dashboard in cluster mode, the dashboard
+creates this administrator first, from `Tsak:Web:AdminLogin` and `Tsak:Web:AdminPassword` (admin/admin by default),
+and both sign in with the same account. Change its password in the Tsak dashboard or in the Identity UI;
+`Identity:SeedAdmin:Password` replaces it only while it is still admin/admin.
 
 For an unattended setup there is a one-time endpoint that creates an administrator, the `identity-admins` group and
 the Web console client. It is off by default; enable it with `Identity:Bootstrap:Enabled=true` and a secret of at
@@ -604,7 +610,7 @@ RFC compliance is verified by integration tests (`tests/redb.Identity.Tests/`) �
 | **7592** | DCR Management Protocol | `GET/PUT/DELETE /connect/register/{client_id}` with `registration_access_token`. |
 | **7521 / 7523** | Assertion Framework + JWT Bearer client authentication | `private_key_jwt` — DCR accepts `token_endpoint_auth_method=private_key_jwt` with inline `jwks`; `/connect/token` + `/connect/introspect` authenticate via an RS256-signed client assertion (RFC 7521 §4.2 / RFC 7523 §2.2); advertised in discovery `token_endpoint_auth_methods_supported`. Assertions follow draft-ietf-oauth-rfc7523bis: `typ` header `client-authentication+jwt` and the issuer as `aud`, for every endpoint ([UPGRADING.md](UPGRADING.md#client-assertions-private_key_jwt-client_secret_jwt)). Tampered signature → 401 `invalid_client`. Pinned by `demo_private_key_jwt`. |
 | **7636** | PKCE | `S256` mandated; `plain` rejected per OAuth 2.1 / RFC 7636 §4.2. |
-| **7662** | Token Introspection | RS256-signed, audience-checked, scope-filtered. |
+| **7662** | Token Introspection | Answers only a client the token concerns: one in its `aud` or the client it was issued to; any other caller gets `active: false` (§2.2). A resource server is put into the audience through the `Resources` of the scopes its callers request. |
 | **8252** | OAuth 2.0 for Native Apps (BCP 212) | Private-use URI scheme redirect (§7.1); loopback IP redirect (§7.3) on `127.0.0.1` / `[::1]` with any port (`AllowLoopbackRedirectPortWildcard`, on by default); `application_type=native` and `token_endpoint_auth_method=none` accepted by DCR (`Register_NativeApp_SetsApplicationType`). |
 | **8414** | Authorization Server Metadata | `/.well-known/oauth-authorization-server` (separate from OIDC Discovery, for non-OIDC clients) — verified by `DiscoveryD1ConformanceTests`. |
 | **8628** | Device Authorization Grant | `/connect/deviceauthorization`, `/connect/device/verify`, configurable `expires_in` / `interval` (§3.2). |
@@ -907,6 +913,7 @@ Surface under Tsak's aggregated `/api/health/{startup,live,ready}`. Defined in [
 | Consent page | Renders and grants only from a server-signed consent ticket (`?ct=…`); app name and scopes come from the ticket, not the URL (no trusted-UI phishing), and the ticket is bound to the session user (no cross-session replay). Pinned by `FullStackFacadeFormHardeningTests` |
 | MFA verify | DB row-lock + `IdempotentConsumer` keyed by `(jti, code)` — defeats retransmit / captured-request replay |
 | Recovery codes | One-shot — marked consumed in the same transaction as session creation |
+| Role scopes | A scope attached to a role is an entitlement, never an addition: it reaches a token only when the client requests it and holds the `scp:` permission, and a gated scope (`AdminScopeEntitlement`: `identity:*`, `scim`, `GatedScopes`) stays only for users whose roles carry it. An administrator signing in to some other application gives it no management scope. Pinned by `RoleScopeAugmentationTests` |
 | Self vs admin | `RequireSelfOrAdminProcessor` on every `/me/*` route — a token with `identity:account` can never mutate another user's MFA, password, sessions, or consents |
 | Idempotency | Cache placed AFTER authorization so a revoked token cannot unlock cached responses |
 | Trusted proxies | `TrustedProxyResolverProcessor` — `redbHttp.RemoteAddress` is sanitized BEFORE any rate-limit / lockout sees it |

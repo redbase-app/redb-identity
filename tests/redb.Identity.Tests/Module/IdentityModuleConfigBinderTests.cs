@@ -157,4 +157,66 @@ public sealed class IdentityModuleConfigBinderTests
         opts.ReverseProxies.KnownNetworks[0].BaseAddress.Should().Be(IPAddress.Parse("10.0.0.0"));
         opts.ReverseProxies.KnownNetworks[0].PrefixLength.Should().Be(8);
     }
+
+    // Identity:Audit in a Tsak worker: the module used to hand the route builder no audit options at
+    // all, so configured targets were ignored and events reached only the relational sink.
+
+    [Fact]
+    public void BindAudit_ReturnsDefaults_WhenNoAuditSection()
+    {
+        var audit = IdentityModuleConfigBinder.BindAudit(MakeContext(new Dictionary<string, object?> { ["Issuer"] = "https://id.example/" }));
+
+        audit.Enabled.Should().BeTrue();
+        audit.Filter.Should().Be("*");
+        audit.Targets.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BindAudit_HydratesTargetsAndSwitches()
+    {
+        var section = new Dictionary<string, object?>
+        {
+            ["Audit"] = new Dictionary<string, object?>
+            {
+                ["Filter"] = "TokenRevoked,UserDeleted",
+                ["PersistToProps"] = "false",
+                ["Targets"] = new List<object?>
+                {
+                    new Dictionary<string, object?> { ["Name"] = "app", ["Enabled"] = "true", ["Uri"] = "direct-vm://app-identity-events" },
+                    new Dictionary<string, object?> { ["Name"] = "log", ["Enabled"] = "false", ["Uri"] = "log:identity-audit" },
+                },
+            },
+        };
+
+        var audit = IdentityModuleConfigBinder.BindAudit(MakeContext(section));
+
+        audit.Filter.Should().Be("TokenRevoked,UserDeleted");
+        audit.PersistToProps.Should().BeFalse();
+        audit.Targets.Should().HaveCount(2);
+        audit.Targets[0].Name.Should().Be("app");
+        audit.Targets[0].Enabled.Should().BeTrue();
+        audit.Targets[0].Uri.Should().Be("direct-vm://app-identity-events");
+        audit.Targets[1].Enabled.Should().BeFalse();
+    }
+
+    [Fact]
+    public void BindAudit_ReadsTargetsGivenAsIndexedKeys()
+    {
+        // An environment override (Identity__Audit__Targets__0__Uri) arrives as a dictionary keyed "0".
+        var section = new Dictionary<string, object?>
+        {
+            ["Audit"] = new Dictionary<string, object?>
+            {
+                ["Targets"] = new Dictionary<string, object?>
+                {
+                    ["0"] = new Dictionary<string, object?> { ["Name"] = "app", ["Enabled"] = "true", ["Uri"] = "direct-vm://app-identity-events" },
+                },
+            },
+        };
+
+        var audit = IdentityModuleConfigBinder.BindAudit(MakeContext(section));
+
+        audit.Targets.Should().ContainSingle()
+            .Which.Uri.Should().Be("direct-vm://app-identity-events");
+    }
 }

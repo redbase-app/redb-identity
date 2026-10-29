@@ -1,5 +1,6 @@
 using OpenIddict.Server;
 using redb.Identity.Core.OpenIddict;
+using redb.Identity.Core.OpenIddict.Handlers;
 using redb.Route.Abstractions;
 using redb.Identity.Contracts.Routes;
 
@@ -118,6 +119,11 @@ internal sealed class RevocationEndpointProcessor : IProcessor
             exchange.Properties["identity-event-data"] = new
             {
                 ClientId = exchange.In.GetHeader<string>("client_id"),
+                // The owner of the revoked token (CaptureRevokedTokenUserHandler); null for a client
+                // token or a token Identity does not know.
+                UserId = exchange.Properties.TryGetValue(CaptureRevokedTokenUserHandler.ExchangeProperty, out var userId)
+                    ? userId as string
+                    : null,
                 Timestamp = _timeProvider.GetUtcNow()
             };
         }

@@ -106,6 +106,31 @@ public class GroupServiceTests
         userGroups.Should().NotContain(g => g.GroupId == group.id);
     }
 
+    [Fact]
+    public async Task GroupWithoutProperties_UserGroupsAndLoadsWork()
+    {
+        // A group created with nothing but a name stores no props rows.
+        var svc = CreateService();
+        var group = await svc.CreateGroupAsync("NoProps-" + Guid.NewGuid().ToString("N")[..8]);
+        var userId = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        await svc.AddMemberAsync(group.id, userId);
+
+        var userGroups = await svc.GetUserGroupsAsync(userId);
+        userGroups.Should().ContainSingle(g => g.GroupId == group.id);
+        userGroups.Single(g => g.GroupId == group.id).GroupType.Should().BeNull();
+        userGroups.Single(g => g.GroupId == group.id).GroupName.Should().Be(group.name);
+
+        (await svc.ResolveUserRolesAsync(userId)).Should().ContainSingle(g => g.GroupId == group.id);
+
+        // redb hands such a group back with Props null; callers must not dereference it blindly.
+        var loaded = await svc.GetGroupAsync(group.id);
+        loaded.Should().NotBeNull();
+        loaded!.Props?.GroupType.Should().BeNull();
+
+        await svc.UpdateGroupAsync(group.id, groupType: "team");
+        (await svc.GetGroupAsync(group.id))!.Props.GroupType.Should().Be("team");
+    }
+
     // ── Tree operations ─────────────────────────────────────────
 
     [Fact]

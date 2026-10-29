@@ -3,6 +3,28 @@
 What to check and change when moving to a new version. Each section lists the changes that need action;
 [CHANGELOG.md](CHANGELOG.md) has the full list of what changed.
 
+## 4.5.0
+
+### Role scopes only when the client asks for them
+
+A scope attached to a role is no longer added to the user's tokens on its own. A token carries the scopes the
+client requested, which OpenIddict checks against the client's `scp:` permissions; for a scope that
+`AdminScopeEntitlement` gates (`identity:*`, `scim`, and whatever `GatedScopes` lists) the user's roles then decide
+whether it stays. The role is the entitlement, the request is still needed.
+
+Up to 4.4.2 every scope of the user's roles went into every token of that user, for any client and without the
+client's permission being checked. An administrator signing in to any application handed it a token with
+`identity:manage` and Identity's own audience, which the management API accepted.
+
+Who notices: a client that relied on receiving a role's scope without asking for it. Add the scope to the
+client's request (`scope=` of the authorization or token request) and make sure the client has the `scp:`
+permission for it. The Identity Web console, the `redb-identity-app` template and the Tsak dashboard are not
+affected: the first two request their scopes explicitly, the dashboard does not sign in through Identity.
+Tokens issued before the upgrade keep their scopes until they expire; a refresh issues the new set.
+
+A scope that only a role should open, for example an application's administrative scope, must be listed in
+`Identity:AdminScopeEntitlement:GatedScopes`; otherwise the client's permission alone decides, for every user.
+
 ## 4.4
 
 ### OpenIddict 7

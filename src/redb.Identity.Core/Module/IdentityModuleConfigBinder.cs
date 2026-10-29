@@ -46,19 +46,9 @@ internal static class IdentityModuleConfigBinder
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        var raw = context.GetProperty<IDictionary<string, object?>>(SectionName);
         var options = new RedbIdentityOptions();
-        if (raw is null || raw.Count == 0)
+        if (Configuration(context) is not { } cfg)
             return options;
-
-        // Flatten nested dictionary into IConfiguration kvp form (Section:Key:Index syntax)
-        // so the standard IConfiguration.Bind reflection path can hydrate the POCO.
-        var flat = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        Flatten(raw, prefix: string.Empty, sink: flat);
-
-        var cfg = new ConfigurationBuilder()
-            .Add(new MemoryConfigurationSource { InitialData = flat })
-            .Build();
 
         cfg.Bind(options, opt => opt.BindNonPublicProperties = false);
 
@@ -84,6 +74,47 @@ internal static class IdentityModuleConfigBinder
         BindReverseProxyIpAddresses(cfg, options);
 
         return options;
+    }
+
+    /// <summary>Sub-section of <see cref="SectionName"/> read by <see cref="BindAudit"/>.</summary>
+    public const string AuditSection = "Audit";
+
+    /// <summary>
+    /// Builds <see cref="IdentityAuditOptions"/> from <c>Identity:Audit</c> of
+    /// <paramref name="context"/>: the master switch, the event filter, the relational sink and the
+    /// external targets the events are multicast to. Defaults when the section is missing.
+    /// <c>Targets</c> replaces the default list rather than merging by index.
+    /// </summary>
+    public static IdentityAuditOptions BindAudit(IRouteContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var audit = new IdentityAuditOptions();
+        var section = Configuration(context)?.GetSection(AuditSection);
+        if (section is null || !section.Exists())
+            return audit;
+
+        section.Bind(audit, opt => opt.BindNonPublicProperties = false);
+        var targets = section.GetSection(nameof(IdentityAuditOptions.Targets));
+        if (targets.Exists())
+            audit.Targets = targets.Get<List<AuditTarget>>() ?? [];
+        return audit;
+    }
+
+    // The context's "Identity" property flattened into IConfiguration key-value form
+    // (Section:Key:Index syntax), so the standard IConfiguration.Bind reflection path can hydrate
+    // the POCOs; null when the property is missing or empty.
+    private static IConfiguration? Configuration(IRouteContext context)
+    {
+        var raw = context.GetProperty<IDictionary<string, object?>>(SectionName);
+        if (raw is null || raw.Count == 0)
+            return null;
+
+        var flat = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        Flatten(raw, prefix: string.Empty, sink: flat);
+        return new ConfigurationBuilder()
+            .Add(new MemoryConfigurationSource { InitialData = flat })
+            .Build();
     }
 
     private static void ReplaceListIfPresent(IConfiguration cfg, string key, Action<string[]> setter)

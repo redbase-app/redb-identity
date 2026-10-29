@@ -117,41 +117,12 @@ internal sealed class AttachRoleRegistryClaims
 
             if (roles.Count == 0) return;
 
-            // B.3 (permission picker) — bulk-fetch every effective role's
-            // attached scopes and union them into the principal's scope set.
-            // OpenIddict's downstream validation still enforces the client's
-            // allowed-scope ApplicationProps restriction, so a role can't
-            // smuggle in scopes the requesting client isn't authorised for —
-            // the union here is purely "if the client COULD ask for X and
-            // this user has a role that grants X, give them X without making
-            // the operator add X to scope= on every request".
-            try
-            {
-                var attached = await svc.GetEffectiveScopeNamesAsync(roles.Select(r => r.Id), context.CancellationToken)
-                    .ConfigureAwait(false);
-                if (attached.Count > 0)
-                {
-                    var existingScopes = context.Principal.GetScopes().ToHashSet(StringComparer.Ordinal);
-                    var added = 0;
-                    foreach (var s in attached)
-                    {
-                        if (existingScopes.Add(s)) added++;
-                    }
-                    if (added > 0)
-                    {
-                        identity.SetScopes(existingScopes);
-                        _logger.LogDebug(
-                            "AttachRoleRegistryClaims: added {Count} scope(s) from role attachments for user {UserId} on client {ClientId}",
-                            added, userId, clientId);
-                    }
-                }
-            }
-            catch (Exception scopeEx)
-            {
-                _logger.LogWarning(scopeEx,
-                    "AttachRoleRegistryClaims: failed to resolve scope attachments for roles of user {UserId}; emitting roles claim without scope augmentation",
-                    userId);
-            }
+            // The scopes attached to these roles are NOT added to the token. A role is an entitlement:
+            // a scope the client asked for (and OpenIddict checked against the client's permissions)
+            // stays only when the user's roles carry it (RestrictAdminScopesByRoleHandler). Adding the
+            // role's scopes here, after that check, gave every client a user signed in to the scopes of
+            // the user's roles, identity:manage with Identity's own audience included, so an
+            // administrator's token issued to any client administered Identity (RoleScopeAugmentationTests).
 
             // Idempotent vs prior emitters — drop any already-present `roles`
             // values that the role-registry walk also produces, then re-add

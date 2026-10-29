@@ -84,6 +84,8 @@ public sealed class GroupService : IGroupService
             ?? throw new InvalidOperationException($"Group {groupId} not found.");
 
         if (name is not null) group.name = name;
+        // A group stored with no properties loads with Props null (redb stores no props rows for it).
+        group.Props ??= new GroupProps();
         if (groupType is not null) group.Props.GroupType = groupType;
         if (description is not null) group.Props.Description = description;
 
@@ -479,7 +481,7 @@ public sealed class GroupService : IGroupService
             {
                 GroupId = m.parent_id ?? 0,
                 GroupName = g?.name,
-                GroupType = g?.Props.GroupType,
+                GroupType = g?.Props?.GroupType,
                 Role = m.Props.Role
             };
         }).ToList();

@@ -296,13 +296,14 @@ internal sealed class GroupManagementProcessor : IProcessor
     private static void SetError(IExchange exchange, string error, string description)
         => IdentityProcessorHelpers.SetError(exchange, error, description);
 
+    // A group created with a name only has no props rows and loads with Props null.
     private static object MapGroup(redb.Core.Models.Entities.RedbObject<GroupProps> g) => new
     {
         id = g.id,
         name = g.name,
         parentId = g.parent_id,
-        groupType = g.Props.GroupType,
-        description = g.Props.Description,
+        groupType = g.Props?.GroupType,
+        description = g.Props?.Description,
         createdAt = g.date_create,
         modifiedAt = g.date_modify
     };
@@ -312,8 +313,8 @@ internal sealed class GroupManagementProcessor : IProcessor
         id = g.id,
         name = g.name,
         parentId = g.parent_id,
-        groupType = g.Props.GroupType,
-        description = g.Props.Description,
+        groupType = g.Props?.GroupType,
+        description = g.Props?.Description,
         createdAt = g.date_create,
         modifiedAt = g.date_modify,
         memberCount = memberCount
@@ -324,8 +325,8 @@ internal sealed class GroupManagementProcessor : IProcessor
         id = node.id,
         name = node.name,
         parentId = node.parent_id,
-        groupType = node.Props.GroupType,
-        description = node.Props.Description,
+        groupType = node.Props?.GroupType,
+        description = node.Props?.Description,
         level = node.Level,
         children = node.Children
             .OfType<redb.Core.Models.Entities.TreeRedbObject<GroupProps>>()

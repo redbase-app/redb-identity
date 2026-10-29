@@ -719,8 +719,9 @@ public class RedbIdentityOptions
     /// in the base redb SQL seed (<c>_users.id = 1</c>, <c>login = "admin"</c>,
     /// empty password). On host startup, <c>SeedAdminPasswordHostedService</c>
     /// looks up the user by <see cref="SeedAdminOptions.Login"/>; if found and its
-    /// stored password is empty, it is hashed via the configured
-    /// <see cref="redb.Core.Security.IPasswordHasher"/> and persisted, so a fresh
+    /// stored password is empty or still the default <c>admin</c> (a Tsak dashboard on the
+    /// same database writes admin/admin first), <see cref="SeedAdminOptions.Password"/> is
+    /// hashed via the configured <see cref="redb.Core.Security.IPasswordHasher"/> and persisted, so a fresh
     /// install supports <c>admin/admin</c> sign-in out-of-the-box. Logs a loud
     /// startup WARNING when the password is the default <c>admin</c>.
     /// </summary>
@@ -751,7 +752,8 @@ public class RedbIdentityOptions
 /// <summary>
 /// Options for the default-admin password seeder that ensures the well-known
 /// <c>admin</c> user from the base redb SQL seed has a usable password on a fresh
-/// install. Idempotent: only updates when the stored password is empty.
+/// install. Idempotent: only updates when the stored password is empty or still the
+/// default <c>admin</c>; a password the operator changed is never overwritten.
 /// </summary>
 public sealed class SeedAdminOptions
 {

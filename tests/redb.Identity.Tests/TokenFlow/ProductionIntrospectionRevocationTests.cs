@@ -187,6 +187,93 @@ public class ProductionIntrospectionRevocationTests
         exchange.Properties.Should().ContainKey("identity-event-data");
     }
 
+    // The TokenRevoked event names the owner of a user's token, so a subscriber that caches token
+    // checks per user drops only that user's entries. A client token has no user and the event none.
+
+    [Fact]
+    public async Task Revoke_UserToken_EventNamesTheUser()
+    {
+        var (accessToken, _) = await ObtainTokensViaAuthCodeFlow();
+
+        var exchange = await _fx.RequestWithHeaders(
+            IdentityEndpoints.Revoke,
+            new Dictionary<string, string>
+            {
+                ["token"] = accessToken,
+                ["token_type_hint"] = "access_token",
+                ["client_id"] = ProductionBootstrapFixture.TestClientIdPublic,
+            },
+            new Dictionary<string, object?>());
+
+        exchange.Properties["identity-event-type"].Should().Be("TokenRevoked");
+        long.TryParse(EventUserId(exchange), out var userId).Should().BeTrue("a code-flow token belongs to a user");
+        userId.Should().BePositive();
+    }
+
+    // Introspection answers only a client the token concerns (RFC 7662 §2.2): one in its audience or
+    // the client it was issued to. Any other client with the introspection permission gets active:false.
+
+    [Fact]
+    public async Task Introspect_TokenOfAnotherClient_IsInactiveForTheCaller()
+    {
+        // Issued to the public client: its audience is that client and its declared backend
+        // (integration-test-client), not the outsider below.
+        var (accessToken, _) = await ObtainTokensViaAuthCodeFlow();
+
+        const string outsider = "integration-test-outsider";
+        const string outsiderSecret = "integration-test-outsider-secret-value";
+        var manager = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<OpenIddict.Abstractions.IOpenIddictApplicationManager>(_fx.ServiceProvider);
+        if (await manager.FindByClientIdAsync(outsider) is { } stale)
+            await manager.DeleteAsync(stale);
+        await manager.CreateAsync(new OpenIddict.Abstractions.OpenIddictApplicationDescriptor
+        {
+            ClientId = outsider,
+            ClientSecret = outsiderSecret,
+            ClientType = OpenIddict.Abstractions.OpenIddictConstants.ClientTypes.Confidential,
+            Permissions = { OpenIddict.Abstractions.OpenIddictConstants.Permissions.Endpoints.Introspection },
+        });
+
+        var body = (Dictionary<string, object?>)(await _fx.Request(IdentityEndpoints.Introspect, new Dictionary<string, string>
+        {
+            ["token"] = accessToken,
+            ["client_id"] = outsider,
+            ["client_secret"] = outsiderSecret,
+        }))!;
+
+        var active = body.TryGetValue("active", out var a) && Equals(a, true);
+        active.Should().BeFalse($"the caller is neither in the audience nor the token's client; got: {Describe(body)}");
+        body.Should().NotContainKey("sub", "an inactive answer describes nothing");
+        body.Should().NotContainKey("redb:user_id");
+    }
+
+    [Fact]
+    public async Task Introspect_OwnToken_StaysActive()
+    {
+        var token = await ObtainAccessToken();   // client_credentials of the calling client itself
+
+        var body = (Dictionary<string, object?>)(await Introspect(token))!;
+
+        body.Should().ContainKey("active");
+        body["active"].Should().Be(true, $"the caller is the token's client; got: {Describe(body)}");
+    }
+
+    [Fact]
+    public async Task Revoke_ClientToken_EventNamesNoUser()
+    {
+        var token = await ObtainAccessToken();
+
+        var exchange = await RevokeWithExchange(token);
+
+        exchange.Properties["identity-event-type"].Should().Be("TokenRevoked");
+        EventUserId(exchange).Should().BeNull("a client-credentials token has no user");
+    }
+
+    private static string? EventUserId(Exchange exchange)
+    {
+        var data = exchange.Properties["identity-event-data"]!;
+        return data.GetType().GetProperty("UserId")!.GetValue(data)?.ToString();
+    }
+
     [Fact]
     public async Task Revoke_Idempotent_SecondRevocationIsAccepted()
     {

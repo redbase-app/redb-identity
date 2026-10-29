@@ -14,7 +14,7 @@ dashboard and Identity's own UI in one container.
 
 | Port | Service | In which artifacts |
 |------|---------|--------------------|
-| **9090** | Tsak Worker management API | backend, managed, full, (archive) |
+| **9090** | Tsak Worker management API; in managed and full only on 127.0.0.1 inside the container, behind the dashboard | backend, (archive) |
 | **5002** | **Identity OIDC** (HTTPS): `/connect/*`, `/.well-known/*`, userinfo | backend, managed, full, (archive) |
 | **8085** | Tsak dashboard (manages the Worker) | managed, full, (archive) |
 | **8087** | **Identity BFF**: login, consent, admin UI | full, web, (archive) |
@@ -31,8 +31,8 @@ The OIDC default in code is 8080; `context.json` pins it to **5002**. Every host
 | Image | What's inside | Ports | Use it when |
 |-------|---------------|-------|-------------|
 | `redb-identity-backend` | Tsak Worker + Identity modules | 9090, 5002 | pure OIDC backend, you already have UIs |
-| `redb-identity-managed` | + **Tsak dashboard** | 9090, 5002, **8085** | backend you want to **manage** via the Tsak dashboard |
-| `redb-identity-full` | + **Identity BFF** | 9090, 5002, 8085, **8087** | everything: managed backend **and** Identity's own login UI |
+| `redb-identity-managed` | + **Tsak dashboard** | 5002, **8085** | backend you want to **manage** via the Tsak dashboard |
+| `redb-identity-full` | + **Identity BFF** | 5002, 8085, **8087** | everything: managed backend **and** Identity's own login UI |
 | `redb-identity-web` | Identity BFF only | 8087 | scale/deploy the UI separately, point it at any backend |
 
 Tags: `:<version>`, `:<version>-net10` and `:latest`. The images start on SQLite with a bundled self-signed
@@ -59,8 +59,8 @@ all users out.
 ### Full (backend + dashboard + Identity UI)
 ```bash
 docker run -d --name redb-identity-full \
-  -p 8087:8087 -p 8085:8085 -p 5002:5002 -p 9090:9090 \
-  -e Tsak__Auth__Secret=<tsak-auth-secret> \
+  -p 8087:8087 -p 8085:8085 -p 5002:5002 \
+  -e Tsak__Api__Host=127.0.0.1 -e Tsak__Web__AdminPassword=<dashboard-password> \
   -e Tsak__Contexts__identity.core__Override__Identity__SeedBackchannelClient__ClientSecret=<backchannel-secret> \
   -e Identity__BackchannelClient__ClientSecret=<backchannel-secret> \
   -v identity_data:/app/data \
@@ -74,8 +74,8 @@ docker run -d --name redb-identity-full \
 
 ### Managed (backend + Tsak dashboard, no Identity UI)
 ```bash
-docker run -d --name redb-identity-managed -p 8085:8085 -p 5002:5002 -p 9090:9090 \
-  -e Tsak__Auth__Secret=<tsak-auth-secret> \
+docker run -d --name redb-identity-managed -p 8085:8085 -p 5002:5002 \
+  -e Tsak__Api__Host=127.0.0.1 -e Tsak__Web__AdminPassword=<dashboard-password> \
   -v identity_data:/app/data -v dp_keys:/root/.aspnet/DataProtection-Keys \
   ghcr.io/redbase-app/redb-identity-managed:latest
 ```
@@ -134,9 +134,13 @@ Minimum to boot a real backend:
 - **Backchannel secret**: the **same** value on both sides so the BFF can talk to the backend:
   - backend: `Tsak__Contexts__identity.core__Override__Identity__SeedBackchannelClient__ClientSecret`
   - BFF: `Identity__BackchannelClient__ClientSecret`
-- **Tsak auth**: `Tsak__Auth__Secret`
-- **First administrator**: a fresh database has `admin` / `admin`; change it or set `Identity:SeedAdmin:Password`
-  before the first start (README, "First administrator").
+- **Tsak management API**: the images ship it without API keys. In `managed` and `full` it listens on 127.0.0.1
+  inside the container (`Tsak__Api__Host=127.0.0.1`), where the dashboard reaches it, and the dashboard needs its
+  password (`Tsak__Web__AdminPassword`); the compose files set both. In `backend` it answers on 9090 to whoever
+  reaches the port: publish it only to a trusted network, or turn on Tsak's API keys (`Tsak:Auth`).
+- **First administrator**: a fresh database has `admin` / `admin`. `Identity:SeedAdmin:Password` replaces it while
+  it is still the default and never overwrites a changed password; on a database shared with the Tsak dashboard
+  the account is the dashboard's too (README, "First administrator").
 
 ### Postgres instead of SQLite
 

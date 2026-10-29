@@ -53,11 +53,13 @@ public static class InitRoute
         var hostHasIdentity = hostSp.GetServices<IConfigureOptions<RedbIdentityOptions>>().Any();
         IServiceProvider identitySp;
         IOptions<RedbIdentityOptions> options;
+        IOptions<IdentityAuditOptions> audit;
 
         if (hostHasIdentity)
         {
             identitySp = hostSp;
             options = hostSp.GetRequiredService<IOptions<RedbIdentityOptions>>();
+            audit = hostSp.GetRequiredService<IOptions<IdentityAuditOptions>>();
         }
         else
         {
@@ -67,6 +69,8 @@ public static class InitRoute
             context.AddLifecycleListener(new ChildHostDisposeListener(childSp));
             identitySp = childSp;
             options = childSp.GetRequiredService<IOptions<RedbIdentityOptions>>();
+            // Identity:Audit (targets the events are multicast to) from the same configuration.
+            audit = Options.Create(IdentityModuleConfigBinder.BindAudit(context));
         }
 
         // Initialize redb base schema BEFORE any route starts processing exchanges.
@@ -155,7 +159,7 @@ public static class InitRoute
         if (!context.HasComponent("https"))
             context.AddComponent(new redb.Route.Http.HttpComponent("https"));
 
-        var builder = new IdentityCoreRouteBuilder(identitySp, options);
+        var builder = new IdentityCoreRouteBuilder(identitySp, options, audit);
         ((RouteContext)context).AddRoutes(builder);
 
         return context;

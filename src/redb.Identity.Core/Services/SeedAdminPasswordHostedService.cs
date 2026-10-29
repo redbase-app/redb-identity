@@ -14,10 +14,13 @@ namespace redb.Identity.Core.Services;
 /// <list type="bullet">
 ///   <item>Resolves <see cref="IRedbService"/> through a transient scope.</item>
 ///   <item>Looks up user by <see cref="SeedAdminOptions.Login"/>.</item>
-///   <item>If the user is <b>missing</b> or already has a non-empty password →
-///   no-op (idempotent across restarts and respects passwords set via
-///   bootstrap-admin / management API).</item>
-///   <item>Otherwise hashes <see cref="SeedAdminOptions.Password"/> via the
+///   <item>If the user is <b>missing</b> → no-op.</item>
+///   <item>If the user has a stored password other than the documented default
+///   <c>admin</c> → no-op with one log line: that password belongs to the operator
+///   (set via the Tsak dashboard, bootstrap-admin or the management API).</item>
+///   <item>If the stored password is empty, or is still the default <c>admin</c>
+///   (a Tsak dashboard sharing the database writes admin/admin before this
+///   listener runs), hashes <see cref="SeedAdminOptions.Password"/> via the
 ///   configured <see cref="redb.Core.Security.IPasswordHasher"/> chain and
 ///   persists it via <see cref="redb.Core.Providers.IUserProvider.SetPasswordAsync"/>.</item>
 /// </list>
@@ -82,10 +85,28 @@ public sealed class SeedAdminPasswordHostedService : IRouteLifecycleListener
 
             if (!string.IsNullOrEmpty(user.Password))
             {
-                _logger.LogDebug(
-                    "SeedAdmin: user '{Login}' (id={Id}) already has a stored password — leaving untouched",
-                    seed.Login, user.Id);
-                return;
+                // A password is already stored. Replace it only while it is still the documented
+                // default: a host that shares the database with the Tsak dashboard sees the dashboard
+                // write admin/admin before this listener runs. Any other password belongs to the
+                // operator and stays.
+                if (string.Equals(seed.Password, SeedAdminOptions.DefaultPassword, StringComparison.Ordinal))
+                {
+                    _logger.LogDebug(
+                        "SeedAdmin: user '{Login}' (id={Id}) already has a stored password and no other is configured",
+                        seed.Login, user.Id);
+                    return;
+                }
+
+                var storedIsDefault = await redb.UserProvider
+                    .ValidateUserAsync(seed.Login, SeedAdminOptions.DefaultPassword)
+                    .ConfigureAwait(false) is not null;
+                if (!storedIsDefault)
+                {
+                    _logger.LogInformation(
+                        "SeedAdmin: user '{Login}' (id={Id}) already has a changed password, seed skipped",
+                        seed.Login, user.Id);
+                    return;
+                }
             }
 
             var ok = await redb.UserProvider

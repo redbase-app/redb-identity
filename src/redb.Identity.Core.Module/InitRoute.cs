@@ -76,14 +76,18 @@ public static class InitRoute
         var hostHasIdentity = hostSp.GetServices<IConfigureOptions<RedbIdentityOptions>>().Any();
         IServiceProvider identitySp;
         IOptions<RedbIdentityOptions> options;
+        IOptions<IdentityAuditOptions> audit;
 
         if (hostHasIdentity)
         {
             identitySp = hostSp;
             options = hostSp.GetRequiredService<IOptions<RedbIdentityOptions>>();
+            audit = hostSp.GetRequiredService<IOptions<IdentityAuditOptions>>();
         }
         else
         {
+            // Identity:Audit (targets the events are multicast to) from the same configuration.
+            audit = Options.Create(IdentityModuleConfigBinder.BindAudit(context));
             var bound = IdentityModuleConfigBinder.Bind(context);
             var ldap = LdapIntegrationConfigBinder.Bind(context);
             var childSp = IdentityModuleHost.Build(context, bound, services =>
@@ -264,7 +268,7 @@ public static class InitRoute
             bridgeLogger?.LogError(ex, "[Identity.Core.InitRoute] Failed to build management/SCIM auth processors");
         }
 
-        var builder = new IdentityCoreRouteBuilder(identitySp, options, null, managementAuth, scimAuth);
+        var builder = new IdentityCoreRouteBuilder(identitySp, options, audit, managementAuth, scimAuth);
         ((RouteContext)context).AddRoutes(builder);
 
         return context;

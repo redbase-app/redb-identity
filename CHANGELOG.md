@@ -38,61 +38,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Pending changes live in `changelog/unreleased/` until the release; `pwsh scripts/changelog.ps1 -Preview` shows them.
 
-## [4.4.2] — 2026-10-23
-
-### Changed
-
-- **The `backend`, `managed` and `full` Dockerfiles build without `--build-arg TSAK_VERSION`.** The base Tsak image
-  defaults to the Tsak release it was built with, and Docker no longer warns about an empty base image name. `publish/docker/DOCKER.md` now
-  describes the 4.4 build: .NET 10 SDK, Tsak base images of the same release, `-net10` tags.
-
-## [4.4.1] — 2026-10-21
-
-### Changed
-
-- **Rebuilt on redb.Route 4.4.1.** No changes of its own: the packages, images and archives are built on redb.Route 4.4.1, which fixes `seda:` after a context restart. 4.4.0 was withdrawn on the day of release.
-
-## [4.4.0] — 2026-10-21
-
-> **Withdrawn on the day of release because of the seda restart bug in redb.Route; use 4.4.1.**
+## [4.5.0] — 2026-10-29
 
 ### Breaking
 
-- **`resource` (RFC 8707) is validated** on `/connect/authorize`, `/connect/par` and token exchange: an absolute URI
-  listed in a scope's `Resources`, with the client's `rsrc:<resource>` permission. OpenIddict 6 ignored it. Packages: `redb.Identity.Core`. Upgrade: [UPGRADING.md](UPGRADING.md#resource-parameter).
-- **JWT client assertions (`private_key_jwt`, `client_secret_jwt`) follow draft-ietf-oauth-rfc7523bis**, as OpenIddict
-  7 requires: the assertion must have the `typ` header `client-authentication+jwt` and the issuer as its `aud`, for every
-  endpoint. An assertion typed plain `JWT` or aimed at an endpoint URL is rejected with `invalid_client`. Packages: `redb.Identity.Core`. Upgrade: [UPGRADING.md](UPGRADING.md#client-assertions-private_key_jwt-client_secret_jwt).
-- **A resource server that validates Identity's DPoP-bound access tokens with OpenIddict.Validation 7 fails on them**
-  (internal error ID2196: OpenIddict 7 checks `cnf` and knows only the certificate-bound form, not the DPoP `jkt`),
-  also in front of `redb.Identity.Resource.Dpop`. Skip OpenIddict's proof-of-possession check for tokens whose `cnf`
-  holds only `jkt` and check the DPoP proof yourself, as Identity does for its own endpoints. Packages: `redb.Identity.Resource.Dpop`. Upgrade: [UPGRADING.md](UPGRADING.md#dpop-bound-access-tokens-at-third-party-resource-servers).
-
-### Security
-
-- **Token exchange (RFC 8693) runs on OpenIddict's built-in grant and checks who calls it**: a token bound to a
-  client can no longer be exchanged by an unrelated one, and a token of a disabled or deleted user is rejected. Packages: `redb.Identity.Core`. Upgrade: [UPGRADING.md](UPGRADING.md#openiddict-7).
-
-### Changed
-
-- **OpenIddict 7.7** (was 6.3), Microsoft.Extensions and ASP.NET Core 10.0.13, Microsoft.IdentityModel 8.23.0.
-  Existing sessions survive the upgrade: tokens issued by 6.3 keep validating. Packages: `redb.Identity.Core`. Upgrade: [UPGRADING.md](UPGRADING.md#openiddict-7).
-- **`compose.managed.yml` and `compose.full.yml` mount the volume `dp_keys` on `/root/.aspnet/DataProtection-Keys`** for
-  the key rings of the Tsak worker and dashboard. A 4.3 container without that volume: copy its ring out with `docker cp`
-  and import it on the first start of 4.4 with `Identity:DataProtection:ImportKeysFromPath`. Packages: `redb.Identity.Core`. Upgrade: [UPGRADING.md](UPGRADING.md#dataprotection-key-ring).
-- **The `redb-identity-web` image runs as the non-root `app` user (uid 1654)** instead of root. Its state lives on named
-  volumes owned by that user; a host directory mounted on `/app/keys` or `/app/logs` instead must be writable by uid 1654.
-  The `backend`, `managed` and `full` images still run as root, like the Tsak images they are built on. Packages: `redb.Identity.Web`.
+- **A role's scopes reach a token only when the client asks for them.** They used to be added to every token of the
+  user for any client, past the client's permissions, so an administrator's sign-in to any application gave it a
+  token that administered Identity. Request the scope explicitly. Upgrade: [UPGRADING.md](UPGRADING.md#role-scopes-only-when-the-client-asks-for-them). Packages: `redb.Identity.Core`. Upgrade: [UPGRADING.md](UPGRADING.md#role-scopes-only-when-the-client-asks-for-them).
 
 ### Fixed
 
-- **The server's DataProtection key ring is stored in redb, as documented.** Up to 4.3 it stayed in the file system, so
-  a container recreated without that directory did not start and each cluster node had a ring of its own. The first
-  start of 4.4 imports the old file ring into redb once; signing keys, TOTP secrets and sessions stay valid. Packages: `redb.Identity.Core`, `redb.Identity.DataProtection`, `redb.Identity.Http`. Upgrade: [UPGRADING.md](UPGRADING.md#dataprotection-key-ring).
-- **Identity Web keeps its sessions and file log across a recreated container.** New settings
-  `Identity:DataProtectionKeysPath` and `Identity:LogsPath`; the `redb-identity-web` and `redb-identity-full` images set
-  them to the volumes `web_keys` and `web_logs` of their compose files. Before, every recreated container signed all users out. Packages: `redb.Identity.Web`.
+- **`Identity:Audit` takes effect when Identity runs as a Tsak module.** The targets the audit events are multicast
+  to (Kafka, Elasticsearch, RabbitMQ, a log, a `direct-vm` route), the filter and the switches were ignored there, and
+  events reached only the built-in audit table. They are now read from the context configuration. Packages: `redb.Identity.Core`, `redb.Identity.Core.Module`.
+- **`Identity:SeedAdmin:Password` takes effect on a database shared with the Tsak dashboard.** In cluster mode the
+  dashboard gives the empty `admin` its own default password first, and the configured one was then never applied.
+  It now replaces a stored password that is still admin/admin; a password that was changed is left as it is. Packages: `redb.Identity.Core`.
+- **The `TokenRevoked` audit event names the token's user.** A revocation at `/connect/revocation` or through the
+  token management API now carries the user's id, like `TokensRevokedByUser` does, so a subscriber can act on that
+  user alone. A client-credentials token has no user, and its event still carries none. Packages: `redb.Identity.Core`.
+- **A group created with a name only works again.** For a member of a group without type and description, the user's
+  group list failed with a `NullReferenceException`, and so did reading or updating that group. At sign-in this member
+  got no group roles and was refused scopes and applications that require group membership. Nothing to do after
+  upgrading. Packages: `redb.Identity.Core`.
+- **`compose.managed.yml` and `compose.full.yml` no longer expose the Tsak management API.** It has no API keys in
+  these images and answered on a published port 9090; it now listens on 127.0.0.1 inside the container, behind the
+  dashboard, and the dashboard's password `TSAK_WEB_ADMIN_PASSWORD` is required instead of the image's admin/admin. Packages: `redb.Identity.Core.Module`.
+- **Identity Web no longer warns on every start of the `full` image.** Its first revoked-sessions poll ran before
+  the Identity host answered and was then retried only after a full poll interval. While the host is still starting,
+  the poll now retries within seconds and logs that at information level; a refused secret still warns at once. Packages: `redb.Identity.Web`.
 
 ## Earlier versions
 
-Earlier releases are archived by line in [changelog/](changelog/): [4.3.x](changelog/CHANGELOG-4.3.x.md), [4.2.x](changelog/CHANGELOG-4.2.x.md), [4.1.x](changelog/CHANGELOG-4.1.x.md), [4.0.x](changelog/CHANGELOG-4.0.x.md), [3.x](changelog/CHANGELOG-3.x.md), [1.x](changelog/CHANGELOG-1.x.md).
+Earlier releases are archived by line in [changelog/](changelog/): [4.4.x](changelog/CHANGELOG-4.4.x.md), [4.3.x](changelog/CHANGELOG-4.3.x.md), [4.2.x](changelog/CHANGELOG-4.2.x.md), [4.1.x](changelog/CHANGELOG-4.1.x.md), [4.0.x](changelog/CHANGELOG-4.0.x.md), [3.x](changelog/CHANGELOG-3.x.md), [1.x](changelog/CHANGELOG-1.x.md).

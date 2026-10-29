@@ -48,15 +48,23 @@ public sealed class RevokedSidsPollHostedService : BackgroundService
         var interval = _opts.Value.RevokedSids.PollInterval;
         if (interval <= TimeSpan.Zero) interval = TimeSpan.FromMinutes(1);
 
-        // Initial bootstrap poll — without cursor → server returns a baseline window.
-        await PollOnceAsync(ct).ConfigureAwait(false);
-
-        using var timer = new PeriodicTimer(interval);
         try
         {
+            // Bootstrap poll, without cursor: the server returns a baseline window. The Identity host
+            // may still be starting (the full image starts it and this server together), so until the
+            // first answer a host that does not answer at all is retried soon and logged as information,
+            // not as a warning; any other failure is a warning from the first try.
+            var retry = BootstrapRetry;
+            while (!await PollOnceAsync(starting: true, retry, ct).ConfigureAwait(false))
+            {
+                await Task.Delay(retry, ct).ConfigureAwait(false);
+                retry = TimeSpan.FromTicks(Math.Min(retry.Ticks * 2, interval.Ticks));
+            }
+
+            using var timer = new PeriodicTimer(interval);
             while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
             {
-                await PollOnceAsync(ct).ConfigureAwait(false);
+                await PollOnceAsync(starting: false, interval, ct).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -65,7 +73,11 @@ public sealed class RevokedSidsPollHostedService : BackgroundService
         }
     }
 
-    private async Task PollOnceAsync(CancellationToken ct)
+    /// <summary>The first retry while the Identity host is starting; doubled up to the poll interval.</summary>
+    internal static readonly TimeSpan BootstrapRetry = TimeSpan.FromSeconds(2);
+
+    /// <summary>One poll; false when it failed. <paramref name="next"/> is when the next try comes, for the log.</summary>
+    private async Task<bool> PollOnceAsync(bool starting, TimeSpan next, CancellationToken ct)
     {
         try
         {
@@ -79,6 +91,7 @@ public sealed class RevokedSidsPollHostedService : BackgroundService
                     "Revoked-SIDs poll: applied {Count} entries, next cursor {Cursor:O}",
                     resp.Entries.Count, resp.NextCursor);
             }
+            return true;
         }
         catch (OperationCanceledException)
         {
@@ -90,10 +103,28 @@ public sealed class RevokedSidsPollHostedService : BackgroundService
             // host isn't up yet (startup), it's unreachable, or the backchannel secret is missing/
             // mismatched. The full exception is available at Debug for anyone who needs it.
             var reason = (ex.InnerException ?? ex).Message;
-            _log.LogWarning(
-                "Revoked-SIDs poll skipped: {Reason} (Identity host {Host}). Retrying in {Interval}.",
-                reason, _opts.Value.ApiBaseUrl, _opts.Value.RevokedSids.PollInterval);
+            if (starting && IsUnreachable(ex))
+            {
+                _log.LogInformation(
+                    "Revoked-SIDs poll: Identity host {Host} not reachable yet ({Reason}); next try in {Next}.",
+                    _opts.Value.ApiBaseUrl, reason, next);
+            }
+            else
+            {
+                _log.LogWarning(
+                    "Revoked-SIDs poll skipped: {Reason} (Identity host {Host}). Retrying in {Interval}.",
+                    reason, _opts.Value.ApiBaseUrl, next);
+            }
             _log.LogDebug(ex, "Revoked-SIDs poll exception detail");
+            return false;
         }
     }
+
+    /// <summary>
+    /// The host gave no HTTP answer at all (connection refused, name not resolved, TLS not up):
+    /// what a host that is still starting looks like. An HTTP status, a refused secret included,
+    /// is an answer and never counts as this.
+    /// </summary>
+    internal static bool IsUnreachable(Exception ex) =>
+        ex is HttpRequestException { StatusCode: null } || ex.InnerException is HttpRequestException { StatusCode: null };
 }

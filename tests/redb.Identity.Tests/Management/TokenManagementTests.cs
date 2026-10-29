@@ -102,6 +102,31 @@ public class TokenManagementTests
     }
 
     [Fact]
+    public async Task Revoke_UserToken_EventNamesTheUser()
+    {
+        // The token's subject column is the public sub; the event carries the user's internal id,
+        // the key of their UserProps, as TokensRevokedByUser does.
+        var subject = Guid.NewGuid();
+        var token = MockRedbQuery.CreateObject<TokenProps>(43, "tok",
+            new TokenProps { Status = Statuses.Valid, Type = "access_token" });
+        token.value_guid = subject;
+        _redb.LoadAsync<TokenProps>(43).Returns(token);
+        _redb.SaveAsync(Arg.Any<RedbObject<TokenProps>>()).Returns(43L);
+        var user = MockRedbQuery.CreateObject<UserProps>(900, "user", new UserProps());
+        user.value_guid = subject;
+        user.key = 7;
+        MockRedbQuery.Setup(_redb, new List<RedbObject<UserProps>> { user });
+
+        var exchange = CreateExchange("revoke", new Dictionary<string, object?> { ["tokenId"] = 43L });
+
+        await _processor.Process(exchange);
+
+        exchange.Properties["identity-event-type"].Should().Be("TokenRevoked");
+        var data = exchange.Properties["identity-event-data"]!;
+        data.GetType().GetProperty("UserId")!.GetValue(data).Should().Be(7L);
+    }
+
+    [Fact]
     public async Task Revoke_MissingTokenId_ReturnsValidationError()
     {
         var exchange = CreateExchange("revoke", new Dictionary<string, object?> { ["tokenId"] = 0L });

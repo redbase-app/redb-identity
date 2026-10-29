@@ -44,6 +44,8 @@ public static class RedbRouteOpenIddictServerBuilderExtensions
         // BEFORE the response writer above so the field is in
         // context.Response before serialisation.
         AttachInternalUserIdToIntrospectionResponse.Descriptor,
+        // The owner of a revoked token, for the TokenRevoked audit event.
+        CaptureRevokedTokenUserHandler.Descriptor,
         ApplyRevocationResponseHandler.Descriptor,
         ApplyDeviceResponseHandler.Descriptor,
         ApplyVerificationResponseHandler.Descriptor,
