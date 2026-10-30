@@ -33,13 +33,24 @@ internal sealed class EventDispatchProcessor : IProcessor
 
     public Task Process(IExchange exchange, CancellationToken ct = default)
     {
+        // The exchange is the WireTap copy of the originating request: its In carries that request's
+        // headers (Authorization, client_secret and the other form fields, cookies, redbHttp.*), its body
+        // and attachments, and its Out the response. None of it may reach the audit sink, the webhook
+        // delivery or the audit targets. An exchange that yields no event goes no further; one that does
+        // leaves this step carrying the event and its own headers only.
         var eventType = exchange.GetProperty<string>("identity-event-type");
         if (string.IsNullOrEmpty(eventType))
+        {
+            exchange.Stop();
             return Task.CompletedTask;
+        }
 
         // Apply filter — skip events not in whitelist
         if (_allowedEventTypes is not null && !_allowedEventTypes.Contains(eventType))
+        {
+            exchange.Stop();
             return Task.CompletedTask;
+        }
 
         var detailsDict = exchange.GetProperty<object>("identity-event-data") switch
         {
@@ -79,7 +90,10 @@ internal sealed class EventDispatchProcessor : IProcessor
         // RabbitMQ/log) is responsible for its own wire encoding via IDataFormatRegistry, or the
         // route DSL inserts an explicit .Marshal() step at the boundary. Core MUST NOT pre-serialise
         // to string/bytes here: that would lock every sink to JSON and break proto/avro/CBOR sinks.
-        exchange.Out ??= new redb.Route.Core.Message();
+        // Fresh messages on both sides: the pipeline merges Out headers into In, so the request's In must
+        // go, and a response already on Out must not be reused.
+        exchange.In = new redb.Route.Core.Message();
+        exchange.Out = new redb.Route.Core.Message();
         exchange.Out.Body = identityEvent;
         exchange.Out.ContentType = "application/json";
         exchange.Out.Headers["event-type"] = eventType;

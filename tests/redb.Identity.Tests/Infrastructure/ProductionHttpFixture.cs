@@ -80,6 +80,23 @@ public sealed class ProductionHttpFixture : IAsyncLifetime
     public const string BootstrapAdminScope = "identity:admin-bootstrap-test";
     public const string BootstrapAdminGroup = "identity-bootstrap-admins";
 
+    /// <summary>
+    /// The one external audit target of this fixture, a direct-vm consumer in the fixture's own context:
+    /// it sees exactly what Kafka, AMQP, a log endpoint or a consumer module would receive.
+    /// </summary>
+    public const string AuditTargetUri = "direct-vm://identity-test-audit-target";
+
+    /// <summary>What reached <see cref="AuditTargetUri"/>: each message's headers and its body as text.</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<(Dictionary<string, object?> Headers, string Body)> AuditTargetMessages { get; } = new();
+
+    private static IdentityAuditOptions AuditOptions() => new()
+    {
+        Enabled = true,
+        Filter = "*",
+        PersistToProps = true,
+        Targets = [new AuditTarget { Name = "test-capture", Enabled = true, Uri = AuditTargetUri }]
+    };
+
     public int Port { get; private set; }
     public string BaseUrl => $"http://localhost:{Port}";
     public HttpClient Http { get; private set; } = null!;
@@ -279,13 +296,7 @@ public sealed class ProductionHttpFixture : IAsyncLifetime
         services.AddSingleton(Options.Create(identityOptions));
 
         // H6/H7/H9: enable audit + PROPS persistence so e2e protocol tests can assert audit emission.
-        services.AddSingleton(Options.Create(new IdentityAuditOptions
-        {
-            Enabled = true,
-            Filter = "*",
-            PersistToProps = true,
-            Targets = []
-        }));
+        services.AddSingleton(Options.Create(AuditOptions()));
 
         // HTTP transport options. Features instance is *shared* with the Core options
         // — single source of truth keeps Core (DI / direct-vm gating) and Http (route
@@ -389,9 +400,10 @@ public sealed class ProductionHttpFixture : IAsyncLifetime
             : null;
 
         _ctx.AddRoutes(new IdentityCoreRouteBuilder(_sp, Options.Create(identityOptions),
-            Options.Create(new IdentityAuditOptions { Enabled = true, Filter = "*", PersistToProps = true, Targets = [] }),
+            Options.Create(AuditOptions()),
             managementAuth,
             scimAuth));
+        _ctx.AddRoutes(new AuditTargetCapture(AuditTargetMessages));
 
         _ctx.AddRoutes(new HttpFacadeRouteBuilder(
             new SessionTicketService(_sp.GetRequiredService<IDataProtectionProvider>()),
@@ -771,3 +783,25 @@ public sealed class ProductionHttpFixture : IAsyncLifetime
 
 [CollectionDefinition("ProductionHttp")]
 public class ProductionHttpCollection : ICollectionFixture<ProductionHttpFixture>;
+
+/// <summary>The consumer behind <see cref="ProductionHttpFixture.AuditTargetUri"/>.</summary>
+internal sealed class AuditTargetCapture(
+    System.Collections.Concurrent.ConcurrentQueue<(Dictionary<string, object?> Headers, string Body)> sink) : RouteBuilder
+{
+    protected override void Configure()
+    {
+        From(ProductionHttpFixture.AuditTargetUri)
+            .RouteId("identity-test-audit-target")
+            .Process(e =>
+            {
+                var body = e.In.Body switch
+                {
+                    byte[] bytes => System.Text.Encoding.UTF8.GetString(bytes),
+                    string text => text,
+                    null => string.Empty,
+                    var other => JsonSerializer.Serialize(other),
+                };
+                sink.Enqueue((new Dictionary<string, object?>(e.In.Headers), body));
+            });
+    }
+}

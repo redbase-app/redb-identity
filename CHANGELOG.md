@@ -38,6 +38,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Pending changes live in `changelog/unreleased/` until the release; `pwsh scripts/changelog.ps1 -Preview` shows them.
 
+## [4.5.1] — 2026-10-30
+
+### Security
+
+- **Audit targets receive the event and nothing of the request that raised it.** In 4.5.0 every target of
+  `Identity:Audit:Targets` (Kafka, AMQP, a log endpoint, a consumer module) also got the request's headers: the client
+  secret of a token request, `Authorization` with the bearer token, cookies, `redbHttp.*`; and a management read sent its
+  answer (user, role or scope lists) instead of an event. Rotate those client secrets if a target stored or logged them. Packages: `redb.Identity.Core`.
+
+### Fixed
+
+- **A management call no longer repeats the previous call's audit event.** An in-process caller that sent one exchange
+  to several management routes in a row (for example attach a scope to a role, then list the role's scopes) had the
+  first operation's event raised again by every following call on that exchange. Each operation now raises only its own. Packages: `redb.Identity.Core`.
+
 ## [4.5.0] — 2026-10-29
 
 ### Breaking

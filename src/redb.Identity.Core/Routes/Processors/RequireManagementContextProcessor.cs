@@ -42,6 +42,12 @@ internal sealed class RequireManagementContextProcessor : IProcessor
 
     public Task Process(IExchange exchange, CancellationToken ct = default)
     {
+        // Each operation starts without an event. An in-process caller may send one exchange to several
+        // management routes in a row; the event a previous operation left in the properties would
+        // otherwise reach this route's WireTap again, raised by an operation that did not cause it.
+        exchange.Properties.Remove("identity-event-type");
+        exchange.Properties.Remove("identity-event-data");
+
         if (exchange.Properties.TryGetValue(ScopesProperty, out var raw) && raw is string[] { Length: > 0 })
             return Task.CompletedTask;
 
