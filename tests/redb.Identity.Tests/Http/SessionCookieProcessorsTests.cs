@@ -188,6 +188,105 @@ public class SessionCookieProcessorsTests
         ticket!.SessionId.Should().Be(100);
     }
 
+    [Fact]
+    public async Task RedirectToLogin_GetRequest_ReturnUrlIsThePathAndQuery()
+    {
+        var exchange = LoginRequiredExchange();
+        exchange.In.Headers[HttpHeaders.Query] = "client_id=app&response_type=code";
+
+        await SessionCookieProcessors.RedirectToLogin(exchange, CancellationToken.None, "/login");
+
+        ReturnUrl(exchange).Should().Be("/connect/authorize?client_id=app&response_type=code");
+    }
+
+    [Fact]
+    public async Task RedirectToLogin_PostRequestWithoutSession_ReturnUrlCarriesTheForm()
+    {
+        // OIDC Core 3.1.2.1: the authorization request may come as a form POST. Up to 4.5 the
+        // return trip was rebuilt from the (empty) query string, so after login the browser came
+        // back to /connect/authorize without client_id.
+        var form = new Dictionary<string, object?>
+        {
+            ["client_id"] = "app",
+            ["response_type"] = "code",
+            ["scope"] = "openid profile",
+            ["redirect_uri"] = "https://rp.example/cb?dummy1=lorem&dummy2=ipsum",
+            ["state"] = "s+1/2=3",
+        };
+        var exchange = await PostedAuthorizeExchange(form);
+
+        await SessionCookieProcessors.RedirectToLogin(exchange, CancellationToken.None, "/login");
+
+        var returnUrl = ReturnUrl(exchange);
+        returnUrl.Should().StartWith("/connect/authorize?");
+        ParseQuery(returnUrl).Should().BeEquivalentTo(form.ToDictionary(kv => kv.Key, kv => (string)kv.Value!));
+    }
+
+    [Fact]
+    public async Task RedirectToLogin_PostedPushedRequest_KeepsClientIdAndRequestUriVerbatim()
+    {
+        const string requestUri = "urn:ietf:params:oauth:request_uri:6esc_11ACC5bwc014ltc14eY22c";
+        var exchange = await PostedAuthorizeExchange(new Dictionary<string, object?>
+        {
+            ["client_id"] = "app",
+            ["request_uri"] = requestUri,
+        });
+
+        await SessionCookieProcessors.RedirectToLogin(exchange, CancellationToken.None, "/login");
+
+        ReturnUrl(exchange).Should().Be("/connect/authorize?client_id=app&request_uri=" + Uri.EscapeDataString(requestUri));
+    }
+
+    [Fact]
+    public async Task RedirectToConsent_PostRequest_TicketReturnUrlCarriesTheForm()
+    {
+        var exchange = BuildConsentRequiredExchange(delegateHeader: null);
+        exchange.In.Headers.Remove("redbHttp.Query");
+        exchange.In.Body = new Dictionary<string, object?> { ["client_id"] = "demo-client", ["scope"] = "openid profile" };
+        await SessionCookieProcessors.CaptureAuthorizeForm(exchange, CancellationToken.None);
+        exchange.In.Body = new Dictionary<string, object?> { ["error"] = "consent_required" };
+
+        await SessionCookieProcessors.RedirectToConsent(exchange, CancellationToken.None, "/consent", _ticketService);
+
+        var location = exchange.In.GetHeader<string>("Location")!;
+        var ticket = _ticketService.UnprotectConsent(Uri.UnescapeDataString(location["/consent?ct=".Length..]), TimeSpan.FromMinutes(10));
+        ticket!.ReturnUrl.Should().Be("/connect/authorize?client_id=demo-client&scope=openid%20profile");
+    }
+
+    private static IExchange LoginRequiredExchange()
+    {
+        var exchange = CreateExchange();
+        exchange.In.Headers[HttpHeaders.Path] = "/connect/authorize";
+        exchange.Out = new Message { Body = new Dictionary<string, object?> { ["error"] = "login_required" } };
+        return exchange;
+    }
+
+    // The POST route as the facade runs it: MapFormToBody leaves the form on In.Body,
+    // CaptureAuthorizeForm keeps it, then the authorize response replaces the body.
+    private static async Task<IExchange> PostedAuthorizeExchange(Dictionary<string, object?> form)
+    {
+        var exchange = CreateExchange();
+        exchange.In.Headers[HttpHeaders.Path] = "/connect/authorize";
+        exchange.In.Body = form;
+        await SessionCookieProcessors.CaptureAuthorizeForm(exchange, CancellationToken.None);
+        exchange.In.Body = null;
+        exchange.Out = new Message { Body = new Dictionary<string, object?> { ["error"] = "login_required" } };
+        return exchange;
+    }
+
+    private static string ReturnUrl(IExchange exchange)
+    {
+        exchange.Out!.GetHeader<int>(HttpHeaders.ResponseCode).Should().Be(302);
+        var location = exchange.Out.GetHeader<string>("Location")!;
+        location.Should().StartWith("/login?returnUrl=");
+        return Uri.UnescapeDataString(location["/login?returnUrl=".Length..]);
+    }
+
+    private static Dictionary<string, string> ParseQuery(string url) =>
+        url[(url.IndexOf('?') + 1)..].Split('&')
+            .Select(p => p.Split('=', 2))
+            .ToDictionary(p => Uri.UnescapeDataString(p[0]), p => Uri.UnescapeDataString(p[1]));
+
     // ── RedirectToConsent (N-2 native BFF consent) ──
 
     [Fact]

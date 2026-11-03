@@ -304,6 +304,7 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process((e, ct) => SessionCookieProcessors.ReadSessionCookie(e, ct, _ticketService, cookieMaxAge, sessionCookieName))
             .Process(HttpIdentityProcessors.MapHttpToIdentityHeaders)
             .Process(HttpIdentityProcessors.MapFormToBody)
+            .Process(SessionCookieProcessors.CaptureAuthorizeForm)
             .To(IdentityEndpoints.Authorize)
             .Process(HttpIdentityProcessors.HandleRedirectResponse)
             .Process((e, ct) => SessionCookieProcessors.RedirectToLogin(e, ct, loginPath))

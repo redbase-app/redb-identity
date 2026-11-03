@@ -25,6 +25,41 @@ internal static class SessionCookieProcessors
     internal const string ReauthClearProperty = "reauth_clear";       // out: exchange prop = true
     private static readonly TimeSpan ReauthMarkerMaxAge = TimeSpan.FromMinutes(10);
 
+    // POST /connect/authorize carries the request in the form body, not in the query string. The
+    // body is replaced by the authorize response before RedirectToLogin and RedirectToConsent run,
+    // so the form is kept here, encoded as a query, for the return trip.
+    internal const string AuthorizeFormQueryProperty = "identity:authorize-form-query";
+
+    /// <summary>
+    /// Keeps the parameters of a form-encoded authorization request (OIDC Core 3.1.2.1, POST) as a
+    /// query string, so the login and consent pages return to <c>GET /connect/authorize</c> with
+    /// the same request. Runs after <see cref="HttpIdentityProcessors.MapFormToBody"/>.
+    /// </summary>
+    internal static Task CaptureAuthorizeForm(IExchange e, CancellationToken ct)
+    {
+        if (e.In.Body is IDictionary<string, object?> form && form.Count > 0)
+        {
+            e.Properties[AuthorizeFormQueryProperty] = string.Join("&", form.Select(kv =>
+                kv.Value is null
+                    ? Uri.EscapeDataString(kv.Key)
+                    : $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value.ToString() ?? string.Empty)}"));
+        }
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// The authorization request the browser made, as a local path: the form of a POST request,
+    /// otherwise the query string of a GET request.
+    /// </summary>
+    private static string OriginalAuthorizeUrl(IExchange e)
+    {
+        var path = e.In.GetHeader<string>(HttpHeaders.Path) ?? "/connect/authorize";
+        var query = e.Properties.TryGetValue(AuthorizeFormQueryProperty, out var fq) && fq is string formQuery && formQuery.Length > 0
+            ? formQuery
+            : e.In.GetHeader<string>(HttpHeaders.Query);
+        return string.IsNullOrEmpty(query) ? path : $"{path}?{query}";
+    }
+
     /// <summary>
     /// Reads the session cookie from the HTTP request, decrypts it, and sets
     /// <c>session_user_id</c> and <c>session_username</c> headers on the exchange.
@@ -195,10 +230,7 @@ internal static class SessionCookieProcessors
         if (!body.TryGetValue("error", out var err) || err?.ToString() != "login_required")
             return Task.CompletedTask;
 
-        // Reconstruct the original authorize URL from query string or path
-        var query = e.In.GetHeader<string>(HttpHeaders.Query);
-        var path = e.In.GetHeader<string>(HttpHeaders.Path) ?? "/connect/authorize";
-        var originalUrl = string.IsNullOrEmpty(query) ? path : $"{path}?{query}";
+        var originalUrl = OriginalAuthorizeUrl(e);
 
         var redirectUrl = $"{loginPath}?returnUrl={Uri.EscapeDataString(originalUrl)}";
 
@@ -238,10 +270,8 @@ internal static class SessionCookieProcessors
 
         if (clientId is null) return Task.CompletedTask;
 
-        // Reconstruct the original authorize URL for post-consent redirect
-        var query = e.In.GetHeader<string>(HttpHeaders.Query);
-        var path = e.In.GetHeader<string>(HttpHeaders.Path) ?? "/connect/authorize";
-        var originalUrl = string.IsNullOrEmpty(query) ? path : $"{path}?{query}";
+        // The original authorize URL for the post-consent redirect.
+        var originalUrl = OriginalAuthorizeUrl(e);
 
         var scopesArr = string.IsNullOrEmpty(scopes)
             ? Array.Empty<string>()

@@ -6,8 +6,8 @@ prepare for it, and the current state against the official OpenID Foundation
 conformance suite.
 
 > **Status — preparing for OpenID Certification.** In local runs of the official
-> OIDF conformance suite against a live server over native HTTPS:
-> **Config OP — zero failures**, and **Basic OP — 35 modules, zero failures**
+> OIDF conformance suite against a live server over native HTTPS (latest run
+> 2026-11-03, see §4): **Config OP — zero failures**, and **Basic OP — 35 modules, zero failures**
 > (29 PASSED, 3 REVIEW awaiting a screenshot, 1 WARNING that is a deliberate
 > extension, 2 SKIPPED optional features). Every defect the suite found is fixed;
 > §4.1 lists them, including the ones we had previously — and wrongly — written
@@ -167,15 +167,23 @@ discovery and JWKS stay cacheable. Commit `3583a19b`.
 Runs use the [official OpenID Foundation conformance
 suite](https://gitlab.com/openid/conformance-suite) locally (Docker,
 `https://localhost.emobix.co.uk:8443`) driven against the OP at
-`https://host.docker.internal:5002` over native HTTPS (see §5).
+`https://host.docker.internal:5002` over native HTTPS (see §5). The latest run
+is of 2026-11-03, with the suite's own scripted browser; the three modules that
+need a person at the browser were last run on 2026-07-13.
 
-- **Config OP** — passes over HTTPS (0 failures).
+- **Config OP** — **0 failures**, one WARNING. A newer suite check,
+  `CheckForUnexpectedParametersInServerMetadata`, lists three discovery fields
+  outside RFC 8414: `device_authorization_endpoint_auth_methods_supported`,
+  `pushed_authorization_request_endpoint_auth_methods_supported` and
+  `federation_providers` (our extension: the configured external identity
+  providers). Unknown fields are allowed by RFC 8414 and the suite reports them
+  as a warning.
 - **Basic OP** — **35 modules, 0 failures.**
 
   | Result | Modules | Notes |
   |--------|---------|-------|
   | PASSED | 29 | |
-  | REVIEW | 3 | the suite requires a human-uploaded screenshot — pass-equivalent |
+  | REVIEW | 3 | the suite requires a human-uploaded screenshot — pass-equivalent (run of 2026-07-13) |
   | WARNING | 1 | `oidcc-server` — two deliberate id_token claims (below) |
   | SKIPPED | 2 | **both** are `alg:none` (unsigned) request objects — skipped because we correctly refuse the unsafe mode; see §4.3 |
   | **FAILED** | **0** | |
@@ -183,7 +191,8 @@ suite](https://gitlab.com/openid/conformance-suite) locally (Docker,
   The three REVIEW modules (`prompt-login`, `max-age-1`,
   `ensure-registered-redirect-uri`) behave correctly end to end; the suite
   additionally wants a screenshot as certification evidence and therefore never
-  auto-finishes them.
+  auto-finishes them. A scripted browser cannot supply it, so their result is
+  the one of the browser run of 2026-07-13.
 
 ### 4.1 What the suite actually found
 
@@ -199,6 +208,7 @@ turned out to be **genuine OP defects**. All are now fixed.
 | userinfo returning extra fields | UserInfo was copying claims through a *deny-list*, leaking token plumbing: OpenIddict's `oi_*` internals, `jti`/`exp`/`iat`/`at_hash`. Those describe the **token**, not the user (§5.3) | Explicit allow-list |
 | `oidcc-userinfo-post-body` | `/connect/userinfo` (POST) did not accept the access token in the form-encoded body (RFC 6750 §2.2) | Route now maps form to body |
 | `oidcc-claims-essential` — WARNING | The test requests `name` as an essential claim via the **`claims` parameter** (§5.5), which we had **not implemented at all** — and our own discovery said so: `claims_parameter_supported: false` | §5.5 implemented; discovery now says `true` |
+| `oidcc-ensure-post-request-succeeds` — INTERRUPTED (run of 2026-11-03) | An authorization request sent as **POST** to a user without a session lost its parameters on the way to the login page: the return address was rebuilt from the (empty) query string, so after login the OP answered "client_id is missing". The browser run of July passed only because a session already existed. OIDC Core §3.1.2.1 requires POST support | The login and consent redirects carry the form parameters of a POST request; module passes |
 | `oidcc-server-client-secret-post` — FAILED | **Suite config, not an OP defect** — and this one really was the harness. The test does `config.add("client", config.get("client_secret_post"))`, overwriting `client` with a key our plan didn't have, so it died *before* issuing a single request to the OP | Plan config gained a third client under the `client_secret_post` key. Module passes |
 
 Earlier passes also fixed: the error open-redirect (RFC 6749 §4.1.2.1), reused

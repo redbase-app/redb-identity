@@ -177,7 +177,7 @@ internal class InMemoryRedbQueryable<TProps> : IRedbQueryable<TProps>, IOrderedR
     public Task<TResult> AggregateRedbAsync<TResult>(Expression<Func<IRedbObject, TResult>> selector, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     public IRedbGroupedQueryable<TKey, TProps> GroupBy<TKey>(Expression<Func<TProps, TKey>> keySelector) => throw new NotSupportedException();
     public IRedbGroupedQueryable<TKey, TProps> GroupByRedb<TKey>(Expression<Func<IRedbObject, TKey>> keySelector) => throw new NotSupportedException();
-    public IRedbGroupedQueryable<TKey, TItem> GroupByArray<TItem, TKey>(Expression<Func<TProps, IEnumerable<TItem>>> arraySelector, Expression<Func<TItem, TKey>> keySelector) where TItem : class, new() => throw new NotSupportedException();
+    public IRedbGroupedQueryable<TKey, TItem> GroupByArray<TItem, TKey>(Expression<Func<TProps, IEnumerable<TItem>>> arraySelector, Expression<Func<TItem, TKey>> keySelector) => throw new NotSupportedException();
     public IRedbWindowedQueryable<TProps> WithWindow(Action<IWindowSpec<TProps>> windowConfig) => throw new NotSupportedException();
     public string ToSqlString() => throw new NotSupportedException();
     public Task<string> ToSqlStringAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
