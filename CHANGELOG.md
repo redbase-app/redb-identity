@@ -38,6 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Pending changes live in `changelog/unreleased/` until the release; `pwsh scripts/changelog.ps1 -Preview` shows them.
 
+## [4.6.1] — 2026-11-04
+
+### Changed
+
+- **Built on redb 4.6.1, redb.Route 4.6.1 and redb.Tsak 4.6.1.** The images and archives take the fixes of those
+  releases; redb.Identity itself has no change. Nothing to do on your side.
+
 ## [4.6.0] — 2026-11-03
 
 ### Fixed
