@@ -3,6 +3,32 @@
 What to check and change when moving to a new version. Each section lists the changes that need action;
 [CHANGELOG.md](CHANGELOG.md) has the full list of what changed.
 
+## 4.6.2
+
+### DPoP-bound access tokens at userinfo and the management API
+
+This applies only when DPoP is enabled (`Dpop.Enabled = true`; it is off by default). Security fix, see
+[GHSA-vmj2-8phj-mfxf](https://github.com/redbase-app/redb-identity/security/advisories/GHSA-vmj2-8phj-mfxf).
+
+An access token bound to a DPoP key (its `cnf` claim holds `jkt`, RFC 9449) is now accepted at `/connect/userinfo`
+and at the management and self-service API (`/api/v1/identity/...`, SCIM) only when the request carries:
+
+- `Authorization: DPoP <access token>`, not `Bearer`;
+- a `DPoP` header with a fresh proof signed by the bound key, whose `htm` and `htu` match the request and whose
+  `ath` is the base64url SHA-256 of the access token, inside the `Dpop.IatToleranceSeconds` window, never reused.
+
+Otherwise the answer is 401 `invalid_token` with `WWW-Authenticate: DPoP error="invalid_token", ...`. An access
+token without `jkt` sent under the `DPoP` scheme is refused the same way. Plain Bearer tokens and certificate-bound
+tokens (`x5t#S256`) work as before.
+
+What to do:
+
+1. Clients that obtain DPoP-bound tokens and call userinfo or the management API: send the `DPoP` scheme and a
+   proof with `ath` on every such call. Clients that already do this need no change.
+2. The gRPC and SOAP management surfaces cannot carry a DPoP proof, so a DPoP-bound token is refused there. Use a
+   Bearer token (a token request without a `DPoP` header) for those calls, or call the HTTP management API.
+3. `Dpop.RequireNonce` still applies to the token endpoint only.
+
 ## 4.5.0
 
 ### Role scopes only when the client asks for them

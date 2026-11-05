@@ -223,6 +223,16 @@ public sealed class RedbRouteOpenIddictServerHandler
                 }
 
                 RedbRouteOpenIddictServerHelpers.WriteResponseToExchange(exchange, response);
+
+                // RFC 9449 §7.1: a DPoP presentation rejected at userinfo answers with the DPoP challenge
+                // staged by DpopConfirmationServerPassThroughHandler.
+                if (exchange.Out is not null
+                    && exchange.Properties.TryGetValue(Handlers.DpopConfirmationPassThrough.ChallengeProperty, out var challenge)
+                    && challenge is string dpopChallenge && dpopChallenge.Length > 0)
+                {
+                    exchange.Out.Headers["WWW-Authenticate"] = dpopChallenge;
+                }
+
                 // RFC 6749 §5.2 — token-endpoint error status: invalid_client → 401, everything else → 400.
                 if (endpointType == OpenIddictServerEndpointType.Token && exchange.Out is not null
                     && !string.IsNullOrEmpty(response.Error))

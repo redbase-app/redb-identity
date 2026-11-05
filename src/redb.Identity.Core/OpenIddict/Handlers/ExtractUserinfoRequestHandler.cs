@@ -25,13 +25,21 @@ internal sealed class ExtractUserinfoRequestHandler
 
         context.Request = RedbRouteOpenIddictServerHelpers.CreateRequestFromExchange(exchange);
 
-        // Userinfo typically receives the access token via Bearer scheme
+        // The access token comes in the Authorization header under the Bearer scheme, or under the DPoP
+        // scheme for a DPoP-bound token (RFC 9449 §7.1). Whether the scheme fits the token is checked by
+        // DpopConfirmationServerPassThroughHandler once the token is validated.
         if (string.IsNullOrEmpty(context.Request.AccessToken)
             && exchange.In.Headers.TryGetValue("Authorization", out var authValue)
-            && authValue is string auth
-            && auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            && authValue is string auth)
         {
-            context.Request.AccessToken = auth["Bearer ".Length..].Trim();
+            foreach (var scheme in (ReadOnlySpan<string>)["Bearer ", "DPoP "])
+            {
+                if (auth.StartsWith(scheme, StringComparison.OrdinalIgnoreCase))
+                {
+                    context.Request.AccessToken = auth[scheme.Length..].Trim();
+                    break;
+                }
+            }
         }
 
         return default;

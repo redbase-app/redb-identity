@@ -38,6 +38,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Pending changes live in `changelog/unreleased/` until the release; `pwsh scripts/changelog.ps1 -Preview` shows them.
 
+## [4.6.2] — 2026-11-05
+
+### Security
+
+- **DPoP-bound access tokens now require a DPoP proof at `/connect/userinfo` and the management API.** A token bound
+  to a DPoP key is accepted there only as `Authorization: DPoP <token>` with a fresh proof carrying `ath`; as Bearer
+  or without a proof it gets 401. Advisory: [GHSA-vmj2-8phj-mfxf](https://github.com/redbase-app/redb-identity/security/advisories/GHSA-vmj2-8phj-mfxf). Packages: `redb.Identity.Core`, `redb.Identity.Http`. Upgrade: [UPGRADING.md](UPGRADING.md#dpop-bound-access-tokens-at-userinfo-and-the-management-api).
+
 ## [4.6.1] — 2026-11-04
 
 ### Changed

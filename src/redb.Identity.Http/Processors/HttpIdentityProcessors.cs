@@ -136,6 +136,10 @@ internal static class HttpIdentityProcessors
     /// </summary>
     internal static Task ExtractBearerToken(IExchange e, CancellationToken ct)
     {
+        // WWW-Authenticate is a response header. A copy sent by the client is dropped here, so the one
+        // on In after the endpoint call can only be the challenge Core chose (AttachBearerChallengeOnError).
+        e.In.Headers.Remove("WWW-Authenticate");
+
         var authHeader = e.In.GetHeader<string>(HttpHeaders.Authorization);
         if (authHeader?.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) == true)
         {
@@ -435,6 +439,11 @@ internal static class HttpIdentityProcessors
         }
 
         if (string.IsNullOrEmpty(error)) return Task.CompletedTask;
+
+        // Core already chose the challenge (the DPoP scheme for a DPoP-bound token, RFC 9449 §7.1): keep it.
+        // ExtractBearerToken drops a client-sent copy before the endpoint call, so this one is Core's.
+        if ((e.HasOut && e.Out!.Headers.ContainsKey("WWW-Authenticate")) || e.In.Headers.ContainsKey("WWW-Authenticate"))
+            return Task.CompletedTask;
 
         // RFC 7235 §2.1 quoted-string rules: backslash → \\, quote → \"
         var safeError = error.Replace("\\", "\\\\").Replace("\"", "\\\"");

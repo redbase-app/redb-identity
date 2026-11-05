@@ -66,30 +66,7 @@ public class DpopFullCycleTests
         cnf.GetProperty("jkt").GetString().Should().Be(ComputeJkt(ec));
     }
 
-    [Fact]
-    public async Task Userinfo_Accepts_A_DPoP_Bound_Access_Token()
-    {
-        // OpenIddict 7 checks cnf on every token it validates and throws on a DPoP jkt (it knows only mTLS),
-        // which surfaced as server_error on /connect/userinfo.
-        using var ec = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var tokenUrl = $"{_fx.BaseUrl.TrimEnd('/')}/connect/token";
-        using var tokenReq = BuildPasswordTokenRequest();
-        tokenReq.Headers.Add("DPoP", BuildDpopProof(ec, "POST", tokenUrl));
-        var tokenResp = await _fx.Http.SendAsync(tokenReq);
-        var tokenBody = await tokenResp.Content.ReadAsStringAsync();
-        tokenResp.StatusCode.Should().Be(HttpStatusCode.OK, tokenBody);
-        var accessToken = JsonDocument.Parse(tokenBody).RootElement.GetProperty("access_token").GetString()!;
-
-        var userinfoUrl = $"{_fx.BaseUrl.TrimEnd('/')}/connect/userinfo";
-        using var req = new HttpRequestMessage(HttpMethod.Get, "/connect/userinfo");
-        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        req.Headers.Add("DPoP", BuildDpopProof(ec, "GET", userinfoUrl));
-
-        var resp = await _fx.Http.SendAsync(req);
-        var body = await resp.Content.ReadAsStringAsync();
-        resp.StatusCode.Should().Be(HttpStatusCode.OK, "a DPoP-bound access token must be accepted by userinfo: {0}", body);
-        JsonDocument.Parse(body).RootElement.TryGetProperty("sub", out _).Should().BeTrue();
-    }
+    // Use of a DPoP-bound token at userinfo and the management API: DpopBoundTokenResourceTests.
 
     [Fact]
     public async Task Token_With_Replayed_DPoP_Proof_Is_Rejected()

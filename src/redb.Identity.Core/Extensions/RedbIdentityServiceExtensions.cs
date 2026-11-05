@@ -373,7 +373,7 @@ public static class RedbIdentityServiceExtensions
                 validation.AddEventHandler(redb.Identity.Core.Services.DisabledUserRejectionHandler.Descriptor);
 
                 // DPoP-bound access tokens carry cnf.jkt, which OpenIddict 7's proof-of-possession check
-                // (mTLS only) throws on; the DPoP proof is checked by Identity's own handlers.
+                // (mTLS only) throws on; this handler verifies the DPoP proof in its place (RFC 9449 §7).
                 validation.AddEventHandler(OpenIddict.Handlers.DpopConfirmationValidationPassThroughHandler.Descriptor);
 
                 // **Batch 12 diagnostic.** Class-based handler dumps key picture on

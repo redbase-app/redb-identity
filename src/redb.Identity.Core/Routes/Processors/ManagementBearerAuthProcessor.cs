@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using OpenIddict.Abstractions;
 using OpenIddict.Validation;
+using redb.Identity.Core.OpenIddict.Handlers;
 using redb.Identity.Core.Serialization;
 using redb.Identity.Core.Services;
 using redb.Route.Abstractions;
@@ -107,23 +108,37 @@ internal sealed class ManagementBearerAuthProcessor : IProcessor
         // D6: per RFC 6750 §2.1 the scheme token is case-insensitive ("Bearer", "bearer",
         // "BEARER" all valid) and per RFC 7230 §3.2.4 one-or-more SP / OWS is permitted
         // between the scheme and the credentials.
-        var token = TryExtractBearerToken(exchange.In.GetHeader<string>("Authorization"));
+        // A DPoP-bound token comes under the DPoP scheme (RFC 9449 §7.1); whether the scheme fits the
+        // token, and the proof, are checked by DpopConfirmationValidationPassThroughHandler.
+        var authorization = exchange.In.GetHeader<string>("Authorization");
+        var scheme = DpopConfirmationPassThrough.DpopScheme;
+        var token = TryExtractToken(authorization, scheme);
+        if (token is null)
+        {
+            scheme = "Bearer";
+            token = TryExtractBearerToken(authorization);
+        }
+
         if (token is null)
         {
             Reject(exchange, 401, "missing_token",
-                "Authorization header with Bearer token is required.");
+                "Authorization header with a Bearer or DPoP token is required.");
             return;
         }
 
         if (token.Length == 0)
         {
-            Reject(exchange, 401, "invalid_token", "Bearer token is empty.");
+            Reject(exchange, 401, "invalid_token", "The access token is empty.");
             return;
         }
 
         // 2. Validate token via OpenIddict Validation (server-local)
         var transaction = await _factory.CreateTransactionAsync();
         transaction.Properties[TokenPropertyKey] = token;
+        transaction.Properties[DpopConfirmationPassThrough.SchemeProperty] = scheme;
+        transaction.Properties[DpopConfirmationPassThrough.ProofProperty] = exchange.In.GetHeader<string>("DPoP");
+        transaction.Properties[DpopConfirmationPassThrough.MethodProperty] = exchange.In.GetHeader<string>("redbHttp.Method");
+        transaction.Properties[DpopConfirmationPassThrough.UrlProperty] = exchange.In.GetHeader<string>("redbHttp.Url");
         transaction.CancellationToken = ct;
 
         var context = new OpenIddictValidationEvents.ProcessAuthenticationContext(transaction);
@@ -132,7 +147,10 @@ internal sealed class ManagementBearerAuthProcessor : IProcessor
         if (context.IsRejected || context.AccessTokenPrincipal is null)
         {
             Reject(exchange, 401, context.Error ?? "invalid_token",
-                context.ErrorDescription ?? "The access token is not valid.");
+                context.ErrorDescription ?? "The access token is not valid.",
+                transaction.Properties.TryGetValue(DpopConfirmationPassThrough.ChallengeProperty, out var challenge)
+                    ? challenge as string
+                    : null);
             return;
         }
 
@@ -168,7 +186,7 @@ internal sealed class ManagementBearerAuthProcessor : IProcessor
             exchange.Properties["identity:management-sid"] = sid;
     }
 
-    private static void Reject(IExchange exchange, int statusCode, string error, string description)
+    private static void Reject(IExchange exchange, int statusCode, string error, string description, string? challenge = null)
     {
         // RFC 6749 §5.2 — OAuth 2.0 error response: application/json with snake_case
         // members "error", "error_description". RFC 6750 §3 mandates the same envelope
@@ -196,7 +214,7 @@ internal sealed class ManagementBearerAuthProcessor : IProcessor
         // protected resources behind the same hostname.
         if (statusCode is 401 or 403)
         {
-            exchange.Out.Headers["WWW-Authenticate"] = BuildChallenge(error, description);
+            exchange.Out.Headers["WWW-Authenticate"] = challenge ?? BuildChallenge(error, description);
         }
 
         exchange.Exception = new UnauthorizedAccessException(description);
@@ -218,12 +236,17 @@ internal sealed class ManagementBearerAuthProcessor : IProcessor
     /// <c>null</c> when the header is absent / does not use the Bearer scheme.
     /// </summary>
     internal static string? TryExtractBearerToken(string? authorizationHeader)
+        => TryExtractToken(authorizationHeader, "Bearer");
+
+    /// <summary>
+    /// Same tolerant parsing as <see cref="TryExtractBearerToken"/> for the given <paramref name="scheme"/>.
+    /// </summary>
+    internal static string? TryExtractToken(string? authorizationHeader, string scheme)
     {
         if (string.IsNullOrEmpty(authorizationHeader))
             return null;
 
         var span = authorizationHeader.AsSpan().TrimStart();
-        const string scheme = "Bearer";
         if (span.Length < scheme.Length ||
             !span[..scheme.Length].Equals(scheme.AsSpan(), StringComparison.OrdinalIgnoreCase))
             return null;
