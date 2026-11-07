@@ -1,0 +1,516 @@
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject IJSRuntime JS
+
+@*
+    User > Profile tab — OIDC standard profile claims.
+
+    Editable: DisplayName, GivenName, FamilyName, Email, PhoneNumber, Picture.
+    Read-only: internal Id, Login (immutable after creation), Created/Modified.
+
+    Status + email_verified live on the Account tab — they're admin-only flags,
+    not OIDC profile claims, and putting them here would conflate two different
+    operator workflows.
+*@
+
+@if (_dirty)
+{
+    <div class="app-detail__dirty-banner">
+        <RdbIcon Name="alert-triangle" Size="14" />
+        <span>You have unsaved changes.</span>
+        <button class="btn btn-sm btn-ghost" @onclick="Reset" disabled="@_saving">Discard</button>
+    </div>
+}
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Identity</h3>
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Public subject (OIDC <code>sub</code>)</span>
+        <div class="app-detail__input-cluster">
+            <input type="text" readonly
+                   class="app-detail__input app-detail__input--mono app-detail__input--readonly"
+                   value="@(User.SubjectGuid?.ToString("D") ?? "(none yet — assigned on first sign-in)")" />
+            @if (User.SubjectGuid is { } sub)
+            {
+                <button class="btn btn-sm btn-ghost" title="Copy" @onclick="@(() => CopyAsync(sub.ToString("D")))">
+                    <RdbIcon Name="copy" Size="14" />
+                </button>
+            }
+        </div>
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            This GUID is the <code>sub</code> claim that appears in every
+            <code>id_token</code> and <code>access_token</code> issued for this
+            user. It's the public, stable identifier downstream RPs rely on.
+        </span>
+    </div>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Internal user id</span>
+        <input type="text" readonly
+               class="app-detail__input app-detail__input--mono app-detail__input--readonly"
+               value="@User.Id" />
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            Stable internal bigint primary key — what admin API paths
+            (<code>/admin/users/{id}</code>) accept. Not part of any OIDC
+            token; keep it server-internal.
+        </span>
+    </div>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Login</span>
+        <input type="text" readonly
+               class="app-detail__input app-detail__input--mono app-detail__input--readonly"
+               value="@User.Login" />
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            Immutable after creation. To rename a user, create a new one and
+            archive this account.
+        </span>
+    </div>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Profile</h3>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Display name</span>
+        <input type="text"
+               class="app-detail__input"
+               value="@_displayName"
+               @oninput="@(e => { _displayName = e.Value?.ToString() ?? string.Empty; _dirty = true; })"
+               placeholder="Alice Doe" />
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            Shown on the consent screen and across the admin UI.
+            Maps to the OIDC <code>name</code> claim.
+        </span>
+    </div>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">First name</span>
+        <input type="text"
+               class="app-detail__input"
+               value="@_givenName"
+               @oninput="@(e => { _givenName = e.Value?.ToString() ?? string.Empty; _dirty = true; })" />
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            OIDC <code>given_name</code> claim.
+        </span>
+    </div>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Last name</span>
+        <input type="text"
+               class="app-detail__input"
+               value="@_familyName"
+               @oninput="@(e => { _familyName = e.Value?.ToString() ?? string.Empty; _dirty = true; })" />
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            OIDC <code>family_name</code> claim.
+        </span>
+    </div>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Email</span>
+        <input type="email"
+               class="app-detail__input"
+               value="@_email"
+               @oninput="@(e => { _email = e.Value?.ToString() ?? string.Empty; _dirty = true; })"
+               placeholder="alice@example.com" />
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            OIDC <code>email</code> claim. Updating here does NOT re-verify;
+            use the Account tab to flip the <code>email_verified</code> flag
+            manually, or trigger the verification flow.
+        </span>
+    </div>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Phone number</span>
+        <input type="tel"
+               class="app-detail__input"
+               value="@_phone"
+               @oninput="@(e => { _phone = e.Value?.ToString() ?? string.Empty; _dirty = true; })"
+               placeholder="+1 555 0100" />
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            OIDC <code>phone_number</code> claim. E.164 format recommended.
+        </span>
+    </div>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Picture URL</span>
+        <input type="url"
+               class="app-detail__input app-detail__input--mono"
+               value="@_picture"
+               @oninput="@(e => { _picture = e.Value?.ToString() ?? string.Empty; _dirty = true; })"
+               placeholder="https://example.com/avatar.png" />
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            OIDC <code>picture</code> claim — link to an externally-hosted avatar.
+            Direct image upload is not yet supported; tracked in
+            <code>doc/FEATURE_GAPS_VS_WSO2_IS_7X.md</code>.
+        </span>
+    </div>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Custom claims</h3>
+    <p class="text-secondary" style="margin: 0 0 var(--space-4); font-size: var(--font-size-sm); line-height: 1.6;">
+        Schema-driven from global
+        <NavLink href="/admin/claim-definitions">claim definitions</NavLink>:
+        required claims are validated on save (RFC 7519 §4.3 private-claim
+        convention), per-application required claims and per-definition
+        token destinations apply at sign-in. Unstructured ad-hoc claims
+        can still be added below for one-offs.
+    </p>
+
+    @if (_definitions.Count == 0 && _adhocClaims.Count == 0)
+    {
+        <UiEmptyState Variant="inline"
+                      Title="No claim definitions and no ad-hoc claims"
+                      Description="Define schema on the Claim definitions page, or add an ad-hoc key/value pair below." />
+    }
+    else if (_definitions.Count > 0)
+    {
+        <div style="display: grid; gap: var(--space-3);">
+            @foreach (var def in _definitions)
+            {
+                <div class="app-detail__field">
+                    <span class="app-detail__field-label">
+                        <code>@def.ClaimName</code>
+                        @if (def.Required)
+                        {
+                            <span style="color: var(--status-error); margin-left: var(--space-1);" title="Required">*</span>
+                        }
+                        @if (!string.IsNullOrEmpty(def.DisplayName))
+                        {
+                            <span class="text-secondary" style="font-weight: normal; margin-left: var(--space-2);">— @def.DisplayName</span>
+                        }
+                        <RdbBadge Text="@def.Type" Variant="info" />
+                    </span>
+
+                    @switch (def.Type)
+                    {
+                        case "bool":
+                            <label style="display:flex; gap: var(--space-2); align-items:center;">
+                                <input type="checkbox" checked="@(GetClaimValue(def.ClaimName) == "true")"
+                                       @onchange="@(e => OnDefinedClaimChanged(def.ClaimName, ((bool)(e.Value ?? false)) ? "true" : "false"))" />
+                                <span class="text-secondary">@(GetClaimValue(def.ClaimName) ?? (def.DefaultValue ?? ""))</span>
+                            </label>
+                            break;
+                        case "int":
+                        case "long":
+                            <input type="number"
+                                   class="app-detail__input app-detail__input--mono"
+                                   value="@GetClaimValue(def.ClaimName)"
+                                   placeholder="@def.DefaultValue"
+                                   @oninput="@(e => OnDefinedClaimChanged(def.ClaimName, e.Value?.ToString() ?? string.Empty))" />
+                            break;
+                        case "datetime":
+                            <input type="datetime-local"
+                                   class="app-detail__input"
+                                   value="@GetClaimValue(def.ClaimName)"
+                                   @oninput="@(e => OnDefinedClaimChanged(def.ClaimName, e.Value?.ToString() ?? string.Empty))" />
+                            break;
+                        case "url":
+                            <input type="url"
+                                   class="app-detail__input app-detail__input--mono"
+                                   value="@GetClaimValue(def.ClaimName)"
+                                   placeholder="@(def.DefaultValue ?? "https://...")"
+                                   @oninput="@(e => OnDefinedClaimChanged(def.ClaimName, e.Value?.ToString() ?? string.Empty))" />
+                            break;
+                        case "email":
+                            <input type="email"
+                                   class="app-detail__input app-detail__input--mono"
+                                   value="@GetClaimValue(def.ClaimName)"
+                                   placeholder="@(def.DefaultValue ?? "user@example.com")"
+                                   @oninput="@(e => OnDefinedClaimChanged(def.ClaimName, e.Value?.ToString() ?? string.Empty))" />
+                            break;
+                        default:
+                            <input type="text"
+                                   class="app-detail__input app-detail__input--mono"
+                                   value="@GetClaimValue(def.ClaimName)"
+                                   placeholder="@def.DefaultValue"
+                                   pattern="@def.ValidationPattern"
+                                   @oninput="@(e => OnDefinedClaimChanged(def.ClaimName, e.Value?.ToString() ?? string.Empty))" />
+                            break;
+                    }
+
+                    @if (!string.IsNullOrEmpty(def.Description))
+                    {
+                        <span class="app-detail__field-hint">
+                            <RdbIcon Name="info" Size="12" />
+                            @def.Description
+                        </span>
+                    }
+                    @if (!string.IsNullOrEmpty(def.ValidationPattern) && def.Type == "string")
+                    {
+                        <span class="app-detail__field-hint">
+                            <RdbIcon Name="info" Size="12" />
+                            Pattern: <code>@def.ValidationPattern</code>
+                        </span>
+                    }
+                    @if (def.Required && string.IsNullOrEmpty(GetClaimValue(def.ClaimName)) && string.IsNullOrEmpty(def.DefaultValue))
+                    {
+                        <span class="app-detail__field-hint" style="color: var(--status-error);">
+                            <RdbIcon Name="alert-triangle" Size="12" />
+                            Required — server will reject save until a value is set.
+                        </span>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @* Ad-hoc unstructured claims — anything in CustomClaims with no
+       definition. Useful for one-offs, migrations, and to avoid losing
+       legacy data if a definition is deleted. *@
+    @if (_adhocClaims.Count > 0)
+    {
+        <h4 style="margin-top: var(--space-5); font-size: var(--font-size-sm); color: var(--text-secondary);">
+            Ad-hoc (no definition)
+        </h4>
+        <ul class="app-detail__assignment-list">
+            @foreach (var kv in _adhocClaims)
+            {
+                <li class="app-detail__assignment-row">
+                    <div class="app-detail__assignment-info" style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+                        <input type="text"
+                               class="app-detail__input app-detail__input--mono"
+                               value="@kv.Key" disabled />
+                        <input type="text"
+                               class="app-detail__input app-detail__input--mono"
+                               value="@kv.Value"
+                               @oninput="@(e => OnAdhocClaimChanged(kv.Key, e.Value?.ToString() ?? string.Empty))" />
+                    </div>
+                    <button class="btn btn-sm btn-danger"
+                            @onclick="@(() => RemoveAdhocClaim(kv.Key))">Remove</button>
+                </li>
+            }
+        </ul>
+    }
+
+    <div class="app-detail__assignment-add" style="margin-top: var(--space-4); display:grid; grid-template-columns: 1fr 1fr auto; gap: var(--space-2);">
+        <input type="text"
+               class="app-detail__input app-detail__input--mono"
+               placeholder="ad-hoc key (no definition)"
+               value="@_newClaimKey"
+               @oninput="@(e => _newClaimKey = e.Value?.ToString() ?? string.Empty)" />
+        <input type="text"
+               class="app-detail__input app-detail__input--mono"
+               placeholder="value"
+               value="@_newClaimValue"
+               @oninput="@(e => _newClaimValue = e.Value?.ToString() ?? string.Empty)" />
+        <button class="btn btn-primary"
+                @onclick="AddAdhocClaim"
+                disabled="@(string.IsNullOrWhiteSpace(_newClaimKey) || _adhocClaims.ContainsKey(_newClaimKey.Trim()) || _definedValues.ContainsKey(_newClaimKey.Trim()))">
+            Add
+        </button>
+    </div>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Timestamps</h3>
+    <dl class="app-detail__kv">
+        <dt>Created</dt>
+        <dd>@User.CreatedAt.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss") <span class="text-tertiary">(@User.CreatedAt.Offset)</span></dd>
+
+        <dt>Last modified</dt>
+        <dd>@User.ModifiedAt.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss") <span class="text-tertiary">(@User.ModifiedAt.Offset)</span></dd>
+    </dl>
+</section>
+
+<div class="app-detail__submit-row">
+    <button class="btn btn-primary" @onclick="SaveAsync" disabled="@(!_dirty || _saving)">
+        @(_saving ? "Saving…" : "Update")
+    </button>
+    @if (_dirty)
+    {
+        <button class="btn btn-secondary" @onclick="Reset" disabled="@_saving">Discard</button>
+    }
+    @if (_error is not null)
+    {
+        <span class="text-error">@_error</span>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public UserResponse User { get; set; } = default!;
+    [Parameter] public EventCallback OnRefresh { get; set; }
+
+    private string _displayName = "";
+    private string _givenName = "";
+    private string _familyName = "";
+    private string _email = "";
+    private string _phone = "";
+    private string _picture = "";
+
+    // Schema-driven defined-claim values (keyed by ClaimDefinitionProps.ClaimName).
+    private readonly Dictionary<string, string> _definedValues = new(StringComparer.Ordinal);
+    // Ad-hoc claims — anything in CustomClaims that has no matching definition.
+    private readonly Dictionary<string, string> _adhocClaims = new(StringComparer.Ordinal);
+    // Loaded definitions for the editor.
+    private List<ClaimDefinitionResponse> _definitions = new();
+    private string _newClaimKey = "";
+    private string _newClaimValue = "";
+
+    private bool _dirty;
+    private bool _saving;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Per-app definitions are token-issuance gated, not stored on user;
+            // the profile editor only renders the global schema (the one the
+            // server-side ClaimSchemaValidator actually checks here).
+            var page = await Client.ListClaimDefinitionsAsync(count: 200, scope: "global");
+            _definitions = page.Items.ToList();
+        }
+        catch
+        {
+            // Schema page unavailable — fall back to ad-hoc only so the editor
+            // remains usable when /claim-definitions is down or permission-gated.
+            _definitions = new();
+        }
+        Reset();
+    }
+
+    protected override void OnParametersSet() => Reset();
+
+    private void Reset()
+    {
+        _displayName = User.DisplayName ?? string.Empty;
+        _givenName = User.GivenName ?? string.Empty;
+        _familyName = User.FamilyName ?? string.Empty;
+        _email = User.Email ?? string.Empty;
+        _phone = User.PhoneNumber ?? string.Empty;
+        _picture = User.Picture ?? string.Empty;
+
+        _definedValues.Clear();
+        _adhocClaims.Clear();
+        var defNames = new HashSet<string>(_definitions.Select(d => d.ClaimName), StringComparer.Ordinal);
+        if (User.CustomClaims is { } cc)
+        {
+            foreach (var (k, v) in cc)
+            {
+                if (defNames.Contains(k))
+                    _definedValues[k] = v;
+                else
+                    _adhocClaims[k] = v;
+            }
+        }
+
+        _newClaimKey = "";
+        _newClaimValue = "";
+        _dirty = false;
+        _error = null;
+    }
+
+    private string? GetClaimValue(string name)
+        => _definedValues.TryGetValue(name, out var v) ? v : null;
+
+    private void OnDefinedClaimChanged(string name, string value)
+    {
+        _definedValues[name] = value;
+        _dirty = true;
+    }
+
+    private void OnAdhocClaimChanged(string key, string value)
+    {
+        _adhocClaims[key] = value;
+        _dirty = true;
+    }
+
+    private void AddAdhocClaim()
+    {
+        var k = _newClaimKey.Trim();
+        if (string.IsNullOrEmpty(k)) return;
+        if (_adhocClaims.ContainsKey(k) || _definedValues.ContainsKey(k)) return;
+        _adhocClaims[k] = _newClaimValue;
+        _newClaimKey = "";
+        _newClaimValue = "";
+        _dirty = true;
+    }
+
+    private void RemoveAdhocClaim(string key)
+    {
+        if (_adhocClaims.Remove(key))
+        {
+            _dirty = true;
+        }
+    }
+
+    private Dictionary<string, string> BuildClaimsForSave()
+    {
+        var dict = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (k, v) in _definedValues) dict[k] = v ?? "";
+        foreach (var (k, v) in _adhocClaims) dict[k] = v ?? "";
+        return dict;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!_dirty || _saving) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            await Client.UpdateUserAsync(User.Id, new UpdateUserRequest
+            {
+                Id = User.Id,
+                DisplayName = NormalizeNullable(_displayName),
+                GivenName = NormalizeNullable(_givenName),
+                FamilyName = NormalizeNullable(_familyName),
+                Email = NormalizeNullable(_email),
+                PhoneNumber = NormalizeNullable(_phone),
+                Picture = NormalizeNullable(_picture),
+                // Merge schema-defined values + ad-hoc into one dict. Empty
+                // strings are kept verbatim — the server-side schema check
+                // treats them as "missing" for required gating, which is the
+                // intuitive UX (clearing a field undeclares it).
+                CustomClaims = BuildClaimsForSave(),
+            });
+            Toast.Success("Profile updated");
+            _dirty = false;
+            await OnRefresh.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    /// <summary>
+    /// Treat empty-after-trim as a clear (null), so the operator can wipe a
+    /// claim by clearing the input and saving. The server side merges PATCH-
+    /// style — null on the wire means "leave alone", so the explicit null
+    /// here lets us round-trip "the user has no first_name on file" as well
+    /// as "the user just had it cleared".
+    /// </summary>
+    private static string? NormalizeNullable(string raw) =>
+        string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
+
+    private async Task CopyAsync(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", value);
+            Toast.Success("Copied");
+        }
+        catch
+        {
+            Toast.Error("Copy to clipboard failed");
+        }
+    }
+}

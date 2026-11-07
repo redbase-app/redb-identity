@@ -1,0 +1,73 @@
+@page "/admin/scopes"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+<RdbPageHeader Title="Scopes" Description="OIDC/OAuth scopes." />
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">All scopes</span>
+        <NavLink href="/admin/scopes/new" class="btn btn-primary">
+            <RdbIcon Name="edit" Size="14" /> <span>New scope</span>
+        </NavLink>
+    </div>
+
+    @if (_loading) { <p class="text-secondary">Loading…</p> }
+    else if (_error is not null) { <p class="text-error">@_error</p> }
+    else if (_items.Count == 0) { <p class="text-secondary">No scopes.</p> }
+    else
+    {
+        <table class="data-table">
+            <thead><tr><th>Name</th><th>Display name</th><th>Resources</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var s in _items)
+                {
+                    <tr>
+                        <td><strong>@s.Name</strong></td>
+                        <td>@s.DisplayName</td>
+                        <td class="text-secondary">@string.Join(", ", s.Resources ?? Array.Empty<string>())</td>
+                        <td style="text-align:right;">
+                            <NavLink href="@($"/admin/scopes/{Uri.EscapeDataString(s.Id)}")" class="btn btn-sm">
+                                Open <RdbIcon Name="chevron-right" Size="12" />
+                            </NavLink>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <div style="display:flex; gap: var(--space-2); margin-top: var(--space-3); align-items:center;">
+            <button class="btn btn-sm" @onclick="PrevPage" disabled="@(_offset == 0)">&laquo; Prev</button>
+            <span class="text-secondary">@(_offset + 1)–@(_offset + _items.Count) of @_total</span>
+            <button class="btn btn-sm" @onclick="NextPage" disabled="@(_offset + _items.Count >= _total)">Next &raquo;</button>
+        </div>
+    }
+</div>
+
+
+@code {
+    private readonly List<ScopeResponse> _items = new();
+    private int _offset, _total;
+    private const int PageSize = 25;
+    private bool _loading = true;
+    private string? _error;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            var page = await Client.ListScopesAsync(_offset, PageSize);
+            _items.Clear(); _items.AddRange(page.Items);
+            _total = page.Total;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private Task PrevPage() { _offset = Math.Max(0, _offset - PageSize); return LoadAsync(); }
+    private Task NextPage() { _offset += PageSize; return LoadAsync(); }
+
+}

@@ -1,0 +1,167 @@
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject UndoToastService UndoToast
+
+@*
+    Application > General tab — basic metadata + danger zone.
+
+    Sections:
+        1. Identity — inline-edit display name + consent type dropdown
+        2. Danger zone — delete the application (typed-confirm).
+
+    "Disable" is intentionally not exposed yet — redb.Identity does not have an
+    Application.Disabled flag in the contract. The UndoToast primitive is wired
+    up for when it lands (RFC: batch 2).
+*@
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Identity</h3>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Display name</span>
+        <UiInlineEdit Value="@(App.DisplayName ?? string.Empty)"
+                      OnSave="SaveDisplayNameAsync"
+                      Placeholder="Untitled application"
+                      MaxLength="200" />
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            Shown on the consent screen and across the admin UI. Click to edit, Enter to save.
+        </span>
+    </div>
+
+    <div class="app-detail__field">
+        <span class="app-detail__field-label">Consent type</span>
+        <select class="app-detail__input"
+                value="@(App.ConsentType ?? string.Empty)"
+                @onchange="OnConsentChangedAsync"
+                disabled="@_saving">
+            <option value="">(default)</option>
+            <option value="explicit">explicit — prompt the user every time</option>
+            <option value="implicit">implicit — auto-grant for first-party clients</option>
+            <option value="external">external — managed by an external authority</option>
+        </select>
+        <span class="app-detail__field-hint">
+            <RdbIcon Name="info" Size="12" />
+            Controls whether the authorization endpoint prompts the user for consent
+            on each request. Most production setups use <code>explicit</code>.
+            (<code>systematic</code> is mentioned by OpenIddict but the
+            redb.Identity admin API only accepts the three values above.)
+        </span>
+    </div>
+</section>
+
+<section class="app-detail__danger-zone">
+    <h3>Danger zone</h3>
+    <div class="app-detail__danger-row">
+        <div class="app-detail__danger-row-text">
+            <strong>Delete this application</strong>
+            <p>
+                Permanently removes the application, revokes all its tokens, and
+                drops its scope assignments. This action cannot be undone.
+            </p>
+        </div>
+        <button class="btn btn-danger btn-sm" @onclick="OnDeleteClickedAsync" disabled="@_deleting">
+            @(_deleting ? "Deleting…" : "Delete application")
+        </button>
+    </div>
+</section>
+
+<UiTypedConfirmDialog @ref="_typedConfirm" />
+
+@code {
+    [Parameter, EditorRequired] public ApplicationResponse App { get; set; } = default!;
+    [Parameter] public EventCallback OnRefresh { get; set; }
+    [Parameter] public EventCallback OnDeleted { get; set; }
+
+    private bool _saving;
+    private bool _deleting;
+    private UiTypedConfirmDialog? _typedConfirm;
+
+    private async Task SaveDisplayNameAsync(string newName)
+    {
+        _saving = true;
+        try
+        {
+            await Client.UpdateApplicationAsync(App.Id, new UpdateApplicationRequest
+            {
+                Id = App.Id,
+                DisplayName = newName,
+                ConcurrencyToken = App.ConcurrencyToken,
+            });
+            Toast.Success("Display name updated");
+            await OnRefresh.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.Error(ex.Message);
+            throw; // Let UiInlineEdit roll back to the previous value.
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task OnConsentChangedAsync(ChangeEventArgs e)
+    {
+        var newConsent = e.Value?.ToString();
+        if (newConsent == App.ConsentType) return;
+
+        _saving = true;
+        try
+        {
+            await Client.UpdateApplicationAsync(App.Id, new UpdateApplicationRequest
+            {
+                Id = App.Id,
+                ConsentType = string.IsNullOrEmpty(newConsent) ? null : newConsent,
+                ConcurrencyToken = App.ConcurrencyToken,
+            });
+            Toast.Success("Consent type updated");
+            await OnRefresh.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task OnDeleteClickedAsync()
+    {
+        if (_deleting || _typedConfirm is null) return;
+
+        var name = App.DisplayName ?? App.ClientId ?? string.Empty;
+        if (string.IsNullOrEmpty(name))
+        {
+            Toast.Error("Application has no display name or client_id — refusing to delete without a confirm target.");
+            return;
+        }
+
+        var ok = await _typedConfirm.ShowAsync(
+            expectedText: name,
+            title: "Delete application",
+            message: $"This permanently deletes the application '{name}', revokes all its tokens, " +
+                     $"and drops its scope assignments. This action cannot be undone.",
+            confirmLabel: "Delete this application");
+
+        if (!ok) return;
+
+        _deleting = true;
+        try
+        {
+            await Client.DeleteApplicationAsync(App.Id);
+            await OnDeleted.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _deleting = false;
+        }
+    }
+}

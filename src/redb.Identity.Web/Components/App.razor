@@ -1,0 +1,32 @@
+@using Microsoft.AspNetCore.Components.Routing
+
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <title>redb.Identity — Admin</title>
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="stylesheet" href="css/app-detail.css" />
+    <link rel="stylesheet" href="css/app-list.css" />
+    @* Critical — without this <link> Blazor's CSS isolation bundle never loads,
+       which means every Component.razor.css (UiTabBar, UiPageHeader, all 8
+       primitives, every page-scoped style) is silently missing. Without it the
+       UI looks broken — tabs unstyled, badges missing, cards naked. *@
+    <link rel="stylesheet" href="redb.Identity.Web.styles.css" />
+    <link rel="icon" href="favicon.ico" />
+    <script src="js/theme.js"></script>
+    <script src="js/sidebar.js"></script>
+    <script src="js/tabbar.js"></script>
+    <HeadOutlet @rendermode="@RenderMode.InteractiveServer" />
+</head>
+<body>
+    <Routes @rendermode="@RenderMode.InteractiveServer" />
+    <script src="_framework/blazor.web.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="js/charts.js"></script>
+    <script src="js/logs.js"></script>
+    <script src="js/webauthn.js"></script>
+</body>
+</html>

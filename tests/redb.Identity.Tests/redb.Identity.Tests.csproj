@@ -1,0 +1,84 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Tests pin ONE TFM: props declares TargetFrameworks (plural) for the libraries and
+         the plural form wins, which would multi-target these tests onto net10-only apps. -->
+    <TargetFrameworks></TargetFrameworks>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="NSubstitute" />
+    <PackageReference Include="coverlet.collector">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+    <!-- NU1603: 10.0.3 didn't ship; resolved to 10.1.0. Pin the actual version. -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\redb.Identity.Core\redb.Identity.Core.csproj" />
+    <ProjectReference Include="..\..\src\redb.Identity.Grpc\redb.Identity.Grpc.csproj" />
+    <ProjectReference Include="..\..\src\redb.Identity.Http\redb.Identity.Http.csproj" />
+    <ProjectReference Include="..\..\src\redb.Identity.Ldap\redb.Identity.Ldap.csproj" />
+    <ProjectReference Include="..\..\src\redb.Identity.Resource.Dpop\redb.Identity.Resource.Dpop.csproj" />
+    <ProjectReference Include="..\..\src\redb.Identity.Soap\redb.Identity.Soap.csproj" />
+    <PackageReference Include="redb.Core.Pro" />
+    <PackageReference Include="redb.Postgres" />
+    <PackageReference Include="redb.Postgres.Pro" />
+    <!-- SQLite provider — the default for the test suite. Postgres / MSSQL
+         remain available via REDB_PROVIDER={postgres|mssql} for integration
+         scenarios that specifically need them (broker tests, prod-shape
+         probes). All three project references are required so the runtime
+         can select any of the three. -->
+    <PackageReference Include="redb.SQLite" />
+    <PackageReference Include="redb.SQLite.Pro" />
+    <PackageReference Include="redb.MSSql" />
+    <PackageReference Include="redb.MSSql.Pro" />
+    <PackageReference Include="redb.Route" />
+    <PackageReference Include="redb.Route.Sql" />
+    <PackageReference Include="redb.Route.Elasticsearch" />
+    <PackageReference Include="redb.Route.RabbitMQ" />
+    <PackageReference Include="redb.Route.Kafka" />
+    <PackageReference Include="redb.Route.Redis" />
+    <PackageReference Include="redb.Route.MqttNet" />
+    <PackageReference Include="redb.Route.Amqp" />
+    <PackageReference Include="redb.Route.IbmMq" />
+    <PackageReference Include="redb.Route.Ldap" />
+    <!-- N-4 (Session C): greenmail-backed SMTP integration test exercises the
+         redb.Route.Mail DSL end-to-end through SmtpEmailNotificationChannel. -->
+    <PackageReference Include="redb.Route.Mail" />
+    <!--
+      Tsak host SPI used by tests (e.g. IModuleHealthContributor / HealthStatus). The
+      Identity production projects exclude these at runtime (host provides them); tests
+      bring them in normally so unit tests can construct contributor instances.
+    -->
+    <PackageReference Include="redb.Tsak.Core" />
+    <PackageReference Include="redb.Tsak.Contracts" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="xunit.runner.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>
+

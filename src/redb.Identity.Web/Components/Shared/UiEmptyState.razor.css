@@ -1,0 +1,71 @@
+/* UiEmptyState — centred "no data" block. Two variants: block (default, large)
+   and inline (tighter, for empty drawer / table contexts). */
+
+.ui-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+.ui-empty-state--block {
+    padding: var(--space-12) var(--space-6);
+    gap: var(--space-4);
+    max-width: 480px;
+    margin: 0 auto;
+}
+
+.ui-empty-state--inline {
+    padding: var(--space-6) var(--space-4);
+    gap: var(--space-2);
+}
+
+.ui-empty-state__illustration {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 96px;
+    height: 96px;
+    border-radius: 50%;
+    background: var(--bg-inset);
+    color: var(--text-tertiary);
+    margin-bottom: var(--space-2);
+}
+
+.ui-empty-state--inline .ui-empty-state__illustration {
+    width: 56px;
+    height: 56px;
+    margin-bottom: 0;
+}
+
+.ui-empty-state__title {
+    font-size: var(--font-size-xl);
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.ui-empty-state--inline .ui-empty-state__title {
+    font-size: var(--font-size-base);
+}
+
+.ui-empty-state__description {
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    margin: 0;
+    line-height: 1.5;
+}
+
+.ui-empty-state__actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    margin-top: var(--space-4);
+}
+
+.ui-empty-state--inline .ui-empty-state__actions {
+    margin-top: var(--space-2);
+}

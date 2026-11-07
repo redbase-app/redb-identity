@@ -1,0 +1,66 @@
+@page "/Error"
+@inject IHostEnvironment Env
+@layout Layout.MainLayout
+
+<RdbPageHeader Title="Something went wrong" Description="An error occurred while processing your request." />
+
+<div class="card" style="max-width:640px;" role="alert" aria-live="polite">
+    <div class="card-header">
+        <span class="card-title">@GetTitle()</span>
+        <RdbIcon Name="alert-triangle" Size="20" />
+    </div>
+    @switch (Reason)
+    {
+        case "oidc-failure":
+            <p><strong>Identity provider unavailable.</strong></p>
+            <p>The Identity server at the configured authority did not respond.
+               Make sure it is running, then try again.</p>
+            break;
+        case "oidc-discovery-failure":
+            <p><strong>Identity discovery failed.</strong></p>
+            <p>Could not load <code>/.well-known/openid-configuration</code> from
+               the configured authority. Check <code>Identity:Authority</code> /
+               <code>Identity:MetadataAddress</code> in <code>appsettings.json</code>.</p>
+            break;
+        case "OpenIdConnectProtocolException":
+            <p><strong>Sign-in was rejected by the identity provider.</strong></p>
+            <p>The provider returned a protocol error (for example
+               <code>invalid_request</code>, <code>access_denied</code>,
+               <code>invalid_client</code>). If you cancelled at the consent
+               screen this is expected; otherwise contact your administrator.</p>
+            break;
+        default:
+            <p>Reason: <code>@(Reason ?? "(unspecified)")</code></p>
+            break;
+    }
+    @if (!string.IsNullOrEmpty(Detail) && Env.IsDevelopment())
+    {
+        <p style="margin-top:var(--space-3); font-size:0.875rem; opacity:0.8;">
+            <strong>Details (development only):</strong> <code>@Detail</code>
+        </p>
+    }
+    else if (!string.IsNullOrEmpty(Detail))
+    {
+        <p style="margin-top:var(--space-3); font-size:0.875rem; opacity:0.8;">
+            <strong>Correlation ID:</strong> <code>@CorrelationId</code>
+        </p>
+    }
+    <p style="margin-top:var(--space-4);"><a class="btn" href="/">Back to home</a></p>
+</div>
+
+@code {
+    [SupplyParameterFromQuery] public string? Reason { get; set; }
+    [SupplyParameterFromQuery] public string? Detail { get; set; }
+
+    private string CorrelationId { get; } = System.Diagnostics.Activity.Current?.Id
+        ?? Guid.NewGuid().ToString("N");
+
+    private string GetTitle() => Reason switch
+    {
+        "oidc-failure" => "Sign-in failed",
+        "oidc-discovery-failure" => "Discovery failed",
+        "OpenIdConnectProtocolException" => "Sign-in rejected",
+        _ => "Error"
+    };
+}
+

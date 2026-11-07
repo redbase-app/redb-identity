@@ -1,0 +1,571 @@
+@page "/admin/roles/{Id:long}"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    B.3 — Role detail page. Tabs:
+      Overview  — identity + audience + timestamps
+      Members   — direct user assignments (search + add + remove)
+      Groups    — transitive assignments via group memberships
+      Settings  — rename (displayName + description; name + audience IMMUTABLE)
+*@
+
+<div style="margin-bottom: var(--space-3);">
+    <NavLink href="/admin/roles" class="btn btn-ghost" style="padding: 0; color: var(--accent-primary);">← Go back to Roles</NavLink>
+</div>
+
+@if (_loading) { <p class="text-secondary">Loading…</p> }
+else if (_error is not null) { <p class="text-error">@_error</p> }
+else if (_role is not null)
+{
+    <div style="display:flex; gap: var(--space-4); align-items: flex-start; margin-bottom: var(--space-4);">
+        <div class="apps-list__avatar" style="font-size: 1.5rem; width: 56px; height: 56px;">@InitialOf(_role.Name)</div>
+        <div style="flex: 1;">
+            <h1 style="margin: 0;">@_role.Name</h1>
+            <div style="display:flex; gap: var(--space-2); margin-top: var(--space-1);">
+                <RdbBadge Text="@_role.Audience" Variant="info" />
+                @if (_role.IsSystem) { <RdbBadge Text="system" Variant="online" /> }
+                @if (_role.Audience == "application" && !string.IsNullOrEmpty(_role.ApplicationName))
+                {
+                    <span class="text-secondary" style="font-size: var(--font-size-sm);">app: <code>@_role.ApplicationName</code></span>
+                }
+            </div>
+            @if (!string.IsNullOrEmpty(_role.Description)) { <p class="text-secondary" style="margin-top: var(--space-2);">@_role.Description</p> }
+        </div>
+        @if (!_role.IsSystem)
+        {
+            <button class="btn btn-danger" @onclick="DeleteRole">Delete</button>
+        }
+    </div>
+
+    <UiTabBar @bind-ActiveTab="_tab" Tabs="@Tabs" AriaLabel="Role sections" />
+
+    <div class="card" style="margin-top: var(--space-4);">
+        @if (_tab == "overview")
+        {
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">Identity</h3>
+                <dl class="app-detail__kv">
+                    <dt>Internal id</dt><dd><code>@_role.Id</code></dd>
+                    <dt>Name</dt><dd><code>@_role.Name</code></dd>
+                    <dt>Audience</dt><dd>@_role.Audience</dd>
+                    @if (_role.Audience == "application" && _role.ApplicationId.HasValue)
+                    {
+                        <dt>Application id</dt>
+                        <dd><NavLink href="@($"/admin/applications/{_role.ApplicationId}")">#@_role.ApplicationId</NavLink></dd>
+                    }
+                </dl>
+            </section>
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">Timestamps</h3>
+                <dl class="app-detail__kv">
+                    @if (_role.CreatedAt is { } c) { <dt>Created</dt><dd>@c.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")</dd> }
+                    @if (_role.ModifiedAt is { } m) { <dt>Last modified</dt><dd>@m.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")</dd> }
+                </dl>
+            </section>
+        }
+        else if (_tab == "permissions")
+        {
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">Assigned permissions</h3>
+                <p class="text-secondary" style="font-size: var(--font-size-sm); margin: 0 0 var(--space-3);">
+                    <RdbIcon Name="info" Size="12" />
+                    Scope names encode <code>resource:action</code> (read / write).
+                    Granted scopes are unioned into the principal's <code>scope</code>
+                    claim at token issuance for every effective member of this role.
+                    The requesting client's allowed-scope set still applies — a role
+                    can't grant a scope the application itself isn't authorised for.
+                </p>
+
+                @{
+                    var grouped = _allScopes
+                        .GroupBy(s => ParseResource(s.Name ?? ""))
+                        .OrderBy(g => g.Key.SortKey)
+                        .ToList();
+                    var attachedIds = _attachedScopes.Select(a => a.ScopeId).ToHashSet();
+                }
+
+                @if (grouped.Count == 0)
+                {
+                    <UiEmptyState Variant="inline"
+                                  Title="No scopes catalogued"
+                                  Description="The scope catalogue is empty. Seed the system scopes by restarting the identity server." />
+                }
+                else
+                {
+                    <div style="display:flex; flex-direction:column; gap: var(--space-2);">
+                        @foreach (var group in grouped)
+                        {
+                            var scopesInGroup = group.OrderBy(s => s.Name).ToList();
+                            var attachedInGroup = scopesInGroup.Count(s =>
+                                long.TryParse(s.Id, out var sid) && attachedIds.Contains(sid));
+                            var groupExpanded = _expandedGroups.Contains(group.Key.GroupKey);
+
+                            <div style="border: 1px solid var(--border-color); border-radius: var(--border-radius);">
+                                <button type="button"
+                                        @onclick="@(() => ToggleGroup(group.Key.GroupKey))"
+                                        style="display:flex; align-items:center; gap: var(--space-2); width:100%;
+                                               padding: var(--space-3); background: var(--bg-tertiary);
+                                               border: none; cursor: pointer; text-align: left;">
+                                    <RdbIcon Name="@(groupExpanded ? "chevron-down" : "chevron-right")" Size="14" />
+                                    <strong style="flex:1;">@group.Key.DisplayName</strong>
+                                    <span class="text-secondary" style="font-size: var(--font-size-sm);">
+                                        @attachedInGroup / @scopesInGroup.Count granted
+                                    </span>
+                                </button>
+
+                                @if (groupExpanded)
+                                {
+                                    <div style="padding: var(--space-2) var(--space-3);">
+                                        @foreach (var s in scopesInGroup)
+                                        {
+                                            var sid = long.TryParse(s.Id, out var parsed) ? parsed : 0;
+                                            var isAttached = attachedIds.Contains(sid);
+                                            var action = ParseAction(s.Name ?? "");
+                                            <label style="display:flex; align-items: flex-start; gap: var(--space-3);
+                                                          padding: var(--space-2); border-bottom: 1px solid var(--border-color);
+                                                          cursor: pointer;">
+                                                <input type="checkbox"
+                                                       checked="@isAttached"
+                                                       disabled="@(_togglingScopeId == sid)"
+                                                       @onchange="@(e => TogglePermission(s, (bool)(e.Value ?? false)))"
+                                                       style="margin-top: 4px;" />
+                                                <div style="flex:1;">
+                                                    <div style="display:flex; align-items:center; gap: var(--space-2);">
+                                                        <span style="font-weight: 600;">@action</span>
+                                                        <code style="font-size: var(--font-size-xs); color: var(--text-secondary);">@s.Name</code>
+                                                    </div>
+                                                    @if (!string.IsNullOrEmpty(s.Description))
+                                                    {
+                                                        <div class="text-secondary" style="font-size: var(--font-size-sm); margin-top: 2px;">
+                                                            @s.Description
+                                                        </div>
+                                                    }
+                                                </div>
+                                            </label>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </section>
+        }
+        else if (_tab == "users")
+        {
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">Users with this role</h3>
+
+                <input type="text" class="app-detail__input"
+                       placeholder="Search users to assign"
+                       value="@_userSearch"
+                       @oninput="OnUserSearchChanged" />
+
+                @if (_userSearchResults.Count > 0)
+                {
+                    <div style="border: 1px solid var(--border-color); border-radius: var(--border-radius); max-height: 200px; overflow-y: auto; margin: var(--space-2) 0;">
+                        @foreach (var u in _userSearchResults)
+                        {
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding: var(--space-2); border-bottom: 1px solid var(--border-color);">
+                                <div>
+                                    <strong>@u.Login</strong>
+                                    @if (!string.IsNullOrEmpty(u.DisplayName) && u.DisplayName != u.Login)
+                                    {
+                                        <span class="text-secondary" style="margin-left: var(--space-2);">— @u.DisplayName</span>
+                                    }
+                                </div>
+                                <button class="btn btn-sm btn-primary" @onclick="@(() => AssignUser(u))">Assign</button>
+                            </div>
+                        }
+                    </div>
+                }
+
+                @if (_userAssignees.Count == 0)
+                {
+                    <UiEmptyState Variant="inline"
+                                  Title="No users assigned"
+                                  Description="Search above to assign users to this role." />
+                }
+                else
+                {
+                    <table class="data-table">
+                        <thead><tr><th>User id</th><th>Login</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var r in _userAssignees)
+                            {
+                                <tr>
+                                    <td><code>@r.SubjectId</code></td>
+                                    <td>@(r.SubjectLabel ?? "—")</td>
+                                    <td><button class="btn btn-sm btn-danger" @onclick="@(() => UnassignUser(r.SubjectId))">Remove</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </section>
+        }
+        else if (_tab == "groups")
+        {
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">Groups with this role (transitive)</h3>
+
+                <input type="text" class="app-detail__input"
+                       placeholder="Search groups to assign"
+                       value="@_groupSearch"
+                       @oninput="OnGroupSearchChanged" />
+
+                @if (_groupSearchResults.Count > 0)
+                {
+                    <div style="border: 1px solid var(--border-color); border-radius: var(--border-radius); max-height: 200px; overflow-y: auto; margin: var(--space-2) 0;">
+                        @foreach (var g in _groupSearchResults)
+                        {
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding: var(--space-2); border-bottom: 1px solid var(--border-color);">
+                                <div>
+                                    <strong>@g.Name</strong>
+                                    @if (!string.IsNullOrEmpty(g.GroupType))
+                                    {
+                                        <span class="text-secondary" style="margin-left: var(--space-2);">@g.GroupType</span>
+                                    }
+                                </div>
+                                <button class="btn btn-sm btn-primary" @onclick="@(() => AssignGroup(g))">Assign</button>
+                            </div>
+                        }
+                    </div>
+                }
+
+                @if (_groupAssignees.Count == 0)
+                {
+                    <UiEmptyState Variant="inline"
+                                  Title="No groups assigned"
+                                  Description="Every member of an assigned group inherits this role at token issuance." />
+                }
+                else
+                {
+                    <table class="data-table">
+                        <thead><tr><th>Group id</th><th>Name</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var r in _groupAssignees)
+                            {
+                                <tr>
+                                    <td><code>@r.SubjectId</code></td>
+                                    <td>@(r.SubjectLabel ?? "—")</td>
+                                    <td><button class="btn btn-sm btn-danger" @onclick="@(() => UnassignGroup(r.SubjectId))">Remove</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </section>
+        }
+        else if (_tab == "settings")
+        {
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">Edit</h3>
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Display name</span>
+                    <input class="app-detail__input" value="@_editDisplayName"
+                           @oninput="@(e => _editDisplayName = e.Value?.ToString() ?? string.Empty)" />
+                </label>
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Description</span>
+                    <input class="app-detail__input" value="@_editDescription"
+                           @oninput="@(e => _editDescription = e.Value?.ToString() ?? string.Empty)" />
+                </label>
+                <div class="app-detail__submit-row">
+                    <button class="btn btn-primary" @onclick="SaveSettings" disabled="@_savingSettings">
+                        @(_savingSettings ? "Saving…" : "Save")
+                    </button>
+                    @if (_settingsError is not null) { <span class="text-error">@_settingsError</span> }
+                </div>
+                <p class="text-secondary" style="font-size: var(--font-size-sm); margin-top: var(--space-3);">
+                    <RdbIcon Name="info" Size="12" />
+                    Name and audience are immutable. To rename, delete + re-create.
+                </p>
+            </section>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public long Id { get; set; }
+
+    private IReadOnlyList<UiTabBar.Tab> Tabs => new[]
+    {
+        new UiTabBar.Tab("overview", "Overview"),
+        new UiTabBar.Tab("permissions", $"Permissions ({_attachedScopes.Count})"),
+        new UiTabBar.Tab("users", $"Users ({_userAssignees.Count})"),
+        new UiTabBar.Tab("groups", $"Groups ({_groupAssignees.Count})"),
+        new UiTabBar.Tab("settings", "Settings"),
+    };
+
+    // Permissions tab state (WSO2-style tree picker)
+    private readonly List<RoleScopeResponse> _attachedScopes = new();
+    private readonly List<ScopeResponse> _allScopes = new();
+    private readonly HashSet<string> _expandedGroups = new(StringComparer.Ordinal);
+    private long? _togglingScopeId; // in-flight toggle id, prevents double-clicks
+
+    private bool _loading = true;
+    private string? _error;
+    private RoleResponse? _role;
+    private string _tab = "overview";
+
+    private readonly List<RoleAssignmentResponse> _userAssignees = new();
+    private readonly List<RoleAssignmentResponse> _groupAssignees = new();
+
+    // User assignment search
+    private string _userSearch = "";
+    private readonly List<UserResponse> _userSearchResults = new();
+    private System.Threading.Timer? _userDebounce;
+
+    // Group assignment search
+    private string _groupSearch = "";
+    private readonly List<GroupResponse> _groupSearchResults = new();
+    private System.Threading.Timer? _groupDebounce;
+
+    // Settings
+    private string _editDisplayName = "";
+    private string _editDescription = "";
+    private bool _savingSettings;
+    private string? _settingsError;
+
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    public void Dispose() { _userDebounce?.Dispose(); _groupDebounce?.Dispose(); }
+
+    /// <summary>
+    /// Resource label parsed out of a scope name. Group by these so the
+    /// picker tree looks like Users / Applications / Roles / etc. (WSO2-style).
+    /// </summary>
+    private static (string GroupKey, string DisplayName, string SortKey) ParseResource(string scopeName)
+    {
+        if (string.IsNullOrEmpty(scopeName))
+            return ("misc", "Miscellaneous", "z-misc");
+
+        // Special cases for universal scopes.
+        if (scopeName == "identity:manage")  return ("universal", "Universal — admin", "0-universal");
+        if (scopeName == "identity:account") return ("universal", "Universal — admin", "0-universal");
+        if (scopeName == "identity:read")    return ("universal", "Universal — admin", "0-universal");
+        if (scopeName == "identity:impersonate") return ("special", "Impersonation", "y-special");
+
+        // identity:<resource>:<action>
+        var parts = scopeName.Split(':', 3);
+        if (parts.Length >= 2 && parts[0] == "identity")
+        {
+            var resource = parts[1];
+            var display = TitleCase(resource);
+            return (resource, display, $"1-{resource}");
+        }
+
+        // Operator-defined or non-identity scopes — group under their first segment.
+        var firstColon = scopeName.IndexOf(':');
+        if (firstColon > 0)
+        {
+            var prefix = scopeName[..firstColon];
+            return (prefix, TitleCase(prefix), $"2-{prefix}");
+        }
+
+        return (scopeName, scopeName, $"2-{scopeName}");
+    }
+
+    /// <summary>Returns the action verb ("read" / "write" / scope name when no action).</summary>
+    private static string ParseAction(string scopeName)
+    {
+        var parts = scopeName.Split(':', 3);
+        if (parts.Length >= 3) return TitleCase(parts[2]);
+        if (scopeName == "identity:manage")  return "Full admin (master scope)";
+        if (scopeName == "identity:account") return "Self-service (/me)";
+        if (scopeName == "identity:read")    return "Universal read";
+        if (scopeName == "identity:impersonate") return "Impersonate";
+        return scopeName;
+    }
+
+    private static string TitleCase(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return s;
+        var clean = s.Replace('-', ' ').Replace('_', ' ');
+        return char.ToUpperInvariant(clean[0]) + clean[1..];
+    }
+
+    private void ToggleGroup(string key)
+    {
+        if (!_expandedGroups.Add(key)) _expandedGroups.Remove(key);
+    }
+
+    private async Task TogglePermission(ScopeResponse s, bool shouldAttach)
+    {
+        if (!long.TryParse(s.Id, out var sid)) return;
+        if (_togglingScopeId == sid) return;
+        _togglingScopeId = sid;
+        try
+        {
+            var isAttached = _attachedScopes.Any(a => a.ScopeId == sid);
+            if (shouldAttach && !isAttached)
+            {
+                await Client.AttachScopeToRoleAsync(Id, sid);
+                Toast.Success($"Granted {s.Name}");
+            }
+            else if (!shouldAttach && isAttached)
+            {
+                await Client.DetachScopeFromRoleAsync(Id, sid);
+                Toast.Success($"Revoked {s.Name}");
+            }
+            await LoadAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+        finally { _togglingScopeId = null; }
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _role = await Client.GetRoleAsync(Id);
+            _editDisplayName = _role.DisplayName ?? "";
+            _editDescription = _role.Description ?? "";
+
+            var assignees = await Client.ListRoleAssigneesAsync(Id);
+            _userAssignees.Clear();
+            _userAssignees.AddRange(assignees.Where(a => a.SubjectKind == "user"));
+            _groupAssignees.Clear();
+            _groupAssignees.AddRange(assignees.Where(a => a.SubjectKind == "group"));
+
+            var scopes = await Client.ListRoleScopesAsync(Id);
+            _attachedScopes.Clear();
+            _attachedScopes.AddRange(scopes);
+
+            // Full scope catalogue for the WSO2-style tree picker. The catalogue
+            // is small in practice (~30 system + a few operator-defined); one
+            // bulk fetch is cheaper than incremental search.
+            var catalogue = await Client.ListScopesAsync(0, 200);
+            _allScopes.Clear();
+            _allScopes.AddRange(catalogue.Items);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private void OnUserSearchChanged(ChangeEventArgs e)
+    {
+        _userSearch = e.Value?.ToString() ?? "";
+        _userDebounce?.Dispose();
+        _userDebounce = new System.Threading.Timer(async _ =>
+        {
+            if (string.IsNullOrWhiteSpace(_userSearch))
+            {
+                _userSearchResults.Clear();
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+            try
+            {
+                var page = await Client.SearchUsersPagedAsync(_userSearch, count: 10);
+                var existing = _userAssignees.Select(a => a.SubjectId).ToHashSet();
+                _userSearchResults.Clear();
+                _userSearchResults.AddRange(page.Items.Where(u => !existing.Contains(u.Id)));
+            }
+            catch { /* swallow */ }
+            await InvokeAsync(StateHasChanged);
+        }, null, 250, System.Threading.Timeout.Infinite);
+    }
+
+    private async Task AssignUser(UserResponse u)
+    {
+        try
+        {
+            await Client.AssignUserToRoleAsync(Id, u.Id);
+            Toast.Success($"Assigned {u.Login}");
+            _userSearch = "";
+            _userSearchResults.Clear();
+            await LoadAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+
+    private async Task UnassignUser(long uid)
+    {
+        try { await Client.UnassignUserFromRoleAsync(Id, uid); await LoadAsync(); }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+
+    private void OnGroupSearchChanged(ChangeEventArgs e)
+    {
+        _groupSearch = e.Value?.ToString() ?? "";
+        _groupDebounce?.Dispose();
+        _groupDebounce = new System.Threading.Timer(async _ =>
+        {
+            if (string.IsNullOrWhiteSpace(_groupSearch))
+            {
+                _groupSearchResults.Clear();
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+            try
+            {
+                var page = await Client.SearchGroupsAsync(_groupSearch, count: 10);
+                var existing = _groupAssignees.Select(a => a.SubjectId).ToHashSet();
+                _groupSearchResults.Clear();
+                _groupSearchResults.AddRange(page.Items.Where(g => !existing.Contains(g.Id)));
+            }
+            catch { /* swallow */ }
+            await InvokeAsync(StateHasChanged);
+        }, null, 250, System.Threading.Timeout.Infinite);
+    }
+
+    private async Task AssignGroup(GroupResponse g)
+    {
+        try
+        {
+            await Client.AssignGroupToRoleAsync(Id, g.Id);
+            Toast.Success($"Assigned group {g.Name}");
+            _groupSearch = "";
+            _groupSearchResults.Clear();
+            await LoadAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+
+    private async Task UnassignGroup(long gid)
+    {
+        try { await Client.UnassignGroupFromRoleAsync(Id, gid); await LoadAsync(); }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+
+    private async Task SaveSettings()
+    {
+        if (_role is null) return;
+        _savingSettings = true;
+        _settingsError = null;
+        try
+        {
+            await Client.UpdateRoleAsync(Id, new UpdateRoleRequest
+            {
+                DisplayName = string.IsNullOrWhiteSpace(_editDisplayName) ? null : _editDisplayName,
+                Description = string.IsNullOrWhiteSpace(_editDescription) ? null : _editDescription,
+            });
+            Toast.Success("Saved");
+            await LoadAsync();
+        }
+        catch (Exception ex) { _settingsError = ex.Message; }
+        finally { _savingSettings = false; }
+    }
+
+    private async Task DeleteRole()
+    {
+        if (_role is null) return;
+        try
+        {
+            await Client.DeleteRoleAsync(Id);
+            Toast.Success($"Role '{_role.Name}' deleted");
+            Nav.NavigateTo("/admin/roles");
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+
+    private static string InitialOf(string? name)
+        => string.IsNullOrEmpty(name) ? "?" : char.ToUpperInvariant(name[0]).ToString();
+}

@@ -1,0 +1,88 @@
+@implements IDisposable
+@inject UndoToastService UndoToast
+
+@*
+    UiUndoToast — singleton presenter for the UndoToastService.
+
+    Mount once in MainLayout (next to RdbToast). The component subscribes to
+    UndoToastService.OnPrompt and renders a single-slot snackbar with a
+    countdown progress bar plus an inline "Undo" button.
+
+    Visuals:
+        ┌────────────────────────────────────────┐
+        │  ✓  Application MyApp disabled  Undo × │
+        │ ▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  │   ← progress fills RIGHT→LEFT
+        └────────────────────────────────────────┘
+
+    Position: bottom-left fixed, above CookieBanner.
+*@
+
+@if (_prompt is not null)
+{
+    <div class="ui-undo-toast" role="status" aria-live="polite" @key="_promptKey">
+        <RdbIcon Name="check-circle" Size="16" />
+        <span class="ui-undo-toast__message">@_prompt.Message</span>
+        <button type="button" class="ui-undo-toast__undo" @onclick="OnUndoClicked">
+            Undo
+        </button>
+        <button type="button" class="ui-undo-toast__close" @onclick="OnCloseClicked" title="Dismiss now">
+            <RdbIcon Name="x" Size="14" />
+        </button>
+        @* Progress bar shrinks RIGHT→LEFT over DurationMs; pure CSS animation
+           so we never call back into Blazor on every tick. *@
+        <div class="ui-undo-toast__progress"
+             style="animation-duration: @(_prompt.DurationMs)ms;"></div>
+    </div>
+}
+
+@code {
+    private UndoPrompt? _prompt;
+    private int _promptKey;
+
+    protected override void OnInitialized()
+    {
+        UndoToast.OnPrompt += HandlePrompt;
+        UndoToast.OnDismiss += HandleDismiss;
+    }
+
+    private void HandlePrompt(UndoPrompt prompt)
+    {
+        _prompt = prompt;
+        _promptKey++; // Force the .razor key to change so the CSS animation
+                      // restarts on a NEW prompt (browsers don't restart a
+                      // keyframe animation if the same element is reused).
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void HandleDismiss()
+    {
+        _prompt = null;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnUndoClicked() => UndoToast.Undo();
+
+    /// <summary>
+    /// Close button — treats explicit dismiss as a "commit" verdict (user
+    /// is fine with the action, just wants the toast off the screen). The
+    /// service handles the auto-commit path; for the close-X we just resolve
+    /// the tcs the same way the timer would.
+    /// </summary>
+    private void OnCloseClicked()
+    {
+        if (_prompt is { } p && !p.Tcs.Task.IsCompleted)
+        {
+            p.Tcs.TrySetResult(true);
+            // The service's OnDismiss fires when Undo is clicked; here we have
+            // to dismiss locally because we bypassed the service.
+            _prompt = null;
+            StateHasChanged();
+        }
+    }
+
+    public void Dispose()
+    {
+        UndoToast.OnPrompt -= HandlePrompt;
+        UndoToast.OnDismiss -= HandleDismiss;
+    }
+}

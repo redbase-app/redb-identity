@@ -1,0 +1,45 @@
+/* UiTypedConfirmDialog — incremental styles on top of the existing
+   .confirm-overlay / .confirm-dialog box in app.css. We only add the
+   typed-confirmation input row; everything else inherits from app.css. */
+
+.ui-typed-confirm__input-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+}
+
+.ui-typed-confirm__label {
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.ui-typed-confirm__expected {
+    background: var(--bg-inset);
+    color: var(--text-primary);
+    padding: 0.125em 0.4em;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 0.95em;
+    margin: 0 var(--space-1);
+}
+
+.ui-typed-confirm__input {
+    width: 100%;
+    appearance: none;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    color: var(--text-primary);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.ui-typed-confirm__input:focus {
+    outline: none;
+    border-color: var(--input-focus-border);
+    box-shadow: 0 0 0 3px var(--input-focus-ring);
+}

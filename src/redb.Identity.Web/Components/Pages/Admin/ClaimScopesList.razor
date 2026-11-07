@@ -1,0 +1,70 @@
+@page "/admin/claim-scopes"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject NavigationManager Nav
+
+@*
+    Claim scopes — listing. Phase 3 (P5, pages-not-dialogs): the create/edit modal
+    and the inline master-detail mapper panel moved to dedicated pages —
+    /admin/claim-scopes/new and /admin/claim-scopes/{id} (which lists the scope's
+    mappers with deep links).
+*@
+
+<RdbPageHeader Title="Claim scopes" Description="Named bundles of claim mappers, assignable to applications." />
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">All claim scopes</span>
+        <NavLink href="/admin/claim-scopes/new" class="btn btn-primary">
+            <RdbIcon Name="edit" Size="14" /> New scope
+        </NavLink>
+    </div>
+
+    @if (_loading) { <p class="text-secondary">Loading…</p> }
+    else if (_loadError is not null) { <p class="text-error">@_loadError</p> }
+    else if (_scopes.Count == 0)
+    {
+        <UiEmptyState Variant="inline"
+                      Title="No claim scopes"
+                      Description="Create one to bundle claim mappers and assign them to applications." />
+    }
+    else
+    {
+        <table class="data-table">
+            <thead><tr><th>Name</th><th>Display name</th><th>Enabled</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var s in _scopes)
+                {
+                    <tr style="cursor:pointer;" @onclick="() => Open(s)">
+                        <td><strong>@s.Name</strong></td>
+                        <td>@s.DisplayName</td>
+                        <td><RdbBadge Text="@(s.Enabled ? "on" : "off")" Variant="@(s.Enabled ? "online" : "offline")" /></td>
+                        <td style="text-align:right;"><RdbIcon Name="chevron-right" Size="14" /></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    private readonly List<ClaimScopeResponse> _scopes = new();
+    private bool _loading = true;
+    private string? _loadError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true; _loadError = null;
+        try
+        {
+            var page = await Client.ListClaimScopesAsync(offset: 0, count: 100);
+            _scopes.Clear();
+            _scopes.AddRange(page.Items);
+        }
+        catch (Exception ex) { _loadError = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private void Open(ClaimScopeResponse s)
+        => Nav.NavigateTo($"/admin/claim-scopes/{Uri.EscapeDataString(s.Id)}");
+}

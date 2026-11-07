@@ -1,0 +1,57 @@
+-- SQLite DDL for identity audit log table.
+-- Embedded resource — executed at module startup by
+-- IdentityAuditLogTableInitListener via redb.Context.ExecuteAsync.
+-- Idempotent (CREATE ... IF NOT EXISTS).
+--
+-- SQLite notes:
+--   * INTEGER PRIMARY KEY = rowid alias, behaves like BIGSERIAL on autoincrement.
+--   * No native UUID / JSONB types — GUIDs and details are stored as TEXT (RFC 4122
+--     strings, plain JSON) and decoded by the app layer.
+--   * timestamp is REAL: the redb SQLite provider encodes every DateTimeOffset
+--     parameter as a Julian day number (UTC) and decodes REAL columns back to
+--     DateTimeOffset — the same convention as the _date_* base columns. A TEXT column
+--     here would receive that number as text, and the query layer would then fail to
+--     parse it (timestamps read back as 0001-01-01, date filters compare text to a
+--     number). DEFAULT mirrors the encoding for rows inserted outside redb.
+--   * No NVARCHAR — SQLite columns are typeless (NUMERIC affinity by default,
+--     TEXT for our string-heavy schema). We still spell out a width so dialect
+--     parity is obvious to a human reader; SQLite ignores it but PostgreSQL /
+--     MSSQL share the same source.
+--   * UNIQUE / index DDL syntax is straightforward and idempotent.
+
+CREATE TABLE IF NOT EXISTS identity_audit_log (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id     TEXT NOT NULL,
+    event_type   TEXT NOT NULL,
+    category     TEXT,
+    timestamp    REAL NOT NULL DEFAULT (julianday('now')),
+    user_id      INTEGER,
+    login        TEXT,
+    client_id    TEXT,
+    ip_address   TEXT,
+    user_agent   TEXT,
+    details      TEXT,
+    CONSTRAINT uq_audit_event_id UNIQUE (event_id)
+);
+
+-- Reconciling an existing table: NOT possible here, and deliberately not faked.
+--
+-- The Postgres and MSSQL scripts add missing columns idempotently, because a database created before a
+-- column existed never gains it from CREATE TABLE IF NOT EXISTS — the audit query then fails on
+-- `category` / `login` and the operator sees "Database temporarily unavailable", which points at the
+-- wrong thing. SQLite has no conditional DDL: `ALTER TABLE ... ADD COLUMN` cannot be guarded by
+-- IF NOT EXISTS, and re-running it on a current database is an error rather than a no-op.
+--
+-- So an existing SQLite file predating these columns must be migrated by hand:
+--
+--     ALTER TABLE identity_audit_log ADD COLUMN category TEXT;
+--     ALTER TABLE identity_audit_log ADD COLUMN login    TEXT;
+--
+-- Check first with `PRAGMA table_info(identity_audit_log);`. Fresh files are unaffected: the CREATE above
+-- already carries every column.
+
+CREATE INDEX IF NOT EXISTS ix_audit_timestamp  ON identity_audit_log(timestamp);
+CREATE INDEX IF NOT EXISTS ix_audit_event_type ON identity_audit_log(event_type);
+CREATE INDEX IF NOT EXISTS ix_audit_category   ON identity_audit_log(category);
+CREATE INDEX IF NOT EXISTS ix_audit_user_id    ON identity_audit_log(user_id);
+CREATE INDEX IF NOT EXISTS ix_audit_login      ON identity_audit_log(login);

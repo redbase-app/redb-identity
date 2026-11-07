@@ -1,0 +1,134 @@
+@page "/me/profile"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+<RdbPageHeader Title="My profile" Description="Manage your personal information." />
+
+@* N-4 (N4-7): banners reflect the result of the strict change-email round-trip
+   handled by AuthEndpoints.ChangeEmailRequestAsync — the BFF redirects back here
+   with ?info=change_email_sent or ?error=change_email_failed. *@
+@if (Info == "change_email_sent")
+{
+    <div class="login-error" style="background:#0f2a18;border-color:#1a5b32;margin-bottom:var(--space-4);">
+        <RdbIcon Name="mail" Size="16" />
+        <span>Confirmation link sent to the new address. Your e-mail will only change after you click the link.</span>
+    </div>
+}
+else if (!string.IsNullOrEmpty(Error))
+{
+    <div class="login-error" style="margin-bottom:var(--space-4);">
+        <RdbIcon Name="alert-circle" Size="16" />
+        <span>Could not start e-mail change (@Error). Please try again.</span>
+    </div>
+}
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Profile</span>
+    </div>
+
+    @if (_loading) { <p class="text-secondary">Loading…</p> }
+    else if (_error is not null) { <p class="text-error">@_error</p> }
+    else
+    {
+        <div class="form-grid">
+            <label class="form-field">Display name <input @bind="_form.DisplayName" /></label>
+            <label class="form-field">Email <input type="email" @bind="_form.Email" /></label>
+            <label class="form-field">Phone <input @bind="_form.PhoneNumber" /></label>
+            <label class="form-field">Picture URL <input @bind="_form.Picture" /></label>
+            <label class="form-field">Given name <input @bind="_form.GivenName" /></label>
+            <label class="form-field">Family name <input @bind="_form.FamilyName" /></label>
+        </div>
+
+        <h4 style="margin-top: var(--space-4);">Address</h4>
+        <div class="form-grid">
+            <label class="form-field">Street <input @bind="_addr.StreetAddress" /></label>
+            <label class="form-field">Locality <input @bind="_addr.Locality" /></label>
+            <label class="form-field">Region <input @bind="_addr.Region" /></label>
+            <label class="form-field">Postal code <input @bind="_addr.PostalCode" /></label>
+            <label class="form-field">Country <input @bind="_addr.Country" /></label>
+        </div>
+
+        <div style="display:flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-4);">
+            <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">
+                @(_saving ? "Saving…" : "Save changes")
+            </button>
+        </div>
+    }
+</div>
+
+@* N-4 (N4-7): strict change-of-e-mail — hits the BFF endpoint which forwards to
+   /me/change-email/request via IIdentityClient and dispatches a confirmation link.
+   The user's address only changes after they click the link (ChangeEmailConfirmProcessor).
+   Shown only to authenticated users; the host can also force this path by setting
+   RedbIdentityOptions.ChangeEmail.RejectSoftEmailChange=true, in which case the
+   /me/profile Email field above is rejected with use_change_email_flow. *@
+<div class="card" style="margin-top: var(--space-4);">
+    <div class="card-header">
+        <span class="card-title">Change e-mail (verified)</span>
+    </div>
+    <p class="text-secondary">We will send a confirmation link to the new address. Nothing changes until you click it.</p>
+    <form method="post" action="/api/auth/account/change-email/request" style="display:flex; gap: var(--space-2); align-items: flex-end; margin-top: var(--space-3);">
+        <AntiforgeryToken />
+        <label class="form-field" style="flex:1;">
+            New e-mail
+            <input type="email" name="newEmail" required placeholder="name@example.com" />
+        </label>
+        <button type="submit" class="btn btn-primary">
+            <RdbIcon Name="mail" Size="16" />
+            <span>Send confirmation link</span>
+        </button>
+    </form>
+</div>
+
+@code {
+    [CascadingParameter] public HttpContext? HttpContext { get; set; }
+    [SupplyParameterFromQuery] public string? Info { get; set; }
+    [SupplyParameterFromQuery] public string? Error { get; set; }
+
+    private MeUpdateProfileRequest _form = new();
+    private AddressDto _addr = new();
+    private bool _loading = true, _saving;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var doc = await Client.GetMyProfileAsync();
+            _form.DisplayName = GetStr(doc, "displayName");
+            _form.Email = GetStr(doc, "email");
+            _form.PhoneNumber = GetStr(doc, "phoneNumber") ?? GetStr(doc, "phone_number");
+            _form.Picture = GetStr(doc, "picture");
+            _form.GivenName = GetStr(doc, "givenName") ?? GetStr(doc, "given_name");
+            _form.FamilyName = GetStr(doc, "familyName") ?? GetStr(doc, "family_name");
+            if (doc.TryGetProperty("address", out var a) && a.ValueKind == JsonValueKind.Object)
+            {
+                _addr.StreetAddress = GetStr(a, "streetAddress") ?? GetStr(a, "street_address");
+                _addr.Locality = GetStr(a, "locality");
+                _addr.Region = GetStr(a, "region");
+                _addr.PostalCode = GetStr(a, "postalCode") ?? GetStr(a, "postal_code");
+                _addr.Country = GetStr(a, "country");
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private static string? GetStr(JsonElement e, string p)
+        => e.TryGetProperty(p, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        try
+        {
+            _form.Address = _addr;
+            await Client.UpdateMyProfileAsync(_form);
+            Toast.Success("Profile updated");
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+        finally { _saving = false; }
+    }
+}

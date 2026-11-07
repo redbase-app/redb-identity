@@ -1,0 +1,6 @@
+{
+  "Name": "redb.Identity.Soap",
+  "Version": "1.0.0",
+  "EntryPoints": ["redb.Identity.Soap.dll"],
+  "Dependencies": ["redb.Identity.Core.Module"]
+}

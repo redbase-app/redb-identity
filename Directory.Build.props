@@ -1,0 +1,39 @@
+<Project>
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!--
+      CS1591 (public member without XML doc) is suppressed here, unlike redb.Route where it is
+      deliberately left on. Turning the doc file on without this floods the build with thousands of
+      warnings on members that predate the policy; the file itself is what consumers need for
+      IntelliSense. The doc-syntax warnings (CS1570 malformed XML, CS1573 missing param,
+      CS1574 unresolved cref) stay visible on purpose - those are real defects in existing comments.
+    -->
+    <NoWarn>$(NoWarn);1591</NoWarn>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version>4.7.0</Version>
+    <PackageVersion>4.7.0</PackageVersion>
+    <Authors>RedBase</Authors>
+    <Company>RedBase</Company>
+    <Product>redb.Identity</Product>
+    <Description>Transport-agnostic OAuth 2.1 / OpenID Connect server for the redb ecosystem, built on OpenIddict and redb.Route.</Description>
+    <Copyright>Copyright (c) 2024-2026 RedBase</Copyright>
+    <PackageProjectUrl>https://github.com/redbase-app/redb-identity</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/redbase-app/redb-identity</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>redb;identity;oauth2;oidc;openid-connect;openiddict;scim;mfa;webauthn;dpop</PackageTags>
+  </PropertyGroup>
+  <!--
+    Pack the shared README + repo-root LICENSE/NOTICE into every library nupkg
+    (Apache 2.0 § 4 attribution). Guarded so test / app projects (IsPackable=false)
+    skip it. Paths resolve from the monorepo when packed via deploy/nuget/publish-identity.ps1.
+  -->
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" Condition="Exists('$(MSBuildThisFileDirectory)README.md')" />
+    <None Include="$(MSBuildThisFileDirectory)..\LICENSE" Pack="true" PackagePath="\" Visible="false" Condition="Exists('$(MSBuildThisFileDirectory)..\LICENSE')" />
+    <None Include="$(MSBuildThisFileDirectory)..\NOTICE" Pack="true" PackagePath="\" Visible="false" Condition="Exists('$(MSBuildThisFileDirectory)..\NOTICE')" />
+  </ItemGroup>
+</Project>

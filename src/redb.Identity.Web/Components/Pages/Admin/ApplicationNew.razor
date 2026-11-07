@@ -1,0 +1,384 @@
+@page "/admin/applications/new"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+@*
+    Application creation — WSO2 IS 7.x-style template grid.
+
+    Flow:
+        1. User lands on /admin/applications/new — sees a grid of template
+           cards (SPA / Traditional Web / Mobile / M2M / Custom).
+        2. Click a card → small modal opens (Name + Client ID) pre-loaded
+           with sensible defaults for that template type.
+        3. Submit → POST /admin/applications, then navigate to the new
+           detail page so the user can fine-tune scopes, redirect URIs,
+           and grant types on the Protocol tab.
+
+    WSO2 templates we DON'T have because redb.Identity is OIDC-only:
+        - SAML / WS-Federation (no plans to support)
+        - Digital Wallet (out of scope)
+        - MCP Client — placeholder for future; not implemented in v1.
+*@
+
+<UiPageHeader BackLink="/admin/applications"
+              BackLabel="Go back to Applications"
+              Title="Create a new application"
+              Subtitle="Pick a template that matches how your application talks to redb.Identity. You can always fine-tune later." />
+
+<div class="app-new__grid">
+    @foreach (var t in Templates)
+    {
+        <button type="button" class="app-new__card" @onclick="() => OpenModal(t)">
+            <div class="app-new__card-icon">
+                <RdbIcon Name="@t.Icon" Size="28" />
+            </div>
+            <div class="app-new__card-title">@t.Name</div>
+            <p class="app-new__card-desc">@t.Description</p>
+            @if (t.TechBadges.Length > 0)
+            {
+                <div class="app-new__card-badges">
+                    @foreach (var tech in t.TechBadges)
+                    {
+                        <span class="app-new__tech-badge">@tech</span>
+                    }
+                </div>
+            }
+        </button>
+    }
+</div>
+
+@if (_selectedTemplate is not null && _createdApp is null)
+{
+    <div class="confirm-overlay" @onclick="CloseModal">
+        <div class="confirm-dialog app-new__modal" @onclick:stopPropagation="true">
+            <div class="confirm-header">
+                <RdbIcon Name="@_selectedTemplate.Icon" Size="20" />
+                <span class="font-semibold">Create @_selectedTemplate.Name</span>
+            </div>
+
+            <div class="app-new__field">
+                <label for="app-new-client-id">Client ID *</label>
+                <div class="app-detail__input-cluster">
+                    <input id="app-new-client-id"
+                           type="text"
+                           class="app-detail__input app-detail__input--mono"
+                           value="@_form.ClientId"
+                           @oninput="@(e => _form.ClientId = e.Value?.ToString() ?? string.Empty)"
+                           autocomplete="off"
+                           autocapitalize="off"
+                           autocorrect="off"
+                           spellcheck="false"
+                           placeholder="my-app" />
+                    <button type="button"
+                            class="btn btn-sm btn-secondary"
+                            title="Generate a random 28-char client_id"
+                            @onclick="GenerateClientId">
+                        <RdbIcon Name="refresh" Size="14" />
+                        <span>Generate</span>
+                    </button>
+                </div>
+                <span class="app-new__hint">
+                    The <code>client_id</code> sent by OAuth flows. Must be unique
+                    and immutable. We pre-fill a random 28-char value (WSO2-style);
+                    overwrite if you want a memorable slug (e.g. <code>my-app</code>).
+                </span>
+            </div>
+
+            <div class="app-new__field">
+                <label for="app-new-display-name">Display name *</label>
+                <input id="app-new-display-name"
+                       type="text"
+                       value="@_form.DisplayName"
+                       @oninput="@(e => _form.DisplayName = e.Value?.ToString() ?? string.Empty)"
+                       placeholder="My App" />
+                <span class="app-new__hint">
+                    Shown on the consent screen and across the admin UI.
+                </span>
+            </div>
+
+            @if (_error is not null)
+            {
+                <p class="text-error">@_error</p>
+            }
+
+            <div class="confirm-actions">
+                <button class="btn btn-secondary btn-sm" @onclick="CloseModal" disabled="@_creating">
+                    Cancel
+                </button>
+                <button class="btn btn-primary btn-sm"
+                        disabled="@(_creating || !IsFormValid)"
+                        @onclick="CreateAsync">
+                    @(_creating ? "Creating…" : "Create")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_createdApp is not null)
+{
+    @* Post-creation success state — modal stays open; for confidential templates
+       we surface the freshly generated client_secret with a copy button before
+       the user navigates away. The plaintext lives in memory only; after this
+       modal closes it is gone forever (server stores only the BCrypt hash). *@
+    <div class="confirm-overlay">
+        <div class="confirm-dialog app-new__modal" @onclick:stopPropagation="true">
+            <div class="confirm-header">
+                <RdbIcon Name="check-circle" Size="20" />
+                <span class="font-semibold">Application created</span>
+            </div>
+
+            <p>
+                <strong>@_createdApp.DisplayName</strong>
+                (client_id <code>@_createdApp.ClientId</code>) is ready.
+            </p>
+
+            @if (!string.IsNullOrEmpty(_generatedSecret))
+            {
+                <div class="app-new__field">
+                    <label>Client secret</label>
+                    <div class="app-detail__input-cluster">
+                        <input type="text"
+                               readonly
+                               class="app-detail__input app-detail__input--mono"
+                               value="@_generatedSecret" />
+                        <button type="button"
+                                class="btn btn-sm btn-ghost"
+                                @onclick="@(() => CopyAsync(_generatedSecret))">
+                            <RdbIcon Name="copy" Size="14" />
+                        </button>
+                    </div>
+                    <span class="app-new__hint" style="color: var(--status-warning);">
+                        ⚠ Copy this value now. It will not be shown again — only the
+                        BCrypt hash is stored. You can always Regenerate later on the
+                        Protocol tab, but the old secret stops working immediately
+                        when you do.
+                    </span>
+                </div>
+            }
+
+            <div class="confirm-actions">
+                <button class="btn btn-primary"
+                        @onclick="ContinueToDetail">
+                    Continue to settings →
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private sealed record Template(
+        string Id,
+        string Name,
+        string Description,
+        string Icon,
+        string[] TechBadges,
+        Action<CreateApplicationRequest> ApplyDefaults);
+
+    // The ApplyDefaults action seeds the request with template-specific values
+    // (client_type, redirect URIs, permissions). User can override on the detail
+    // page's Protocol tab after creation. We deliberately keep defaults minimal
+    // so the user is not surprised by hidden config they didn't see during create.
+    private static readonly Template[] Templates = new[]
+    {
+        new Template(
+            "spa",
+            "Single-Page Application",
+            "Public OIDC client running entirely in the browser. Uses authorization_code with PKCE.",
+            "zap",
+            new[] { "React", "Vue", "Angular" },
+            r =>
+            {
+                r.ClientType = "public";
+                r.ApplicationType = "web";
+                r.Requirements = new[] { "ft:pkce" };
+            }),
+
+        new Template(
+            "web",
+            "Traditional Web Application",
+            "Confidential server-rendered web app. Uses authorization_code with a client_secret.",
+            "server",
+            new[] { ".NET", "Java", "PHP", "Node" },
+            r =>
+            {
+                r.ClientType = "confidential";
+                r.ApplicationType = "web";
+            }),
+
+        new Template(
+            "mobile",
+            "Mobile / Native Application",
+            "Public OIDC client running on a device. Uses authorization_code with PKCE and a custom URL scheme.",
+            "package",
+            new[] { "iOS", "Android", "Flutter" },
+            r =>
+            {
+                r.ClientType = "public";
+                r.ApplicationType = "native";
+                r.Requirements = new[] { "ft:pkce" };
+            }),
+
+        new Template(
+            "m2m",
+            "Machine-to-Machine",
+            "Backend service calling APIs on its own behalf. Uses client_credentials grant.",
+            "cluster",
+            new[] { "Service", "Daemon", "Worker" },
+            r =>
+            {
+                r.ClientType = "confidential";
+                r.ApplicationType = "web";
+                r.Permissions = new[] { "ept:token", "gt:client_credentials" };
+            }),
+
+        new Template(
+            "custom",
+            "Custom",
+            "Start from a blank application and configure every grant, scope, and redirect by hand on the Protocol tab.",
+            "settings",
+            Array.Empty<string>(),
+            _ => { }),
+    };
+
+    private Template? _selectedTemplate;
+    private FormState _form = new();
+    private bool _creating;
+    private string? _error;
+
+    // Post-create state — held only between successful CreateApplicationAsync
+    // and the user clicking "Continue to settings".
+    private ApplicationResponse? _createdApp;
+    private string? _generatedSecret;
+
+    private sealed class FormState
+    {
+        public string ClientId { get; set; } = "";
+        public string DisplayName { get; set; } = "";
+    }
+
+    private bool IsFormValid =>
+        !string.IsNullOrWhiteSpace(_form.ClientId) &&
+        !string.IsNullOrWhiteSpace(_form.DisplayName);
+
+    private void OpenModal(Template t)
+    {
+        _selectedTemplate = t;
+        _form = new FormState();
+        GenerateClientId();
+        _error = null;
+    }
+
+    /// <summary>
+    /// Generate a 28-char client_id matching the WSO2 IS 7.x format: mixed-case
+    /// alphanumeric drawn from a CSPRNG. The user can overwrite it with a
+    /// memorable slug or click Generate again to roll a new value.
+    /// </summary>
+    private void GenerateClientId()
+    {
+        const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        var buf = new byte[28];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(buf);
+        var chars = new char[28];
+        for (var i = 0; i < buf.Length; i++)
+        {
+            chars[i] = alphabet[buf[i] % alphabet.Length];
+        }
+        _form.ClientId = new string(chars);
+    }
+
+    private void CloseModal()
+    {
+        if (_creating) return;
+        // Refuse to dismiss the post-create success step — the secret would be
+        // lost. Force the user through ContinueToDetail.
+        if (_createdApp is not null) return;
+        _selectedTemplate = null;
+        _error = null;
+    }
+
+    private async Task CreateAsync()
+    {
+        if (_selectedTemplate is null || _creating || !IsFormValid) return;
+
+        _creating = true;
+        _error = null;
+        try
+        {
+            var req = new CreateApplicationRequest
+            {
+                ClientId = _form.ClientId.Trim(),
+                DisplayName = _form.DisplayName.Trim(),
+            };
+            _selectedTemplate.ApplyDefaults(req);
+
+            // For confidential templates (Traditional Web, M2M, Custom-with-secret),
+            // generate a strong random secret CLIENT-SIDE so we have the plaintext
+            // to show after creation. The server stores only the BCrypt hash; once
+            // this modal closes the plaintext is gone forever.
+            string? plaintextSecret = null;
+            if (string.Equals(req.ClientType, "confidential", StringComparison.OrdinalIgnoreCase))
+            {
+                plaintextSecret = GenerateSecret();
+                req.ClientSecret = plaintextSecret;
+            }
+
+            var created = await Client.CreateApplicationAsync(req);
+            _createdApp = created;
+            _generatedSecret = plaintextSecret;
+            Toast.Success($"Application '{created.ClientId}' created");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _creating = false;
+        }
+    }
+
+    private void ContinueToDetail()
+    {
+        if (_createdApp is null) return;
+        // Forget the plaintext as we leave — once the user clicks Continue they
+        // either copied it or accepted losing it.
+        var id = _createdApp.Id;
+        _createdApp = null;
+        _generatedSecret = null;
+        Nav.NavigateTo($"/admin/applications/{id}");
+    }
+
+    /// <summary>
+    /// 32-char URL-safe random client_secret. 192 bits of entropy from the
+    /// system CSPRNG — well above the 128-bit floor most security guides
+    /// recommend for OAuth shared secrets.
+    /// </summary>
+    private static string GenerateSecret()
+    {
+        Span<byte> buf = stackalloc byte[24];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(buf);
+        return Convert.ToBase64String(buf)
+            .Replace('+', '-')
+            .Replace('/', '_')
+            .TrimEnd('=');
+    }
+
+    private async Task CopyAsync(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", value);
+            Toast.Success("Copied");
+        }
+        catch
+        {
+            Toast.Error("Copy to clipboard failed");
+        }
+    }
+}

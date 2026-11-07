@@ -1,0 +1,285 @@
+@page "/admin/applications"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    Applications list — WSO2 IS 7.x-style card grid.
+
+    Click anywhere on a card → /admin/applications/{id} for the detail-with-tabs
+    page. The "+ New Application" CTA navigates to /admin/applications/new
+    which renders the template-grid + create flow.
+
+    No inline edit / delete on the list page — that lives in the detail page
+    so we don't fragment mutations across two surfaces. List is read-only
+    navigation.
+*@
+
+<RdbPageHeader Title="Applications"
+               Description="OAuth 2.1 / OpenID Connect client applications.">
+    <Actions>
+        <NavLink class="btn btn-primary" href="/admin/applications/new">
+            + New Application
+        </NavLink>
+    </Actions>
+</RdbPageHeader>
+
+@* Search row — client-side filter over the currently loaded page.
+   Pagination is still server-side via _offset, but a full-list search
+   would require a server-side query parameter we don't have yet (RFC for
+   batch 2). *@
+<div class="apps-list__toolbar">
+    <div class="apps-list__search">
+        <RdbIcon Name="search" Size="14" />
+        <input type="text"
+               placeholder="Filter by name or client ID…"
+               value="@_search"
+               @oninput="@(e => _search = e.Value?.ToString() ?? string.Empty)" />
+    </div>
+    @if (!_loading && _total > 0)
+    {
+        <span class="text-sm text-secondary">
+            @if (_total <= PageSize)
+            {
+                @($"{_total} application{(_total == 1 ? "" : "s")}")
+            }
+            else
+            {
+                @($"Showing {_offset + 1}-{Math.Min(_offset + PageSize, _total)} of {_total}")
+            }
+        </span>
+    }
+</div>
+
+@if (_total > PageSize && !string.IsNullOrWhiteSpace(_search))
+{
+    <p class="apps-list__filter-warning">
+        <RdbIcon Name="info" Size="14" />
+        The filter only matches applications on the current page.
+        Use Prev / Next to search other pages.
+    </p>
+}
+
+@if (_loading)
+{
+    <p class="text-secondary">Loading…</p>
+}
+else if (_error is not null)
+{
+    <p class="text-error">@_error</p>
+}
+else if (_items.Count == 0)
+{
+    <UiEmptyState Title="There are no applications available"
+                  Description="Add a new application to start managing access for your users.">
+        <Illustration>
+            <RdbIcon Name="package" Size="48" />
+        </Illustration>
+        <Actions>
+            <NavLink class="btn btn-primary" href="/admin/applications/new">
+                + New Application
+            </NavLink>
+        </Actions>
+    </UiEmptyState>
+}
+else
+{
+    var visible = string.IsNullOrWhiteSpace(_search)
+        ? _items
+        : _items.Where(a =>
+            (a.DisplayName ?? string.Empty).Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+            (a.ClientId ?? string.Empty).Contains(_search, StringComparison.OrdinalIgnoreCase))
+          .ToList();
+
+    @if (visible.Count == 0)
+    {
+        <UiEmptyState Variant="inline"
+                      Title="No applications match your filter"
+                      Description="Clear the filter or try a different search term." />
+    }
+    else
+    {
+        @* Row table — dense single-line-per-app layout. At 4 097 apps a card
+           grid forces the user to wade through a fraction of a page per
+           screen; the table fits 25-30 rows comfortably and lets the eye
+           scan the Type / Client type / Consent columns in narrow vertical
+           strips. The whole row is a NavLink so clicking anywhere opens
+           detail. *@
+        <table class="apps-list__table">
+            <thead>
+                <tr>
+                    <th class="apps-list__col-name">Application</th>
+                    <th class="apps-list__col-type">Type</th>
+                    <th class="apps-list__col-clienttype">Client</th>
+                    <th class="apps-list__col-consent">Consent</th>
+                    <th class="apps-list__col-meta">Redirects</th>
+                    <th class="apps-list__col-meta">Permissions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var a in visible)
+                {
+                    <tr class="apps-list__row" @onclick="@(() => Nav.NavigateTo($"/admin/applications/{a.Id}"))">
+                        <td class="apps-list__col-name">
+                            <div class="apps-list__row-name">
+                                <div class="apps-list__avatar">
+                                    @AvatarLetter(a)
+                                </div>
+                                <div>
+                                    <div class="apps-list__display-name">
+                                        @(a.DisplayName ?? a.ClientId ?? "Untitled application")
+                                    </div>
+                                    <code class="apps-list__client-id">@a.ClientId</code>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="apps-list__col-type">
+                            @{ var cls = Classify(a); }
+                            <span class="apps-list__chip apps-list__chip--type apps-list__chip--type-@cls.CssModifier">
+                                @cls.Label
+                            </span>
+                        </td>
+                        <td class="apps-list__col-clienttype">
+                            @if (!string.IsNullOrEmpty(a.ClientType))
+                            {
+                                <RdbBadge Text="@a.ClientType" Variant="@TypeVariant(a.ClientType)" ShowDot="false" />
+                            }
+                        </td>
+                        <td class="apps-list__col-consent">
+                            @if (!string.IsNullOrEmpty(a.ConsentType))
+                            {
+                                <span class="apps-list__chip">@a.ConsentType</span>
+                            }
+                        </td>
+                        <td class="apps-list__col-meta">
+                            @(a.RedirectUris?.Length ?? 0)
+                        </td>
+                        <td class="apps-list__col-meta">
+                            @(a.Permissions?.Length ?? 0)
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @* Pagination row — visible whenever there are multiple pages, irrespective
+       of the current client-side filter (the filter shrinks the currently
+       loaded page, not the full result set). *@
+    @if (_total > PageSize)
+    {
+        <div class="apps-list__pagination">
+            <button class="btn btn-sm" @onclick="PrevPage" disabled="@(_offset == 0)">&laquo; Prev</button>
+            <span class="text-secondary">@(_offset + 1)–@(_offset + _items.Count) of @_total</span>
+            <button class="btn btn-sm" @onclick="NextPage" disabled="@(_offset + _items.Count >= _total)">Next &raquo;</button>
+        </div>
+    }
+}
+
+@code {
+    private readonly List<ApplicationResponse> _items = new();
+    private int _offset, _total;
+    private const int PageSize = 25;
+    private bool _loading = true;
+    private string? _error;
+    private string _search = "";
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var page = await Client.ListApplicationsAsync(_offset, PageSize);
+            _items.Clear();
+            _items.AddRange(page.Items);
+            _total = page.Total;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private Task PrevPage()
+    {
+        _offset = Math.Max(0, _offset - PageSize);
+        return LoadAsync();
+    }
+
+    private Task NextPage()
+    {
+        _offset += PageSize;
+        return LoadAsync();
+    }
+
+    private static string AvatarLetter(ApplicationResponse a)
+    {
+        var source = a.DisplayName ?? a.ClientId ?? "?";
+        return string.IsNullOrEmpty(source)
+            ? "?"
+            : source.Substring(0, 1).ToUpperInvariant();
+    }
+
+    private static string TypeVariant(string? clientType) =>
+        clientType?.ToLowerInvariant() switch
+        {
+            "public" => "info",
+            "confidential" => "online",
+            _ => "info"
+        };
+
+    /// <summary>
+    /// Tuple of label + CSS modifier suffix used to colour the type chip.
+    /// The label is shown verbatim; CssModifier becomes
+    /// "apps-list__chip--type-{CssModifier}" so each template gets its own
+    /// accent. Keep modifiers short and lowercase — they're class names.
+    /// </summary>
+    private sealed record TemplateClassification(string Label, string CssModifier);
+
+    /// <summary>
+    /// Best-effort classifier that maps an application's stored fields (client_type,
+    /// application_type, permissions) back to one of our 5 create-time templates.
+    /// The server doesn't carry the template name explicitly, so we re-derive it
+    /// here for display purposes only. Heuristics are deliberately loose — anything
+    /// that doesn't fit cleanly lands in "Standard-Based".
+    /// </summary>
+    private static TemplateClassification Classify(ApplicationResponse a)
+    {
+        var perms = a.Permissions ?? Array.Empty<string>();
+        var hasAuthCode = perms.Any(p => p == "gt:authorization_code");
+        var hasClientCreds = perms.Any(p => p == "gt:client_credentials");
+
+        var ct = a.ClientType?.ToLowerInvariant();
+        var at = a.ApplicationType?.ToLowerInvariant();
+
+        // M2M: confidential + only client_credentials grant.
+        if (ct == "confidential" && hasClientCreds && !hasAuthCode)
+            return new("Machine-to-Machine", "m2m");
+
+        // Mobile / Native: public + application_type=native.
+        if (ct == "public" && at == "native")
+            return new("Mobile / Native", "mobile");
+
+        // SPA: public + web (browser-only).
+        if (ct == "public" && (at == "web" || at is null))
+            return new("Single-Page", "spa");
+
+        // Traditional Web: confidential + authorization_code grant.
+        if (ct == "confidential" && hasAuthCode)
+            return new("Traditional Web", "web");
+
+        return new("Standard-Based", "other");
+    }
+
+    // Back-compat shim used elsewhere by the previous card layout — still
+    // referenced in places we haven't migrated yet; delegates to Classify.
+    private static string ClassifyTemplate(ApplicationResponse a) => Classify(a).Label;
+}

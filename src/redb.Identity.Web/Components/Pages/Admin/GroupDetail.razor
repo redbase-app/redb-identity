@@ -1,0 +1,490 @@
+@page "/admin/groups/{Id:long}"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    Group detail — per-group page with tabs (Overview / Members / Subgroups /
+    Settings). Navigated to from /admin/groups by row click.
+*@
+
+<div style="margin-bottom: var(--space-3);">
+    <NavLink href="/admin/groups" class="btn btn-ghost" style="padding: 0; color: var(--accent-primary);">
+        ← Go back to Groups
+    </NavLink>
+</div>
+
+@if (_loading)
+{
+    <p class="text-secondary">Loading…</p>
+}
+else if (_error is not null)
+{
+    <p class="text-error">@_error</p>
+}
+else if (_group is not null)
+{
+    <div style="display:flex; gap: var(--space-4); align-items: flex-start; margin-bottom: var(--space-4);">
+        <div class="apps-list__avatar" style="font-size: 1.5rem; width: 56px; height: 56px;">@InitialOf(_group.Name)</div>
+        <div style="flex: 1;">
+            <h1 style="margin: 0;">@_group.Name</h1>
+            <div style="display:flex; gap: var(--space-2); margin-top: var(--space-1);">
+                @if (!string.IsNullOrEmpty(_group.GroupType))
+                {
+                    <RdbBadge Text="@_group.GroupType" Variant="info" />
+                }
+                @if (_group.ParentId is { } pid)
+                {
+                    <span class="text-secondary" style="font-size: var(--font-size-sm);">child of #@pid</span>
+                }
+            </div>
+            @if (!string.IsNullOrEmpty(_group.Description))
+            {
+                <p class="text-secondary" style="margin-top: var(--space-2);">@_group.Description</p>
+            }
+        </div>
+        <button class="btn btn-danger" @onclick="DeleteGroup">Delete</button>
+    </div>
+
+    <UiTabBar @bind-ActiveTab="_tab" Tabs="@Tabs" AriaLabel="Group sections" />
+
+    <div class="card" style="margin-top: var(--space-4);">
+        @if (_tab == "overview")
+        {
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">Identity</h3>
+                <dl class="app-detail__kv">
+                    <dt>Internal id</dt>
+                    <dd><code>@_group.Id</code></dd>
+                    <dt>Name</dt>
+                    <dd><code>@_group.Name</code></dd>
+                    <dt>Type</dt>
+                    <dd>@(string.IsNullOrEmpty(_group.GroupType) ? "(none)" : _group.GroupType)</dd>
+                    @if (_group.ParentId is { } parentPid)
+                    {
+                        <dt>Parent</dt>
+                        <dd>
+                            <NavLink href="@($"/admin/groups/{parentPid}")">#@parentPid</NavLink>
+                        </dd>
+                    }
+                </dl>
+            </section>
+
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">Timestamps</h3>
+                <dl class="app-detail__kv">
+                    @if (_group.CreatedAt is { } c)
+                    {
+                        <dt>Created</dt>
+                        <dd>@c.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss") <span class="text-tertiary">(@c.Offset)</span></dd>
+                    }
+                    @if (_group.ModifiedAt is { } m)
+                    {
+                        <dt>Last modified</dt>
+                        <dd>@m.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss") <span class="text-tertiary">(@m.Offset)</span></dd>
+                    }
+                </dl>
+            </section>
+        }
+        else if (_tab == "members")
+        {
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">Members</h3>
+
+                <div style="display: grid; grid-template-columns: 1fr auto; gap: var(--space-2); margin-bottom: var(--space-3);">
+                    <input type="text" class="app-detail__input"
+                           placeholder="Search users to add"
+                           value="@_addUserSearch"
+                           @oninput="OnAddUserSearchChanged" />
+                    <select class="app-detail__input" style="width: 140px;" @bind="_addRole">
+                        <option value="member">member</option>
+                        <option value="lead">lead</option>
+                        <option value="admin">admin</option>
+                        <option value="senior">senior</option>
+                    </select>
+                </div>
+
+                @if (_addUserSearchResults.Count > 0)
+                {
+                    <div style="border: 1px solid var(--border-color); border-radius: var(--border-radius); max-height: 200px; overflow-y: auto; margin-bottom: var(--space-3);">
+                        @foreach (var u in _addUserSearchResults)
+                        {
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding: var(--space-2); border-bottom: 1px solid var(--border-color);">
+                                <div>
+                                    <strong>@u.Login</strong>
+                                    @if (!string.IsNullOrEmpty(u.DisplayName) && u.DisplayName != u.Login)
+                                    {
+                                        <span class="text-secondary" style="margin-left: var(--space-2);">— @u.DisplayName</span>
+                                    }
+                                </div>
+                                <button class="btn btn-sm btn-primary" @onclick="@(() => AddMemberAsync(u))">Add</button>
+                            </div>
+                        }
+                    </div>
+                }
+
+                @if (_members.Count == 0)
+                {
+                    <UiEmptyState Variant="inline"
+                                  Title="No members yet"
+                                  Description="Use the search above to add the first member." />
+                }
+                else
+                {
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>User</th>
+                                <th>Role</th>
+                                <th>Joined</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var m in _members)
+                            {
+                                <tr>
+                                    <td>
+                                        @if (!string.IsNullOrEmpty(m.Login))
+                                        {
+                                            <strong>@m.Login</strong>
+                                            @if (!string.IsNullOrEmpty(m.DisplayName) && m.DisplayName != m.Login)
+                                            {
+                                                <span class="text-secondary" style="margin-left: var(--space-2);">— @m.DisplayName</span>
+                                            }
+                                            <div class="text-tertiary" style="font-size: var(--font-size-xs); margin-top: var(--space-1);">id <code>@m.UserId</code></div>
+                                        }
+                                        else
+                                        {
+                                            <code>@m.UserId</code>
+                                        }
+                                    </td>
+                                    <td>
+                                        <select class="app-detail__input" style="width: 140px;" @bind="m.Role"
+                                                @onfocusout="@(() => UpdateMemberRole(m))">
+                                            <option value="member">member</option>
+                                            <option value="lead">lead</option>
+                                            <option value="admin">admin</option>
+                                            <option value="senior">senior</option>
+                                        </select>
+                                    </td>
+                                    <td class="text-secondary">@(m.JoinedAt?.LocalDateTime.ToString("yyyy-MM-dd") ?? "—")</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-danger" @onclick="() => RemoveMember(m)">Remove</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </section>
+        }
+        else if (_tab == "subgroups")
+        {
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">Subgroups</h3>
+
+                @if (_childrenLoading)
+                {
+                    <p class="text-secondary">Loading…</p>
+                }
+                else if (_children.Count == 0)
+                {
+                    <UiEmptyState Variant="inline"
+                                  Title="No subgroups"
+                                  Description="@($"Create a child group from /admin/groups and set parent = {_group.Name}.")" />
+                }
+                else
+                {
+                    <table class="data-table">
+                        <thead>
+                            <tr><th>Name</th><th>Type</th><th>Description</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var c in _children)
+                            {
+                                <tr style="cursor: pointer;" @onclick="@(() => Nav.NavigateTo($"/admin/groups/{c.Id}"))">
+                                    <td><strong>@c.Name</strong></td>
+                                    <td>
+                                        @if (!string.IsNullOrEmpty(c.GroupType))
+                                        {
+                                            <RdbBadge Text="@c.GroupType" Variant="info" />
+                                        }
+                                    </td>
+                                    <td class="text-secondary">@c.Description</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </section>
+        }
+        else if (_tab == "settings")
+        {
+            <section class="app-detail__section">
+                <h3 class="app-detail__section-title">Edit</h3>
+
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Name *</span>
+                    <input class="app-detail__input" value="@_editName"
+                           @oninput="@(e => _editName = e.Value?.ToString() ?? string.Empty)" />
+                </label>
+
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Type</span>
+                    <select class="app-detail__input" @bind="_editType">
+                        <option value="">(none)</option>
+                        <option value="team">team</option>
+                        <option value="organization">organization</option>
+                        <option value="department">department</option>
+                    </select>
+                </label>
+
+                <label class="app-detail__field">
+                    <span class="app-detail__field-label">Description</span>
+                    <input class="app-detail__input" value="@_editDescription"
+                           @oninput="@(e => _editDescription = e.Value?.ToString() ?? string.Empty)" />
+                </label>
+
+                <div class="app-detail__submit-row">
+                    <button class="btn btn-primary" @onclick="SaveSettings" disabled="@_savingSettings">
+                        @(_savingSettings ? "Saving…" : "Save")
+                    </button>
+                    @if (_settingsError is not null)
+                    {
+                        <span class="text-error">@_settingsError</span>
+                    }
+                </div>
+            </section>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public long Id { get; set; }
+
+    private bool _loading = true;
+    private string? _error;
+    private GroupResponse? _group;
+    private string _tab = "overview";
+
+    // Members tab
+    private readonly List<MemberRow> _members = new();
+    private int? _membersTotal;
+    private string _addUserSearch = "";
+    private string _addRole = "member";
+    private readonly List<UserResponse> _addUserSearchResults = new();
+    private System.Threading.Timer? _addUserDebounce;
+
+    // Subgroups tab
+    private readonly List<GroupResponse> _children = new();
+    private bool _childrenLoading;
+
+    // Settings tab
+    private string _editName = "";
+    private string _editType = "";
+    private string _editDescription = "";
+    private bool _savingSettings;
+    private string? _settingsError;
+
+    private sealed class MemberRow
+    {
+        public long UserId { get; set; }
+        public string Role { get; set; } = "member";
+        public DateTimeOffset? JoinedAt { get; set; }
+        public string? Login { get; set; }
+        public string? DisplayName { get; set; }
+    }
+
+    protected override async Task OnParametersSetAsync() => await LoadGroupAsync();
+
+    private async Task LoadGroupAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _group = await Client.GetGroupAsync(Id);
+            _editName = _group.Name ?? "";
+            _editType = _group.GroupType ?? "";
+            _editDescription = _group.Description ?? "";
+
+            await Task.WhenAll(LoadMembersAsync(), LoadChildrenAsync());
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task LoadMembersAsync()
+    {
+        try
+        {
+            var members = await Client.ListGroupMembersAsync(Id);
+            _members.Clear();
+            _members.AddRange(members.Select(m => new MemberRow
+            {
+                UserId = m.UserId,
+                Role = m.Role ?? "member",
+                JoinedAt = m.JoinedAt
+            }));
+            _membersTotal = _members.Count;
+
+            // Resolve login + displayName per member by calling
+            // GET /users/{id} in parallel. The previous implementation paged
+            // the user list (top 200) and zipped by id — which misses any
+            // member whose user id falls outside that window on installs
+            // with more than 200 users. Per-id lookups are cheap (one
+            // small object per call), bounded by the member set size
+            // (usually <100), and correct at any user-count.
+            if (_members.Count > 0)
+            {
+                try
+                {
+                    var lookups = _members.Select(m =>
+                        Client.GetUserAsync(m.UserId.ToString())
+                              .ContinueWith(t => t.IsCompletedSuccessfully ? t.Result : null)).ToArray();
+                    var resolved = await Task.WhenAll(lookups);
+                    for (var i = 0; i < _members.Count; i++)
+                    {
+                        var u = resolved[i];
+                        if (u is not null)
+                        {
+                            _members[i].Login = u.Login;
+                            _members[i].DisplayName = u.DisplayName;
+                        }
+                    }
+                }
+                catch (Exception lookupEx)
+                {
+                    // Fall back to id-only display — never block the page on
+                    // the user lookup failure.
+                    Toast.Error($"User lookup: {lookupEx.Message}");
+                }
+            }
+        }
+        catch (Exception ex) { Toast.Error($"Members: {ex.Message}"); }
+    }
+
+    private async Task LoadChildrenAsync()
+    {
+        _childrenLoading = true;
+        try
+        {
+            var kids = await Client.GetGroupChildrenAsync(Id);
+            _children.Clear();
+            _children.AddRange(kids);
+        }
+        catch (Exception ex) { Toast.Error($"Subgroups: {ex.Message}"); }
+        finally { _childrenLoading = false; }
+    }
+
+    private IReadOnlyList<UiTabBar.Tab> Tabs => new[]
+    {
+        new UiTabBar.Tab("overview", "Overview"),
+        new UiTabBar.Tab("members", _membersTotal is { } mt ? $"Members ({mt})" : "Members"),
+        new UiTabBar.Tab("subgroups", "Subgroups"),
+        new UiTabBar.Tab("settings", "Settings"),
+    };
+
+    private void SwitchMembers() => _tab = "members";
+    private void SwitchSubgroups() => _tab = "subgroups";
+
+    private void OnAddUserSearchChanged(ChangeEventArgs e)
+    {
+        _addUserSearch = e.Value?.ToString() ?? "";
+        _addUserDebounce?.Dispose();
+        _addUserDebounce = new System.Threading.Timer(async _ =>
+        {
+            if (string.IsNullOrWhiteSpace(_addUserSearch))
+            {
+                _addUserSearchResults.Clear();
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+            try
+            {
+                var page = await Client.SearchUsersPagedAsync(_addUserSearch, count: 10);
+                _addUserSearchResults.Clear();
+                // filter out users already in the group
+                var existing = _members.Select(m => m.UserId).ToHashSet();
+                _addUserSearchResults.AddRange(page.Items.Where(u => !existing.Contains(u.Id)));
+            }
+            catch { /* swallow */ }
+            await InvokeAsync(StateHasChanged);
+        }, null, 250, System.Threading.Timeout.Infinite);
+    }
+
+    private async Task AddMemberAsync(UserResponse u)
+    {
+        try
+        {
+            await Client.AddGroupMemberAsync(Id, new AddMemberRequest
+            {
+                UserId = u.Id,
+                Role = _addRole
+            });
+            Toast.Success($"Added @{u.Login}");
+            _addUserSearch = "";
+            _addUserSearchResults.Clear();
+            await LoadMembersAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+
+    private async Task UpdateMemberRole(MemberRow m)
+    {
+        try
+        {
+            await Client.UpdateGroupMemberAsync(Id, m.UserId, new UpdateMemberRequest { Role = m.Role });
+            Toast.Success("Role updated");
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+
+    private async Task RemoveMember(MemberRow m)
+    {
+        try
+        {
+            await Client.RemoveGroupMemberAsync(Id, m.UserId);
+            await LoadMembersAsync();
+            Toast.Success("Removed");
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+
+    private async Task SaveSettings()
+    {
+        if (_group is null) return;
+        _savingSettings = true;
+        _settingsError = null;
+        try
+        {
+            await Client.UpdateGroupAsync(Id, new UpdateGroupRequest
+            {
+                Name = string.IsNullOrWhiteSpace(_editName) ? null : _editName.Trim(),
+                GroupType = string.IsNullOrWhiteSpace(_editType) ? null : _editType,
+                Description = string.IsNullOrWhiteSpace(_editDescription) ? null : _editDescription
+            });
+            Toast.Success("Saved");
+            await LoadGroupAsync();
+        }
+        catch (Exception ex) { _settingsError = ex.Message; }
+        finally { _savingSettings = false; }
+    }
+
+    private async Task DeleteGroup()
+    {
+        if (_group is null) return;
+        try
+        {
+            await Client.DeleteGroupAsync(Id);
+            Toast.Success($"Group '{_group.Name}' deleted");
+            Nav.NavigateTo("/admin/groups");
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+    }
+
+    private static string InitialOf(string? name)
+        => string.IsNullOrEmpty(name) ? "?" : char.ToUpperInvariant(name[0]).ToString();
+}

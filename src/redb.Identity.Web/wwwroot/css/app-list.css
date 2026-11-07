@@ -1,0 +1,246 @@
+/* ApplicationsList — card-grid layout, WSO2 IS 7.x style. */
+
+.apps-list__toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+    flex-wrap: wrap;
+}
+
+.apps-list__search {
+    flex: 1;
+    min-width: 240px;
+    max-width: 480px;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    background: var(--bg-surface);
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-2) var(--space-3);
+    color: var(--text-tertiary);
+}
+
+.apps-list__search:focus-within {
+    border-color: var(--input-focus-border);
+    box-shadow: 0 0 0 3px var(--input-focus-ring);
+}
+
+.apps-list__search input {
+    flex: 1;
+    appearance: none;
+    background: transparent;
+    border: 0;
+    outline: 0;
+    font: inherit;
+    color: var(--text-primary);
+    padding: 0;
+}
+
+/* Row table layout — replaces the previous card-grid because at scale
+   (4 000+ apps in one tenant) the card density is too low and every
+   card looks the same on the eye. The table fits 25-30 rows per
+   screen and uses narrow vertical columns the user can scan in one
+   sweep. */
+
+.apps-list__table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    margin-bottom: var(--space-6);
+}
+
+.apps-list__table th {
+    text-align: left;
+    background: var(--bg-inset);
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border-default);
+}
+
+.apps-list__row {
+    cursor: pointer;
+    transition: background var(--transition-fast);
+}
+
+.apps-list__row:hover {
+    background: var(--bg-surface-hover);
+}
+
+.apps-list__row td {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border-default);
+    vertical-align: middle;
+}
+
+.apps-list__row:last-child td {
+    border-bottom: 0;
+}
+
+.apps-list__row-name {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+}
+
+.apps-list__col-name { width: 36%; }
+.apps-list__col-type { width: 14%; }
+.apps-list__col-clienttype { width: 12%; }
+.apps-list__col-consent { width: 12%; }
+.apps-list__col-meta { width: 8%; text-align: right; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+
+.apps-list__avatar {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-md);
+    background: var(--accent-light);
+    color: var(--accent-text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--font-size-base);
+    font-weight: 700;
+    text-transform: uppercase;
+    user-select: none;
+}
+
+.apps-list__display-name {
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.apps-list__client-id {
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    background: var(--bg-inset);
+    padding: 0.1em 0.4em;
+    border-radius: var(--radius-sm);
+    width: fit-content;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.apps-list__card-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.apps-list__chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.5rem;
+    background: var(--bg-inset);
+    color: var(--text-secondary);
+    border-radius: var(--radius-full);
+    font-size: var(--font-size-xs);
+    font-weight: 500;
+    text-transform: lowercase;
+}
+
+/* Type chip — the derived template label (Mobile / Native, Traditional Web, …)
+   Each template gets its own palette so users can scan the type column at a
+   glance. Light-mode palette below; the dark-mode override block at the end
+   of this file swaps to higher-contrast variants. */
+.apps-list__chip--type {
+    text-transform: none;
+    font-weight: 600;
+    background: var(--bg-inset);
+    color: var(--text-secondary);
+}
+
+.apps-list__chip--type-spa {
+    background: #dbeafe;  /* blue-100 */
+    color: #1e40af;        /* blue-800 */
+}
+
+.apps-list__chip--type-mobile {
+    background: #dcfce7;  /* green-100 */
+    color: #166534;        /* green-800 */
+}
+
+.apps-list__chip--type-web {
+    background: #f3e8ff;  /* purple-100 */
+    color: #6b21a8;        /* purple-800 */
+}
+
+.apps-list__chip--type-m2m {
+    background: #ffedd5;  /* orange-100 */
+    color: #9a3412;        /* orange-800 */
+}
+
+.apps-list__chip--type-other {
+    background: var(--bg-inset);
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .apps-list__chip--type-spa {
+    background: rgba(59, 130, 246, 0.18);   /* blue-500 @ 18 % */
+    color: #93c5fd;                         /* blue-300 */
+}
+
+[data-theme="dark"] .apps-list__chip--type-mobile {
+    background: rgba(34, 197, 94, 0.18);    /* green-500 @ 18 % */
+    color: #86efac;                         /* green-300 */
+}
+
+[data-theme="dark"] .apps-list__chip--type-web {
+    background: rgba(168, 85, 247, 0.18);   /* purple-500 @ 18 % */
+    color: #d8b4fe;                         /* purple-300 */
+}
+
+[data-theme="dark"] .apps-list__chip--type-m2m {
+    background: rgba(249, 115, 22, 0.18);   /* orange-500 @ 18 % */
+    color: #fdba74;                         /* orange-300 */
+}
+
+.apps-list__card-footer {
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+    border-top: 1px solid var(--border-default);
+    padding-top: var(--space-2);
+    margin-top: auto;
+}
+
+.apps-list__pagination {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    justify-content: center;
+}
+
+/* Inline warning shown when the user types a filter on a large multi-page
+   result set — reminds them the filter is page-local, not full-text-search. */
+.apps-list__filter-warning {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--status-warning-bg);
+    color: var(--status-warning);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    margin-bottom: var(--space-3);
+}
+
+.apps-list__filter-warning svg {
+    flex-shrink: 0;
+}

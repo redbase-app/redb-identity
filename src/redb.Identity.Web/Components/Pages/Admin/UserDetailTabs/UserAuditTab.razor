@@ -1,0 +1,184 @@
+@inject IIdentityClient Client
+@using redb.Identity.Contracts.Audit
+
+@*
+    User > Audit tab — events filtered to this user.
+
+    Per-user filter is automatic + OR'd: server matches events whose UserId
+    OR Login equals one of this user's identifiers. Lets us catch events
+    emitted by processors that stamped one identifier and not the other
+    (the gap pre-AuditEventProps.Login).
+
+    UI adds a small event-type filter dropdown for fast slicing. Pagination
+    via "Load more" appends to the visible list.
+
+    Deep-link to the global audit page (/admin/audit?subject=…) preserves
+    the rest of the filter set — kept here as an escape hatch for power
+    users who need richer querying.
+*@
+
+<section class="app-detail__section">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: var(--space-3);">
+        <h3 class="app-detail__section-title" style="margin:0; border:0; padding:0;">Recent events</h3>
+        <NavLink class="btn btn-secondary btn-sm" href="@($"/admin/audit?subject={User.Id}")">
+            <RdbIcon Name="external-link" Size="14" />
+            <span>Open in audit log</span>
+        </NavLink>
+    </div>
+
+    @* Simple in-tab filter — pick a known event type or leave blank for all. *@
+    <div class="apps-list__toolbar" style="margin-bottom: var(--space-3);">
+        <select class="app-detail__input"
+                style="max-width: 320px;"
+                value="@_eventTypeFilter"
+                @onchange="OnFilterChangedAsync">
+            <option value="">All event types</option>
+            @foreach (var et in CommonEventTypes)
+            {
+                <option value="@et">@et</option>
+            }
+        </select>
+    </div>
+
+    @if (_loading)
+    {
+        <p class="text-secondary">Loading…</p>
+    }
+    else if (_error is not null)
+    {
+        <p class="text-error">@_error</p>
+    }
+    else if (_events.Count == 0)
+    {
+        <UiEmptyState Variant="inline"
+                      Title="No matching audit events"
+                      Description="@(string.IsNullOrEmpty(_eventTypeFilter) ? "Events appear here once the user authenticates, modifies their profile, or is touched by admin actions." : $"No '{_eventTypeFilter}' events for this user. Try clearing the filter.")" />
+    }
+    else
+    {
+        <table class="apps-list__table">
+            <thead>
+                <tr>
+                    <th>When</th>
+                    <th>Event</th>
+                    <th>Category</th>
+                    <th>Client</th>
+                    <th>IP</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var e in _events)
+                {
+                    <tr>
+                        <td><time datetime="@e.Timestamp.ToString("O")">@e.Timestamp.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")</time></td>
+                        <td><code>@e.EventType</code></td>
+                        <td><span class="apps-list__chip">@e.Category</span></td>
+                        <td class="text-secondary">@(e.ClientId ?? "—")</td>
+                        <td class="text-secondary">@(e.IpAddress ?? "—")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        @if (_total > _events.Count)
+        {
+            <div style="display:flex; justify-content:center; margin-top: var(--space-3);">
+                <button class="btn btn-secondary" @onclick="LoadMoreAsync" disabled="@_loading">
+                    Load more (@(_total - _events.Count) remaining)
+                </button>
+            </div>
+        }
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public UserResponse User { get; set; } = default!;
+
+    private const int PageSize = 50;
+    private readonly List<AuditQueryItem> _events = new();
+    private int _total;
+    private int _offset;
+    private bool _loading = true;
+    private string? _error;
+    private string _eventTypeFilter = "";
+
+    // Most common event types operators want to slice on. Pulled from
+    // IdentityAuditEventIds — kept short on purpose so the dropdown stays
+    // scannable. "All event types" (empty) is the default.
+    // Mirror the actual constants from IdentityAuditEventIds (CamelCase
+    // short names — "UserCreated", not "identity.user.created"). Kept short
+    // on purpose so the dropdown stays scannable.
+    private static readonly string[] CommonEventTypes = new[]
+    {
+        "UserCreated",
+        "UserUpdated",
+        "UserDeleted",
+        "PasswordChanged",
+        "UserLoggedIn",
+        "UserLoggedOut",
+        "LoginFailed",
+        "TokenIssued",
+        "TokenRevoked",
+        "MfaEnrolled",
+        "MfaDisabled",
+        "MfaChallengeFailed",
+        "ConsentGranted",
+        "ConsentRevoked",
+        "GroupMemberAdded",
+        "GroupMemberRemoved",
+        "FederatedLogin",
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _events.Clear();
+        _offset = 0;
+        _total = 0;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var resp = await Client.QueryAuditAsync(new AuditQueryRequest
+            {
+                // Per-user filter is automatic + OR'd: server matches events
+                // whose UserId OR Login is one of this user's identifiers.
+                UserId = User.Id.ToString(),
+                Login = User.Login,
+                EventType = string.IsNullOrEmpty(_eventTypeFilter) ? null : _eventTypeFilter,
+                Offset = _offset,
+                Count = PageSize,
+            });
+            _total = resp.Total;
+            _events.AddRange(resp.Items);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        _offset = _events.Count;
+        await LoadAsync();
+    }
+
+    private async Task OnFilterChangedAsync(ChangeEventArgs e)
+    {
+        _eventTypeFilter = e.Value?.ToString() ?? string.Empty;
+        _events.Clear();
+        _offset = 0;
+        _total = 0;
+        await LoadAsync();
+    }
+}

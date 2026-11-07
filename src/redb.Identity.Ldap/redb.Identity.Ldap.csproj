@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>redb.Identity.Ldap</AssemblyName>
+    <RootNamespace>redb.Identity.Ldap</RootNamespace>
+    <Description>LDAP / Active Directory federation provider for redb.Identity — directory sync + bind-on-login.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\redb.Identity.Core\redb.Identity.Core.csproj" />
+    <PackageReference Include="redb.Route.Ldap" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="redb.Identity.Tests" />
+  </ItemGroup>
+
+</Project>
+

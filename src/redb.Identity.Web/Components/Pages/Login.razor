@@ -1,0 +1,212 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@inject redb.Identity.Client.IIdentityClient IdentityClient
+@inject Microsoft.Extensions.Logging.ILogger<Login> Logger
+@inject PersistentComponentState PersistentState
+@implements IDisposable
+
+<PageTitle>Sign In — redb.Identity</PageTitle>
+
+<div class="login-backdrop">
+    <div class="login-card">
+        <div class="login-brand">
+            <RdbIcon Name="shield" Size="28" />
+            <span class="login-brand-name">redb.Identity</span>
+        </div>
+
+        <h2 class="login-title">Sign In</h2>
+        <p class="login-subtitle">Identity admin &amp; self-service portal</p>
+
+        @if (!string.IsNullOrEmpty(Error))
+        {
+            <div class="login-error" role="alert" aria-live="polite" id="login-error">
+                <RdbIcon Name="alert-circle" Size="16" />
+                <span>
+                    @ErrorMessage
+                    @if (Error == "rate_limited" && RetryAfter is { } ra && ra > 0)
+                    {
+                        <br /><small>Please wait <strong>@ra</strong> second@(ra == 1 ? "" : "s") before retrying.</small>
+                    }
+                    @if (!string.IsNullOrEmpty(ErrorDetail))
+                    {
+                        <br /><small style="opacity:0.8;">@ErrorDetail</small>
+                    }
+                </span>
+            </div>
+        }
+
+        <form method="post" action="/api/auth/login" class="login-form"
+              aria-describedby="@(string.IsNullOrEmpty(Error) ? null : "login-error")">
+            <AntiforgeryToken />
+            @if (!string.IsNullOrEmpty(ReturnUrl))
+            {
+                <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+            }
+
+            <div class="float-field">
+                <input id="username" name="username" type="text" placeholder=" "
+                       autocomplete="username" autofocus required
+                       aria-describedby="@(string.IsNullOrEmpty(Error) ? null : "login-error")" />
+                <label for="username">Login</label>
+            </div>
+
+            <div class="float-field">
+                <input id="password" name="password" type="password" placeholder=" "
+                       autocomplete="current-password" required
+                       aria-describedby="@(string.IsNullOrEmpty(Error) ? null : "login-error")" />
+                <label for="password">Password</label>
+            </div>
+
+            <div class="login-actions">
+                @{
+                    var locked = Error == "rate_limited" && RetryAfter is > 0;
+                }
+                <button type="submit" class="btn btn-primary login-btn"
+                        disabled="@locked"
+                        aria-disabled="@(locked ? "true" : "false")">
+                    <RdbIcon Name="key" Size="16" />
+                    <span>@(locked ? $"Retry in {RetryAfter}s" : "Sign In")</span>
+                </button>
+            </div>
+        </form>
+
+        <div class="login-actions" style="margin-top:8px; display:flex; justify-content:space-between; gap:12px;">
+            <a href="/forgot-password" class="login-link">Forgot password?</a>
+            <a href="/register" class="login-link">Create account</a>
+        </div>
+
+        @if (_federationProviders is { Count: > 0 })
+        {
+            <div class="login-divider">or continue with</div>
+            <div class="login-federation">
+                @foreach (var provider in _federationProviders)
+                {
+                    <form method="post"
+                          action="@($"/auth/federation/{Uri.EscapeDataString(provider.ProviderId)}/start")"
+                          class="login-federation-form">
+                        <AntiforgeryToken />
+                        @if (!string.IsNullOrEmpty(ReturnUrl))
+                        {
+                            <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+                        }
+                        <button type="submit"
+                                class="login-federation-btn"
+                                data-kind="@provider.Kind"
+                                data-provider="@provider.ProviderId">
+                            <RdbIcon Name="@IconFor(provider.Kind)" Size="16" />
+                            <span>Continue with @provider.DisplayName</span>
+                        </button>
+                    </form>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] public HttpContext? HttpContext { get; set; }
+    [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+    [SupplyParameterFromQuery] public string? Error { get; set; }
+    [SupplyParameterFromQuery(Name = "error_detail")] public string? ErrorDetail { get; set; }
+    // N6-6: surface throttle countdown when the host returns retry_after on rate_limited.
+    // The page renders statically (interactivity off), so we just display the snapshot
+    // value the user landed with; refreshing the page re-fetches the latest remaining time
+    // from the URL. Server interactivity would let us tick down live but is out of scope here.
+    [SupplyParameterFromQuery(Name = "retry_after")] public int? RetryAfter { get; set; }
+
+    // A-5 (PHASE-2): OIDC standard hint. When the upstream client passes
+    // ?identity_provider=<id> through to /login (typically via the host's authorize
+    // endpoint preserving the param), we collapse the federation button row to that
+    // single provider so the user gets a one-click sign-in. If the hint doesn't match
+    // a configured public provider we silently ignore it and show the full list.
+    [SupplyParameterFromQuery(Name = "identity_provider")] public string? IdentityProvider { get; set; }
+
+    // N-3: federation providers loaded once on initial render. Null = not yet attempted;
+    // empty list = either no providers configured server-side or the discovery call failed
+    // (we degrade silently to local-only sign-in rather than blocking the page).
+    //
+    // The list is fetched server-side during the static SSR pass and SURVIVES the
+    // interactive switchover via PersistentComponentState — without persistence the
+    // page renders twice (once SSR with providers loaded, once interactive starting
+    // from null) which manifested as a visible flicker: providers briefly appear then
+    // disappear while OnInitializedAsync re-runs and re-fetches on the client.
+    private IReadOnlyList<redb.Identity.Contracts.Federation.PublicFederationProviderDescriptor>? _federationProviders;
+
+    private PersistingComponentStateSubscription _persistingSub;
+    private const string PersistKey = "login.federation-providers";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Interactive pass (post-handoff): try to restore from the persisted state
+        // first — if the SSR pass loaded providers, we get them instantly without
+        // a second round-trip and there's no race window where the row is empty.
+        if (PersistentState.TryTakeFromJson<List<redb.Identity.Contracts.Federation.PublicFederationProviderDescriptor>>(
+                PersistKey, out var restored) && restored is not null)
+        {
+            _federationProviders = restored;
+        }
+
+        // SSR pass (HttpContext is non-null during static render only — Blazor
+        // exposes it on the prerender pass): fetch and stash for the interactive
+        // handoff. The subscription fires immediately before serialization.
+        if (HttpContext is not null && _federationProviders is null)
+        {
+            try
+            {
+                var all = await IdentityClient.ListPublicFederationProvidersAsync(HttpContext.RequestAborted);
+                if (!string.IsNullOrWhiteSpace(IdentityProvider))
+                {
+                    var filtered = all
+                        .Where(p => string.Equals(p.ProviderId, IdentityProvider, StringComparison.OrdinalIgnoreCase))
+                        .ToArray();
+                    _federationProviders = filtered.Length > 0 ? filtered : all;
+                }
+                else
+                {
+                    _federationProviders = all;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Degrade silently — the login page must always render the local form
+                // even when the public providers endpoint is unreachable (host down,
+                // network partition, feature flag toggled off mid-flight).
+                Logger.LogWarning(ex, "Failed to load public federation providers; rendering local form only.");
+                _federationProviders = Array.Empty<redb.Identity.Contracts.Federation.PublicFederationProviderDescriptor>();
+            }
+        }
+
+        _persistingSub = PersistentState.RegisterOnPersisting(() =>
+        {
+            PersistentState.PersistAsJson(PersistKey, _federationProviders);
+            return Task.CompletedTask;
+        });
+    }
+
+    public void Dispose() => _persistingSub.Dispose();
+
+    private static string IconFor(string kind) => kind switch
+    {
+        "github" => "github",
+        "oidc" => "shield",
+        _ => "log-in"
+    };
+
+    private string ErrorMessage => Error switch
+    {
+        "invalid_credentials" => "Invalid login or password.",
+        "missing_credentials" => "Please enter both login and password.",
+        "rate_limited" => "Too many sign-in attempts. Please wait a minute and try again.",
+        "mfa_required" => "Multi-factor authentication is required for this account.",
+        "mfa_expired" => "Your two-factor session expired. Please sign in again.",
+        "mfa_cancelled" => "Two-factor verification cancelled.",
+        "mfa_no_state" => "Two-factor challenge could not be initialised. Please try again.",
+        "oidc_discovery_failed" => "The Identity server is unreachable. Please try again later.",
+        "state_mismatch" => "Sign-in session expired. Please try again.",
+        "id_token_invalid" => "Sign-in failed: identity token validation error.",
+        "login_no_session" => "Sign-in failed: no session cookie was issued.",
+        "token_failed" => "Sign-in failed at the token exchange step.",
+        "authorize_failed" => "Sign-in failed at the authorization step.",
+        _ => "Sign-in failed. Please try again."
+    };
+}

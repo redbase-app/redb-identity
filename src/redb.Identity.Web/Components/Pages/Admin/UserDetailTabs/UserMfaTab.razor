@@ -1,0 +1,201 @@
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+@*
+    User > MFA tab — admin view + lifecycle actions.
+
+    Reads MFA status via GetUserMfaStatusAsync(userId) — opaque JsonElement
+    shape, so we tolerate the keys defensively (totpEnabled, recoveryCodes
+    Count, smsEnabled, emailEnabled, webauthnCount).
+
+    Admin actions:
+      - Disable TOTP (forces re-enrollment next sign-in if MFA is required)
+      - Regenerate recovery codes (returns the new set; we just toast that
+        they're regenerated — operator should ask user to view via /me/mfa)
+
+    Initial enrollment + SMS / Email channel setup are NOT exposed here:
+    they're user-driven flows that require the user's confirmation code
+    in the loop. WSO2 IS 7.x admin MFA also reads-only / disables.
+*@
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">MFA factors</h3>
+
+    @if (_loading)
+    {
+        <p class="text-secondary">Loading…</p>
+    }
+    else if (_error is not null)
+    {
+        <p class="text-error">@_error</p>
+    }
+    else
+    {
+        <dl class="app-detail__kv">
+            <dt>TOTP (authenticator app)</dt>
+            <dd>
+                @if (_totpEnabled)
+                {
+                    <RdbBadge Text="enabled" Variant="online" ShowDot="false" />
+                    <button class="btn btn-sm btn-danger" style="margin-left: var(--space-3);"
+                            @onclick="DisableTotpAsync" disabled="@_mutating">
+                        Disable
+                    </button>
+                }
+                else
+                {
+                    <RdbBadge Text="disabled" Variant="warning" ShowDot="false" />
+                }
+            </dd>
+
+            <dt>Recovery codes</dt>
+            <dd>
+                @if (_recoveryCodesRemaining is { } n && n > 0)
+                {
+                    <span><strong>@n</strong> remaining</span>
+                }
+                else
+                {
+                    <span class="text-secondary">none</span>
+                }
+                @* Server rejects regenerate when MFA isn't enrolled — surface
+                   the constraint here instead of letting the click 400. *@
+                <button class="btn btn-sm btn-secondary" style="margin-left: var(--space-3);"
+                        @onclick="RegenerateRecoveryCodesAsync"
+                        disabled="@(_mutating || !_totpEnabled)"
+                        title="@(_totpEnabled ? "Regenerate recovery codes" : "Enable TOTP first")">
+                    Regenerate
+                </button>
+            </dd>
+
+            <dt>SMS channel</dt>
+            <dd>
+                @if (_smsEnabled)
+                {
+                    <RdbBadge Text="enrolled" Variant="online" ShowDot="false" />
+                }
+                else
+                {
+                    <span class="text-secondary">not enrolled</span>
+                }
+            </dd>
+
+            <dt>Email channel</dt>
+            <dd>
+                @if (_emailEnabled)
+                {
+                    <RdbBadge Text="enrolled" Variant="online" ShowDot="false" />
+                }
+                else
+                {
+                    <span class="text-secondary">not enrolled</span>
+                }
+            </dd>
+
+            <dt>WebAuthn / passkey</dt>
+            <dd>
+                @if (_webauthnCount > 0)
+                {
+                    <span><strong>@_webauthnCount</strong> registered credential@(_webauthnCount == 1 ? "" : "s")</span>
+                }
+                else
+                {
+                    <span class="text-secondary">none registered</span>
+                }
+            </dd>
+        </dl>
+
+        <p class="text-secondary" style="margin-top: var(--space-4); font-size: var(--font-size-xs);">
+            Initial enrollment + SMS / email channel setup are user-driven
+            flows requiring the user's confirmation code. The admin view
+            shows the state and can disable / regenerate; the user manages
+            the rest from <code>/me/mfa</code>.
+        </p>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public UserResponse User { get; set; } = default!;
+
+    private bool _loading = true;
+    private bool _mutating;
+    private string? _error;
+
+    private bool _totpEnabled;
+    private int? _recoveryCodesRemaining;
+    private bool _smsEnabled;
+    private bool _emailEnabled;
+    private int _webauthnCount;
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var status = await Client.GetUserMfaStatusAsync(User.Id);
+            _totpEnabled = TryBool(status, "totpEnabled");
+            _smsEnabled = TryBool(status, "smsEnabled");
+            _emailEnabled = TryBool(status, "emailEnabled");
+            _recoveryCodesRemaining = TryInt(status, "recoveryCodesRemaining") ?? TryInt(status, "recoveryCodesCount");
+            _webauthnCount = TryInt(status, "webauthnCount") ?? 0;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private static bool TryBool(JsonElement el, string name) =>
+        el.TryGetProperty(name, out var p) && (p.ValueKind == JsonValueKind.True || (p.ValueKind == JsonValueKind.False ? false : false));
+
+    private static int? TryInt(JsonElement el, string name) =>
+        el.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.Number ? p.GetInt32() : null;
+
+    private async Task DisableTotpAsync()
+    {
+        if (_mutating) return;
+        _mutating = true;
+        try
+        {
+            await Client.DisableUserTotpAsync(User.Id);
+            Toast.Success("TOTP disabled");
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _mutating = false;
+        }
+    }
+
+    private async Task RegenerateRecoveryCodesAsync()
+    {
+        if (_mutating) return;
+        _mutating = true;
+        try
+        {
+            await Client.RegenerateUserRecoveryCodesAsync(User.Id);
+            Toast.Success("Recovery codes regenerated — ask the user to view them at /me/mfa");
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _mutating = false;
+        }
+    }
+}

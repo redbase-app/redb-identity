@@ -1,0 +1,98 @@
+@page "/admin/federation"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject NavigationManager Nav
+
+@*
+    Federation providers — listing. Phase 3 (P1, pages-not-dialogs): the create/edit
+    modal is gone; New goes to /admin/federation/new, a row click opens
+    /admin/federation/{id}, and Delete lives on the detail page behind the
+    typed-confirm dialog. A provider still carrying the REPLACE_ME placeholder is
+    flagged NOT CONFIGURED — such providers are hidden from /login by the core filter.
+*@
+
+<RdbPageHeader Title="Federation providers" Description="External OIDC / OAuth identity providers." />
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">All providers</span>
+        <NavLink href="/admin/federation/new" class="btn btn-primary">
+            <RdbIcon Name="cluster" Size="14" /> New provider
+        </NavLink>
+    </div>
+
+    @if (_loading) { <p class="text-secondary">Loading…</p> }
+    else if (_error is not null) { <p class="text-error">@_error</p> }
+    else if (_items.Count == 0)
+    {
+        <UiEmptyState Title="No federation providers"
+                      Description="Register an external OIDC / OAuth provider to enable federated login.">
+            <Illustration>
+                <RdbIcon Name="cluster" Size="48" />
+            </Illustration>
+        </UiEmptyState>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr><th>Provider ID</th><th>Kind</th><th>Display name</th><th>Authority</th><th>Status</th><th>Priority</th><th></th></tr>
+            </thead>
+            <tbody>
+                @foreach (var p in _items)
+                {
+                    <tr style="cursor: pointer;" @onclick="() => Open(p)">
+                        <td><strong>@p.ProviderId</strong></td>
+                        <td><span class="badge">@p.Kind</span></td>
+                        <td>@p.DisplayName</td>
+                        <td class="text-secondary"><code>@p.Authority</code></td>
+                        <td>
+                            @if (IsPlaceholder(p)) { <RdbBadge Text="NOT CONFIGURED" Variant="error" /> }
+                            else if (p.Enabled) { <RdbBadge Text="enabled" Variant="online" /> }
+                            else { <RdbBadge Text="disabled" Variant="offline" /> }
+                        </td>
+                        <td class="text-secondary">@p.Priority</td>
+                        <td><RdbIcon Name="chevron-right" Size="14" /></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <div style="display:flex; gap: var(--space-2); margin-top: var(--space-3); align-items:center;">
+            <button class="btn btn-sm" @onclick="PrevPage" disabled="@(_offset == 0)">&laquo; Prev</button>
+            <span class="text-secondary">@(_offset + 1)–@(_offset + _items.Count) of @_total</span>
+            <button class="btn btn-sm" @onclick="NextPage" disabled="@(_offset + _items.Count >= _total)">Next &raquo;</button>
+        </div>
+    }
+</div>
+
+@code {
+    private readonly List<FederationProviderResponse> _items = new();
+    private int _offset, _total;
+    private const int PageSize = 25;
+    private bool _loading = true;
+    private string? _error;
+
+    private static bool IsPlaceholder(FederationProviderResponse p) =>
+        p.ClientId == "REPLACE_ME" || p.Authority == "REPLACE_ME";
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            var page = await Client.ListFederationProvidersAsync(offset: _offset, count: PageSize);
+            _items.Clear(); _items.AddRange(page.Items); _total = page.Total;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private void Open(FederationProviderResponse p)
+        => Nav.NavigateTo($"/admin/federation/{Uri.EscapeDataString(p.Id)}");
+
+    private async Task PrevPage() { _offset = Math.Max(0, _offset - PageSize); await LoadAsync(); }
+    private async Task NextPage() { _offset += PageSize; await LoadAsync(); }
+}

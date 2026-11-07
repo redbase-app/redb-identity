@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>redb.Identity.Resource.Dpop</AssemblyName>
+    <RootNamespace>redb.Identity.Resource.Dpop</RootNamespace>
+    <Description>
+      Z4 P2 (RFC 9449 §7) — Resource Server side DPoP-bound access-token validator.
+      Validates the inbound `Authorization: DPoP &lt;token&gt;` header together with a fresh
+      DPoP proof, checking:
+        • the proof is structurally valid (htm, htu, iat, jti, signature, embedded JWK),
+        • the proof's `ath` claim equals base64url(SHA-256(access_token)),
+        • the proof's JWK thumbprint matches the access-token's `cnf.jkt` confirmation claim.
+      Issuer-side leg (token endpoint, /authorize binding, replay-store, server-issued nonce
+      challenge) lives in redb.Identity.Core.
+    </Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\redb.Identity.Core\redb.Identity.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,6 @@
+{
+  "Name": "redb.Identity.Grpc",
+  "Version": "1.0.0",
+  "EntryPoints": ["redb.Identity.Grpc.dll"],
+  "Dependencies": ["redb.Identity.Core.Module"]
+}

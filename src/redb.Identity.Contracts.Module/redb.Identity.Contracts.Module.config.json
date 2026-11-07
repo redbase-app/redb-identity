@@ -1,0 +1,11 @@
+{
+  "//": [
+    "Tsak Layer 4 stub. This module is deliberately empty: the package exists to carry",
+    "redb.Identity.Contracts.dll as its companion, giving the whole worker ONE instance of the",
+    "contracts assembly that survives hot-reloads of every other Identity module.",
+    "Reloading THIS package replaces that instance and must be followed by reloading every",
+    "Identity module — which a contract change requires anyway."
+  ],
+  "ContextName": "identity.contracts",
+  "AutoStart": true
+}

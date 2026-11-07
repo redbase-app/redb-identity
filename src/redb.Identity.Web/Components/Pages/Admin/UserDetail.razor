@@ -1,0 +1,155 @@
+@page "/admin/users/{Id:long}"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+@using redb.Identity.Web.Components.Pages.Admin.UserDetailTabs
+
+@*
+    User detail — WSO2 IS 7.x-style detail page with tabs.
+
+    URL: /admin/users/{id}#tab=profile (deep-linkable via UiTabBar).
+
+    Tabs covered by track B.1:
+      Profile        — basic OIDC profile claims (name, email, phone, address)
+      Account        — status (active/disabled/locked), email_verified flag,
+                       password change, admin lock/unlock
+      Groups         — group membership management
+      MFA            — TOTP factors, recovery codes, SMS / email channels
+      Federation     — linked external IdPs (Google, GitHub, OIDC providers)
+      Sessions       — active sessions + per-user revoke
+      Audit          — events filtered by subject = this user id
+
+    NOT covered:
+      Shared Access  — WSO2 multi-tenant feature, out of scope per
+                       doc/FEATURE_GAPS_VS_WSO2_IS_7X.md §A.1.
+
+    The Roles tab from WSO2 is folded into Groups (group membership drives
+    role claim emission via claim mappers) — same architectural rationale
+    as the Application Roles tab.
+*@
+
+@if (_loading)
+{
+    <p class="text-secondary">Loading…</p>
+}
+else if (_error is not null)
+{
+    <p class="text-error">@_error</p>
+    <NavLink class="btn btn-secondary" href="/admin/users">Back to Users</NavLink>
+}
+else if (_user is not null)
+{
+    <UiPageHeader BackLink="/admin/users"
+                  BackLabel="Go back to Users"
+                  Title="@(_user.DisplayName ?? _user.Login ?? "Unnamed user")"
+                  Avatar="@AvatarLetter(_user)">
+        <Badges>
+            @if (!string.IsNullOrEmpty(_user.Status))
+            {
+                <RdbBadge Text="@_user.Status"
+                          Variant="@StatusVariant(_user.Status)"
+                          ShowDot="false" />
+            }
+            @if (_user.EmailVerified)
+            {
+                <RdbBadge Text="email verified" Variant="online" ShowDot="false" />
+            }
+        </Badges>
+    </UiPageHeader>
+
+    <UiTabBar @bind-ActiveTab="_activeTab" Tabs="_tabs" AriaLabel="User sections" />
+
+    @switch (_activeTab)
+    {
+        case "profile":
+            <UserProfileTab User="_user" OnRefresh="LoadAsync" />
+            break;
+        case "account":
+            <UserAccountTab User="_user" OnRefresh="LoadAsync" OnDeleted="OnDeleted" />
+            break;
+        case "groups":
+            <UserGroupsTab User="_user" />
+            break;
+        case "mfa":
+            <UserMfaTab User="_user" />
+            break;
+        case "federation":
+            <UserFederationTab User="_user" />
+            break;
+        case "sessions":
+            <UserSessionsTab User="_user" />
+            break;
+        case "audit":
+            <UserAuditTab User="_user" />
+            break;
+        default:
+            <p class="text-secondary">Unknown tab.</p>
+            break;
+    }
+}
+
+@code {
+    [Parameter] public long Id { get; set; }
+
+    private UserResponse? _user;
+    private bool _loading = true;
+    private string? _error;
+    private string _activeTab = "profile";
+
+    private readonly IReadOnlyList<UiTabBar.Tab> _tabs = new[]
+    {
+        new UiTabBar.Tab("profile",    "Profile"),
+        new UiTabBar.Tab("account",    "Account"),
+        new UiTabBar.Tab("groups",     "Groups"),
+        new UiTabBar.Tab("mfa",        "MFA"),
+        new UiTabBar.Tab("federation", "Federation"),
+        new UiTabBar.Tab("sessions",   "Sessions"),
+        new UiTabBar.Tab("audit",      "Audit"),
+    };
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _user = await Client.GetUserAsync(Id.ToString());
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _user = null;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OnDeleted()
+    {
+        Toast.Success("User deleted");
+        Nav.NavigateTo("/admin/users");
+    }
+
+    private static string AvatarLetter(UserResponse u)
+    {
+        var source = u.DisplayName ?? u.Login ?? "?";
+        return string.IsNullOrEmpty(source)
+            ? "?"
+            : source.Substring(0, 1).ToUpperInvariant();
+    }
+
+    private static string StatusVariant(string? status) =>
+        status?.ToLowerInvariant() switch
+        {
+            "active" => "online",
+            "disabled" or "locked" => "warning",
+            "deleted" => "error",
+            _ => "info"
+        };
+}

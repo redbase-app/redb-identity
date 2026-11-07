@@ -1,0 +1,78 @@
+@page "/mfa-challenge"
+@attribute [AllowAnonymous]
+@inject redb.Identity.Web.Auth.MfaChallengeStateProtector MfaProtector
+
+<PageTitle>Two-factor verification — redb.Identity</PageTitle>
+
+<div class="login-backdrop">
+    <div class="login-card">
+        <div class="login-brand">
+            <RdbIcon Name="shield" Size="28" />
+            <span class="login-brand-name">redb.Identity</span>
+        </div>
+
+        <h2 class="login-title">Two-factor verification</h2>
+        <p class="login-subtitle">Enter the 6-digit code from your authenticator app</p>
+
+        @if (!HasState)
+        {
+            <div class="login-error" role="alert" aria-live="polite">
+                <RdbIcon Name="alert-circle" Size="16" />
+                <span>Your sign-in session has expired. Please <a href="/login">start over</a>.</span>
+            </div>
+        }
+        else
+        {
+            @if (!string.IsNullOrEmpty(Error))
+            {
+                <div class="login-error" role="alert" aria-live="polite">
+                    <RdbIcon Name="alert-circle" Size="16" />
+                    <span>@ErrorMessage</span>
+                </div>
+            }
+
+            <form method="post" action="/api/auth/mfa/verify" class="login-form" autocomplete="off">
+                <AntiforgeryToken />
+
+                <div class="float-field">
+                    <input id="code" name="code" type="text" inputmode="numeric" pattern="[0-9]*"
+                           maxlength="10" placeholder=" " autofocus required />
+                    <label for="code">Verification code</label>
+                </div>
+
+                <div class="login-actions">
+                    <button type="submit" class="btn btn-primary login-btn">
+                        <RdbIcon Name="check" Size="16" />
+                        <span>Verify</span>
+                    </button>
+                </div>
+            </form>
+
+            <p style="margin-top:var(--space-4); font-size:0.875rem;">
+                <a href="/api/auth/mfa/cancel">Cancel and return to sign-in</a>
+            </p>
+        }
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] public HttpContext? HttpContext { get; set; }
+    [SupplyParameterFromQuery] public string? Error { get; set; }
+
+    private bool HasState;
+
+    protected override void OnInitialized()
+    {
+        if (HttpContext is null) { HasState = false; return; }
+        HasState = MfaProtector.ReadCookie(HttpContext) is not null;
+    }
+
+    private string ErrorMessage => Error switch
+    {
+        "invalid_code" => "The verification code is incorrect or has expired.",
+        "locked" => "Too many incorrect attempts. Please wait before trying again.",
+        "expired" => "The MFA session expired. Please sign in again.",
+        "missing_code" => "Please enter the verification code.",
+        _ => "Verification failed. Please try again."
+    };
+}

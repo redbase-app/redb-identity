@@ -1,0 +1,304 @@
+/* ============================================================
+   Application detail tabs — shared styles
+   ============================================================
+   The 4 Application detail tabs (General / Protocol / Authorization
+   / Info) all use the same section block + kv list + form layout.
+   Pulled out here so a future Group / User detail-with-tabs page can
+   reuse the same vocabulary without re-implementing the styles.
+   ============================================================ */
+
+.app-detail__section {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5) var(--space-6);
+    margin-bottom: var(--space-4);
+}
+
+.app-detail__section-title {
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+    margin: 0 0 var(--space-4) 0;
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--border-default);
+}
+
+/* Key-value list — read-only metadata, two columns desktop, stacked mobile. */
+.app-detail__kv {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: var(--space-3) var(--space-4);
+    margin: 0;
+}
+
+.app-detail__kv dt {
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+}
+
+.app-detail__kv dd {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    overflow-wrap: anywhere;
+}
+
+/* Server endpoints variant — narrower label column so the URL gets more space. */
+.app-detail__endpoints {
+    grid-template-columns: 220px 1fr;
+}
+
+.app-detail__endpoints dd .app-detail__input-cluster {
+    max-width: none;
+}
+
+@media (max-width: 768px) {
+    .app-detail__kv {
+        grid-template-columns: 1fr;
+        gap: var(--space-1);
+    }
+    .app-detail__kv dt {
+        margin-top: var(--space-2);
+    }
+}
+
+/* Form-style field: label + input + hint. Vertically stacked, generous
+   spacing, WSO2-like serif-italic-feeling hint under each field. */
+.app-detail__field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+    max-width: 720px;
+}
+
+.app-detail__field-label {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.app-detail__field-hint {
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    line-height: 1.5;
+    display: flex;
+    gap: var(--space-1);
+    align-items: flex-start;
+}
+
+.app-detail__field-hint svg {
+    margin-top: 2px;
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+.app-detail__input {
+    appearance: none;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    font: inherit;
+    color: var(--text-primary);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.app-detail__input:focus {
+    outline: none;
+    border-color: var(--input-focus-border);
+    box-shadow: 0 0 0 3px var(--input-focus-ring);
+}
+
+.app-detail__input--mono {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+}
+
+.app-detail__input--readonly {
+    background: var(--bg-inset);
+    cursor: default;
+    user-select: all;
+}
+
+/* Inline input cluster — input + adjacent action button (copy / regenerate /
+   show-hide secret). Aligned vertically to the input edge. */
+.app-detail__input-cluster {
+    display: flex;
+    align-items: stretch;
+    gap: var(--space-1);
+    max-width: 720px;
+}
+
+.app-detail__input-cluster .app-detail__input {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Submit row — full-width bottom-aligned with the form's left edge.
+   Update button sits left, secondary actions right. */
+.app-detail__submit-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--space-3);
+    margin-top: var(--space-6);
+}
+
+/* Danger zone — bottom of General tab where Disable / Delete live. Visually
+   set apart so accidental clicks become harder. */
+.app-detail__danger-zone {
+    background: var(--status-error-bg);
+    border: 1px solid var(--status-error);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5) var(--space-6);
+}
+
+.app-detail__danger-zone h3 {
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    color: var(--status-error);
+    margin: 0 0 var(--space-3) 0;
+}
+
+.app-detail__danger-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-3) 0;
+    border-top: 1px solid var(--status-error);
+}
+
+.app-detail__danger-row:first-of-type {
+    border-top: 0;
+}
+
+.app-detail__danger-row-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.app-detail__danger-row-text strong {
+    display: block;
+    color: var(--text-primary);
+    margin-bottom: var(--space-1);
+}
+
+.app-detail__danger-row-text p {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+}
+
+/* Dirty-state banner — shown above the form when the user has unsaved changes.
+   Sticky so it follows the user down long Protocol-tab scrolls. */
+.app-detail__dirty-banner {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    background: var(--status-warning-bg);
+    color: var(--status-warning);
+    border: 1px solid var(--status-warning);
+    border-radius: var(--radius-md);
+    padding: var(--space-2) var(--space-4);
+    margin-bottom: var(--space-4);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+}
+
+.app-detail__dirty-banner button {
+    margin-left: auto;
+}
+
+/* Checkbox list — single vertical column. The old multi-column grid was
+   visually noisy when there were 7+ options (Protocol tab grant types /
+   endpoints / response types). One per row reads much faster and matches
+   the WSO2 IS 7.x layout. */
+.app-detail__checkbox-grid {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    max-width: 720px;
+}
+
+.app-detail__checkbox {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg-inset);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+}
+
+.app-detail__checkbox:hover {
+    background: var(--bg-surface-hover);
+}
+
+.app-detail__checkbox input[type="checkbox"] {
+    flex-shrink: 0;
+}
+
+.app-detail__checkbox-warning {
+    color: var(--status-warning);
+    margin-left: auto;
+    cursor: help;
+}
+
+/* Assignment list — Authorization tab. */
+.app-detail__assignment-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 var(--space-4) 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.app-detail__assignment-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-inset);
+    border-radius: var(--radius-md);
+}
+
+.app-detail__assignment-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.app-detail__assignment-info strong {
+    display: block;
+    color: var(--text-primary);
+    margin-bottom: var(--space-1);
+}
+
+.app-detail__assignment-info p {
+    margin: 0;
+    font-size: var(--font-size-sm);
+}
+
+.app-detail__assignment-add {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    max-width: 720px;
+}
+
+.app-detail__assignment-add select {
+    flex: 1;
+}

@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>redb.Identity.DataProtection</AssemblyName>
+    <RootNamespace>redb.Identity.DataProtection</RootNamespace>
+    <Description>redb-backed ASP.NET Core DataProtection key repository (RedbXmlRepository) for redb.Identity facades.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Phase 9 (9a): redb-backed ASP.NET DataProtection key repository, extracted from
+      redb.Identity.Core so that any Identity facade (Http, gRPC, …) can persist its
+      cookie / state-protector key-ring in redb without taking a project-reference on
+      Core. Contains only the key XML repo + DI extension; everything that depends on
+      RedbIdentityOptions (at-rest encryption, refresh route, lifecycle init) stays in
+      Core where the option type lives.
+    -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" />
+    <!-- Direct override of a transitive dependency. Microsoft.AspNetCore.DataProtection brings in
+         System.Security.Cryptography.Xml, a parser of foreign XML: the 9.0.4 it once dragged in carried
+         seven high-severity advisories and reached the PUBLISHED redb.Identity.DataProtection package.
+         Referenced directly so the package names the patched version, which the redb security baseline
+         (repository root Directory.Build.targets) sets. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="redb.Core" />
+  </ItemGroup>
+
+</Project>
+

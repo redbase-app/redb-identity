@@ -1,0 +1,10 @@
+{
+  "//": [
+    "Tsak Layer 4 stub — module identity only.",
+    "All business config lives in the EXTERNAL Libs/context.json (Layer 3),",
+    "alongside the .tpkg files. See: redb.Identity.Http.config.example.json for",
+    "the full annotated template (reference, NOT shipped)."
+  ],
+  "ContextName": "identity.http",
+  "AutoStart": true
+}

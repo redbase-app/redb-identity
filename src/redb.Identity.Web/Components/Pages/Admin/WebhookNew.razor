@@ -1,0 +1,296 @@
+@page "/admin/webhooks/new"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    Add Webhook — WSO2 IS 7.x-style full-page form.
+
+    Differs from the old modal-create on /admin/webhooks:
+      * Active/Inactive toggle at the top (operator can stage a config
+        with Inactive, flip on later from /admin/webhooks/{id}).
+      * Name field with validation pattern hint (the displayName).
+      * Endpoint with the typical https://myservice.com/webhook
+        placeholder.
+      * Secret input with show/hide eye toggle — but our model is
+        server-generates-secret, not operator-provides. We accept an
+        OPTIONAL operator-supplied secret here; when blank, the server
+        generates one and we show it on the next page (consistent with
+        the model: secret is shown once).
+      * "Select Events" categorised checkboxes that map to our existing
+        filter syntax (cat:* tokens) — the operator picks categories,
+        we serialise into "cat:authentication,cat:admin,…". Selecting
+        zero is equivalent to "*" (all events).
+*@
+
+<div style="margin-bottom: var(--space-3);">
+    <NavLink href="/admin/webhooks" class="btn btn-ghost" style="padding: 0; color: var(--accent-primary);">← Go back to Webhooks</NavLink>
+</div>
+
+<h1 style="margin: 0;">Add Webhook</h1>
+<p class="text-secondary">Configure a new webhook to receive event notifications.</p>
+
+<div style="display:flex; align-items:center; gap: var(--space-3); margin: var(--space-4) 0;">
+    <label style="display:flex; align-items:center; gap: var(--space-2); cursor:pointer;">
+        <input type="checkbox" @bind="_form.Enabled" style="transform: scale(1.4);" />
+        <span style="font-weight: 600;">@(_form.Enabled ? "Active" : "Inactive")</span>
+    </label>
+</div>
+
+<div class="card">
+    <section class="app-detail__section">
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Name *</span>
+            <input class="app-detail__input"
+                   placeholder="Sample Webhook"
+                   value="@_form.Name"
+                   @oninput="@(e => { _form.Name = e.Value?.ToString() ?? string.Empty; _nameError = ValidateName(_form.Name); })" />
+            <span class="app-detail__field-hint">
+                <RdbIcon Name="info" Size="12" />
+                Must be a string containing only letters (a-z, A-Z), numbers (0-9), spaces, underscore (_) and hyphen (-).
+            </span>
+            @if (_nameError is not null)
+            {
+                <span class="text-error" style="font-size: var(--font-size-sm); margin-top: var(--space-1);">@_nameError</span>
+            }
+        </label>
+
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Endpoint *</span>
+            <input class="app-detail__input app-detail__input--mono"
+                   placeholder="https://myservice.com/webhook"
+                   value="@_form.Url"
+                   @oninput="@(e => { _form.Url = e.Value?.ToString() ?? string.Empty; _urlError = ValidateUrl(_form.Url); })" />
+            <span class="app-detail__field-hint">
+                <RdbIcon Name="info" Size="12" />
+                The URL of the external endpoint that integrates as a webhook.
+            </span>
+            @if (_urlError is not null)
+            {
+                <span class="text-error" style="font-size: var(--font-size-sm); margin-top: var(--space-1);">@_urlError</span>
+            }
+        </label>
+
+        <label class="app-detail__field">
+            <span class="app-detail__field-label">Secret (optional)</span>
+            <div style="position: relative;">
+                <input class="app-detail__input app-detail__input--mono"
+                       type="@(_secretVisible ? "text" : "password")"
+                       placeholder="(leave blank to auto-generate)"
+                       value="@_form.Secret"
+                       @oninput="@(e => _form.Secret = e.Value?.ToString() ?? string.Empty)"
+                       style="padding-right: 36px;" />
+                <button type="button" class="btn btn-ghost"
+                        @onclick="@(() => _secretVisible = !_secretVisible)"
+                        style="position:absolute; right:4px; top:50%; transform: translateY(-50%); padding: 4px 8px;"
+                        title="@(_secretVisible ? "Hide" : "Show")">
+                    <RdbIcon Name="@(_secretVisible ? "alert-triangle" : "info")" Size="14" />
+                </button>
+            </div>
+            <span class="app-detail__field-hint">
+                <RdbIcon Name="info" Size="12" />
+                Used to generate the HMAC-SHA256 signature so your endpoint can verify that events
+                are secure and unchanged. Once saved, the secret will not be displayed again;
+                you will only be able to <strong>reset</strong> it. Leave blank to have the
+                server generate a 256-bit random secret for you.
+            </span>
+        </label>
+    </section>
+
+    <section class="app-detail__section">
+        <h3 class="app-detail__section-title">Select Events</h3>
+        <p class="text-secondary" style="margin: 0 0 var(--space-3); font-size: var(--font-size-sm);">
+            Select the event categories you want to receive notifications for.
+            Leave everything unchecked to receive <strong>every</strong> event
+            (filter <code>*</code>).
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-3);">
+            @foreach (var cat in _categories)
+            {
+                <label style="display:flex; gap: var(--space-2); align-items: flex-start; padding: var(--space-3); border: 1px solid var(--border-color); border-radius: var(--border-radius); cursor:pointer;
+                              @(IsCategorySelected(cat.Key) ? "border-color: var(--accent-primary); background: var(--bg-tertiary);" : "")">
+                    <input type="checkbox"
+                           checked="@IsCategorySelected(cat.Key)"
+                           @onchange="@(e => ToggleCategory(cat.Key, (bool)(e.Value ?? false)))"
+                           style="margin-top: 2px;" />
+                    <div>
+                        <strong>@cat.DisplayName</strong>
+                        <div class="text-secondary" style="font-size: var(--font-size-sm); margin-top: var(--space-1);">@cat.Description</div>
+                    </div>
+                </label>
+            }
+        </div>
+
+        <details style="margin-top: var(--space-4);">
+            <summary style="cursor:pointer; color: var(--accent-primary); font-size: var(--font-size-sm);">Advanced — raw filter expression</summary>
+            <label class="app-detail__field" style="margin-top: var(--space-3);">
+                <input class="app-detail__input app-detail__input--mono"
+                       placeholder="*"
+                       value="@_form.RawFilter"
+                       @oninput="@(e => _form.RawFilter = e.Value?.ToString() ?? string.Empty)" />
+                <span class="app-detail__field-hint">
+                    Overrides the category checkboxes above. Format:
+                    <code>*</code> (every event),
+                    <code>UserCreated,UserDeleted</code> (specific event ids),
+                    <code>cat:admin,cat:authentication</code> (entire categories).
+                </span>
+            </label>
+        </details>
+    </section>
+
+    @if (_error is not null)
+    {
+        <p class="text-error" style="padding: 0 var(--space-4) var(--space-3);">@_error</p>
+    }
+
+    <div class="app-detail__submit-row" style="padding: var(--space-4); border-top: 1px solid var(--border-color);">
+        <button class="btn btn-primary" @onclick="CreateAsync"
+                disabled="@(_saving || string.IsNullOrWhiteSpace(_form.Name) || string.IsNullOrWhiteSpace(_form.Url) || _nameError is not null || _urlError is not null)">
+            @(_saving ? "Saving…" : "Create")
+        </button>
+    </div>
+</div>
+
+@* Created-secret-once modal *@
+@if (_revealedSecret is not null)
+{
+    <div class="modal-backdrop" @onclick="OnSecretDismissed">
+        <div class="modal" @onclick:stopPropagation="true" style="max-width: 560px;">
+            <h3>Webhook created — HMAC secret</h3>
+            <p class="text-secondary">
+                Copy this now — the server-side store keeps the secret hashed
+                and we cannot show it again. Receivers verify signatures
+                using this value.
+            </p>
+            <code style="display:block; padding: var(--space-3); background: var(--bg-tertiary); border-radius: var(--border-radius); word-break: break-all; font-size: var(--font-size-sm);">@_revealedSecret</code>
+            <div class="modal-actions">
+                <button class="btn btn-primary" @onclick="OnSecretDismissed">Done</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private FormState _form = new();
+    private bool _saving;
+    private bool _secretVisible;
+    private string? _error;
+    private string? _nameError;
+    private string? _urlError;
+    private string? _revealedSecret;
+    private long? _createdId;
+
+    private readonly HashSet<string> _selectedCategories = new(StringComparer.Ordinal);
+
+    private sealed class FormState
+    {
+        public string Name = "";
+        public string Url = "";
+        public string Secret = "";
+        public bool Enabled = false; // mirror the Inactive default from WSO2 — operator opts in
+        public string RawFilter = "";
+    }
+
+    // Categories mirror IdentityAuditEventIds.CategoryOf() codomain + the
+    // WSO2 IS 7.x "Logins / Registrations / Sessions / Tokens / User account
+    // management / Credential updates" grouping.
+    private sealed record EventCategory(string Key, string DisplayName, string Description);
+    private readonly IReadOnlyList<EventCategory> _categories = new[]
+    {
+        new EventCategory("authentication",
+            "Logins",
+            "Login success or failed, MFA challenge, logout."),
+        new EventCategory("user",
+            "User account management",
+            "User created, profile updated, account enabled / disabled / locked / unlocked, user deleted, registrations."),
+        new EventCategory("session",
+            "Sessions",
+            "Sessions established, presented or revoked. Includes back-channel logout fan-out."),
+        new EventCategory("token",
+            "Tokens",
+            "Access token issued, revoked, introspected. Authorization granted / consent changed."),
+        new EventCategory("mfa",
+            "MFA",
+            "MFA enrolment, disable, replace; recovery codes used; challenge failures."),
+        new EventCategory("admin",
+            "Admin actions",
+            "Application registration / update / delete / secret rotated, scope changes, role and webhook subscription mutations."),
+    };
+
+    private bool IsCategorySelected(string key) => _selectedCategories.Contains(key);
+
+    private void ToggleCategory(string key, bool selected)
+    {
+        if (selected) _selectedCategories.Add(key);
+        else _selectedCategories.Remove(key);
+    }
+
+    private static string? ValidateName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null; // surfaced via disabled button
+        // a-z A-Z 0-9 spaces _ -
+        foreach (var c in name)
+        {
+            if (!(char.IsLetterOrDigit(c) || c == ' ' || c == '_' || c == '-'))
+                return $"Invalid character '{c}' — name allows letters, numbers, spaces, underscore and hyphen only.";
+        }
+        if (name.Length > 60) return "Name must be 60 characters or fewer.";
+        return null;
+    }
+
+    private static string? ValidateUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var u))
+            return "Must be an absolute http(s) URL.";
+        if (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps)
+            return "Scheme must be http or https.";
+        if (!string.IsNullOrEmpty(u.Fragment))
+            return "URL fragment is not allowed.";
+        return null;
+    }
+
+    private string BuildFilter()
+    {
+        // Raw expression wins when the operator types anything in the Advanced field.
+        if (!string.IsNullOrWhiteSpace(_form.RawFilter))
+            return _form.RawFilter.Trim();
+        if (_selectedCategories.Count == 0)
+            return "*"; // unchecked = everything
+        return string.Join(",", _selectedCategories.Select(c => $"cat:{c}"));
+    }
+
+    private async Task CreateAsync()
+    {
+        if (_saving) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            var created = await Client.CreateWebhookAsync(new CreateWebhookSubscriptionRequest
+            {
+                Url = _form.Url.Trim(),
+                DisplayName = string.IsNullOrWhiteSpace(_form.Name) ? null : _form.Name.Trim(),
+                EventTypeFilter = BuildFilter(),
+                Enabled = _form.Enabled,
+                HmacSecret = string.IsNullOrWhiteSpace(_form.Secret) ? null : _form.Secret,
+            });
+            _createdId = created.Id;
+            _revealedSecret = created.HmacSecret;
+            Toast.Success("Webhook created");
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private void OnSecretDismissed()
+    {
+        _revealedSecret = null;
+        if (_createdId is { } id)
+            Nav.NavigateTo($"/admin/webhooks/{id}");
+        else
+            Nav.NavigateTo("/admin/webhooks");
+    }
+}

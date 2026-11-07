@@ -1,0 +1,324 @@
+@page "/admin/audit"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+@*
+    Global audit log — paginated event browser with debounced search +
+    quick-range presets + login OR userId filter (same OR-fallback the
+    per-user tab uses). Matches the user-detail Audit tab pattern but with
+    every filter axis exposed.
+*@
+
+<RdbPageHeader Title="Audit log" Description="Security event history across the entire Identity instance." />
+
+<div class="card" style="margin-bottom: var(--space-4);">
+    <div class="card-header" style="gap: var(--space-3); flex-wrap: wrap;">
+        <div style="display:flex; gap: var(--space-2); align-items:center; flex-wrap: wrap;">
+            <button class="btn @(_range == "1h" ? "btn-primary" : "")" @onclick="@(() => ApplyRange("1h"))">Last 1h</button>
+            <button class="btn @(_range == "24h" ? "btn-primary" : "")" @onclick="@(() => ApplyRange("24h"))">Last 24h</button>
+            <button class="btn @(_range == "7d" ? "btn-primary" : "")" @onclick="@(() => ApplyRange("7d"))">Last 7 days</button>
+            <button class="btn @(_range == "30d" ? "btn-primary" : "")" @onclick="@(() => ApplyRange("30d"))">Last 30 days</button>
+            <button class="btn @(_range == "all" ? "btn-primary" : "")" @onclick="@(() => ApplyRange("all"))">All time</button>
+        </div>
+        <div style="display:flex; gap: var(--space-2); align-items:center; margin-left:auto;">
+            <span class="text-secondary" style="font-size: var(--font-size-sm);">
+                @if (_total <= PageSize)
+                {
+                    @($"{_total} event{(_total == 1 ? "" : "s")}")
+                }
+                else
+                {
+                    @($"Showing {_offset + 1}-{Math.Min(_offset + PageSize, _total)} of {_total}")
+                }
+            </span>
+            <select class="app-detail__input" style="width: 90px;" @bind="PageSize" @bind:after="ReloadAsync">
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+            </select>
+            <button class="btn" disabled="@(_offset == 0 || _loading)" @onclick="PrevPage">‹ Prev</button>
+            <button class="btn" disabled="@(_offset + PageSize >= _total || _loading)" @onclick="NextPage">Next ›</button>
+            <button class="btn" @onclick="ReloadAsync" title="Refresh">
+                <RdbIcon Name="zap" Size="14" />
+            </button>
+        </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-3); padding-bottom: var(--space-3);">
+        <label>
+            <span class="text-secondary" style="display:block; margin-bottom:4px; font-size: var(--font-size-sm);">Event type</span>
+            <select class="app-detail__input" @bind="_filter.EventType" @bind:after="ApplyFilter">
+                <option value="">All</option>
+                <optgroup label="Authentication">
+                    <option value="UserLoggedIn">UserLoggedIn</option>
+                    <option value="UserLoggedOut">UserLoggedOut</option>
+                    <option value="LoginFailed">LoginFailed</option>
+                    <option value="PasswordChanged">PasswordChanged</option>
+                    <option value="PasswordResetRequested">PasswordResetRequested</option>
+                    <option value="PasswordResetCompleted">PasswordResetCompleted</option>
+                    <option value="EmailVerificationCompleted">EmailVerificationCompleted</option>
+                </optgroup>
+                <optgroup label="Tokens">
+                    <option value="TokenIssued">TokenIssued</option>
+                    <option value="TokenRevoked">TokenRevoked</option>
+                    <option value="TokenIntrospected">TokenIntrospected</option>
+                    <option value="AuthorizationGranted">AuthorizationGranted</option>
+                    <option value="ConsentGranted">ConsentGranted</option>
+                    <option value="ConsentRevoked">ConsentRevoked</option>
+                </optgroup>
+                <optgroup label="MFA">
+                    <option value="MfaEnrolled">MfaEnrolled</option>
+                    <option value="MfaDisabled">MfaDisabled</option>
+                    <option value="MfaChallengeIssued">MfaChallengeIssued</option>
+                    <option value="MfaVerifyFailed">MfaVerifyFailed</option>
+                </optgroup>
+                <optgroup label="Admin (users)">
+                    <option value="UserCreated">UserCreated</option>
+                    <option value="UserUpdated">UserUpdated</option>
+                    <option value="UserDeleted">UserDeleted</option>
+                </optgroup>
+                <optgroup label="Admin (clients)">
+                    <option value="ClientRegistered">ClientRegistered</option>
+                    <option value="ClientUpdated">ClientUpdated</option>
+                    <option value="ClientDeleted">ClientDeleted</option>
+                    <option value="ClientSecretRotated">ClientSecretRotated</option>
+                </optgroup>
+                <optgroup label="Sessions">
+                    <option value="SessionRevoked">SessionRevoked</option>
+                    <option value="AllSessionsRevoked">AllSessionsRevoked</option>
+                </optgroup>
+            </select>
+        </label>
+        <label>
+            <span class="text-secondary" style="display:block; margin-bottom:4px; font-size: var(--font-size-sm);">Category</span>
+            <select class="app-detail__input" @bind="_filter.Category" @bind:after="ApplyFilter">
+                <option value="">All</option>
+                <option value="authentication">authentication</option>
+                <option value="admin">admin</option>
+                <option value="token">token</option>
+                <option value="consent">consent</option>
+                <option value="mfa">mfa</option>
+                <option value="session">session</option>
+                <option value="user">user</option>
+                <option value="system">system</option>
+            </select>
+        </label>
+        <label>
+            <span class="text-secondary" style="display:block; margin-bottom:4px; font-size: var(--font-size-sm);">User id</span>
+            <input class="app-detail__input"
+                   placeholder="numeric"
+                   value="@_filter.UserId"
+                   @oninput="@(e => { _filter.UserId = e.Value?.ToString(); DebouncedReload(); })" />
+        </label>
+        <label>
+            <span class="text-secondary" style="display:block; margin-bottom:4px; font-size: var(--font-size-sm);">Login</span>
+            <input class="app-detail__input"
+                   placeholder="user login"
+                   value="@_filter.Login"
+                   @oninput="@(e => { _filter.Login = e.Value?.ToString(); DebouncedReload(); })" />
+        </label>
+        <label>
+            <span class="text-secondary" style="display:block; margin-bottom:4px; font-size: var(--font-size-sm);">Client id</span>
+            <input class="app-detail__input"
+                   placeholder="oauth client_id"
+                   value="@_filter.ClientId"
+                   @oninput="@(e => { _filter.ClientId = e.Value?.ToString(); DebouncedReload(); })" />
+        </label>
+        <label>
+            <span class="text-secondary" style="display:block; margin-bottom:4px; font-size: var(--font-size-sm);">From</span>
+            <input class="app-detail__input" type="datetime-local" @bind="_fromLocal" @bind:after="ApplyFilter" />
+        </label>
+        <label>
+            <span class="text-secondary" style="display:block; margin-bottom:4px; font-size: var(--font-size-sm);">To</span>
+            <input class="app-detail__input" type="datetime-local" @bind="_toLocal" @bind:after="ApplyFilter" />
+        </label>
+        <div style="display:flex; align-items: flex-end; gap: var(--space-2);">
+            <button class="btn btn-ghost" @onclick="ResetFilters" title="Reset all filters">
+                Reset
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    @if (_loading && _items.Count == 0) { <p class="text-secondary" style="padding: var(--space-4);">Loading…</p> }
+    else if (_error is not null) { <p class="text-error" style="padding: var(--space-4);">@_error</p> }
+    else if (_items.Count == 0)
+    {
+        <UiEmptyState Variant="inline"
+                      Title="No events match the current filter"
+                      Description="Adjust the filter axes or pick a wider time range. The default is the last 24 hours." />
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="width: 140px;">Time</th>
+                    <th>Event</th>
+                    <th style="width: 110px;">Category</th>
+                    <th style="width: 100px;">User id</th>
+                    <th>Login</th>
+                    <th>Client</th>
+                    <th style="width: 130px;">IP</th>
+                    <th style="width: 80px;">Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var ev in _items)
+                {
+                    <tr>
+                        <td class="text-secondary" style="white-space:nowrap;">
+                            <span>@ev.Timestamp.LocalDateTime.ToString("HH:mm:ss")</span>
+                            <div style="font-size: var(--font-size-xs); margin-top: 2px;">
+                                @ev.Timestamp.LocalDateTime.ToString("yyyy-MM-dd")
+                            </div>
+                        </td>
+                        <td><strong>@ev.EventType</strong></td>
+                        <td><span class="apps-list__chip">@ev.Category</span></td>
+                        <td class="text-secondary"><code>@ev.UserId</code></td>
+                        <td class="text-secondary">@ev.Login</td>
+                        <td class="text-secondary"><code style="font-size: var(--font-size-xs);">@ev.ClientId</code></td>
+                        <td class="text-secondary">@ev.IpAddress</td>
+                        <td>
+                            @if (ev.Details is { Count: > 0 })
+                            {
+                                <button class="btn btn-ghost btn-sm" @onclick="() => ToggleDetails(ev)">
+                                    @(_expanded.Contains(ev.EventId) ? "▲ Hide" : "▼ JSON")
+                                </button>
+                            }
+                        </td>
+                    </tr>
+                    @if (_expanded.Contains(ev.EventId) && ev.Details is not null)
+                    {
+                        <tr>
+                            <td colspan="8" style="padding: var(--space-2); background: var(--bg-tertiary);">
+                                <JsonViewer Json="@SerializeDetails(ev.Details)" />
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    }
+
+    @if (_loading && _items.Count > 0)
+    {
+        <p class="text-secondary" style="padding: var(--space-2);">Loading…</p>
+    }
+</div>
+
+@code {
+    private readonly List<AuditQueryItem> _items = new();
+    private readonly HashSet<string> _expanded = new();
+    private int _offset;
+    private int _total;
+    public int PageSize { get; set; } = 50;
+    private bool _loading;
+    private string? _error;
+    private string _range = "24h";
+    private System.Threading.Timer? _debounce;
+
+    private readonly AuditQueryRequest _filter = new() { Count = 50 };
+
+    private DateTime? _fromLocal
+    {
+        get => _filter.From?.LocalDateTime;
+        set => _filter.From = value.HasValue ? new DateTimeOffset(value.Value, TimeZoneInfo.Local.GetUtcOffset(value.Value)) : null;
+    }
+    private DateTime? _toLocal
+    {
+        get => _filter.To?.LocalDateTime;
+        set => _filter.To = value.HasValue ? new DateTimeOffset(value.Value, TimeZoneInfo.Local.GetUtcOffset(value.Value)) : null;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        ApplyRange("24h");
+        await ReloadAsync();
+    }
+
+    public void Dispose() => _debounce?.Dispose();
+
+    private void ApplyRange(string range)
+    {
+        _range = range;
+        var now = DateTimeOffset.UtcNow;
+        _filter.From = range switch
+        {
+            "1h"  => now.AddHours(-1),
+            "24h" => now.AddDays(-1),
+            "7d"  => now.AddDays(-7),
+            "30d" => now.AddDays(-30),
+            "all" => null,
+            _     => null
+        };
+        _filter.To = null;
+        _offset = 0;
+    }
+
+    private Task ApplyFilter()
+    {
+        _offset = 0;
+        return ReloadAsync();
+    }
+
+    private void DebouncedReload()
+    {
+        _debounce?.Dispose();
+        _debounce = new System.Threading.Timer(async _ =>
+        {
+            _offset = 0;
+            await InvokeAsync(ReloadAsync);
+            await InvokeAsync(StateHasChanged);
+        }, null, 300, System.Threading.Timeout.Infinite);
+    }
+
+    private void ResetFilters()
+    {
+        _filter.EventType = null;
+        _filter.Category = null;
+        _filter.UserId = null;
+        _filter.Login = null;
+        _filter.ClientId = null;
+        ApplyRange("24h");
+        _ = ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _filter.Offset = _offset;
+            _filter.Count = PageSize;
+            var result = await Client.QueryAuditAsync(_filter);
+            _items.Clear();
+            _items.AddRange(result.Items);
+            _total = result.Total;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private Task PrevPage() { _offset = Math.Max(0, _offset - PageSize); return ReloadAsync(); }
+    private Task NextPage() { _offset += PageSize; return ReloadAsync(); }
+
+    private void ToggleDetails(AuditQueryItem ev)
+    {
+        if (!_expanded.Remove(ev.EventId)) _expanded.Add(ev.EventId);
+    }
+
+    private static string SerializeDetails(Dictionary<string, object?> details)
+    {
+        try
+        {
+            return System.Text.Json.JsonSerializer.Serialize(details,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch { return "{}"; }
+    }
+}

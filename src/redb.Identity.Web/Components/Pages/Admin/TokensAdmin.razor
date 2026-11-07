@@ -1,0 +1,214 @@
+@page "/admin/tokens"
+@attribute [Authorize]
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+<RdbPageHeader Title="Tokens" Description="Browse and revoke issued OAuth tokens." />
+
+<div class="card" style="margin-bottom: var(--space-4);">
+    <div class="card-header" style="gap: var(--space-3); flex-wrap: wrap;">
+        <div style="display:flex; gap: var(--space-2); align-items:center; flex:1; min-width: 280px;">
+            <RdbIcon Name="search" Size="14" />
+            <input class="input" style="flex:1; min-width: 200px;"
+                   placeholder="Filter by subject GUID (optional)…"
+                   @bind="_subject" @bind:event="oninput" />
+        </div>
+        <div style="display:flex; gap: var(--space-2);">
+            <button class="btn btn-primary" @onclick="ApplyFilter">Apply</button>
+            <button class="btn" @onclick="ClearFilter" disabled="@(string.IsNullOrEmpty(_subject))">Clear</button>
+            <button class="btn" @onclick="Prune">
+                <RdbIcon Name="alert-triangle" Size="14" /> Prune expired
+            </button>
+        </div>
+    </div>
+
+    @if (_loading) { <p class="text-secondary" style="padding: var(--space-4);">Loading…</p> }
+    else if (_error is not null) { <p class="text-error" style="padding: var(--space-4);">@_error</p> }
+    else
+    {
+        var items = _tokens.ValueKind == System.Text.Json.JsonValueKind.Array
+            ? _tokens.EnumerateArray().ToList()
+            : (_tokens.ValueKind == System.Text.Json.JsonValueKind.Object && _tokens.TryGetProperty("items", out var arr)
+                ? arr.EnumerateArray().ToList()
+                : new System.Collections.Generic.List<System.Text.Json.JsonElement>());
+
+        @if (items.Count == 0)
+        {
+            <UiEmptyState Variant="inline"
+                          Title="@(string.IsNullOrEmpty(_subject) ? "No tokens issued" : "No tokens for this subject")"
+                          Description="@(string.IsNullOrEmpty(_subject)
+                              ? "OAuth tokens appear here as soon as clients exchange credentials."
+                              : "The subject has no tokens matching the current filter.")" />
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Token ID</th>
+                        <th>Subject</th>
+                        <th>Type</th>
+                        <th>Application</th>
+                        <th>Issued</th>
+                        <th>Expires</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var t in items)
+                    {
+                        var tid = JsonValueAsString(t, "id") ?? JsonValueAsString(t, "tokenId") ?? "—";
+                        var tidShort = tid.Length > 16 ? tid[..16] + "…" : tid;
+                        var subjectLogin = JsonValueAsString(t, "subjectLogin");
+                        var subjectUserId = JsonValueAsString(t, "subjectUserId");
+                        var subjectGuid = JsonValueAsString(t, "subject");
+                        var ttype = JsonValueAsString(t, "type") ?? "—";
+                        var clientId = JsonValueAsString(t, "clientId");
+                        var appName = JsonValueAsString(t, "applicationName");
+                        var issued = JsonValueAsString(t, "createdAt") ?? "—";
+                        var expires = JsonValueAsString(t, "expiresAt") ?? "—";
+                        var status = JsonValueAsString(t, "status") ?? "valid";
+                        <tr>
+                            <td><code style="font-size:0.85em;">@tidShort</code></td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(subjectLogin))
+                                {
+                                    <div>@subjectLogin</div>
+                                    <div class="text-secondary" style="font-size: var(--font-size-xs);">id #@subjectUserId</div>
+                                }
+                                else if (!string.IsNullOrEmpty(subjectGuid))
+                                {
+                                    <code style="font-size:0.85em;">@(subjectGuid.Length > 12 ? subjectGuid[..12] + "…" : subjectGuid)</code>
+                                }
+                                else { <span class="text-secondary">—</span> }
+                            </td>
+                            <td><span class="badge">@ttype</span></td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(appName))
+                                {
+                                    <div>@appName</div>
+                                    <div class="text-secondary" style="font-size: var(--font-size-xs);">@clientId</div>
+                                }
+                                else if (!string.IsNullOrEmpty(clientId))
+                                {
+                                    <code>@clientId</code>
+                                }
+                                else { <span class="text-secondary">—</span> }
+                            </td>
+                            <td class="text-secondary">@FormatTimestamp(issued)</td>
+                            <td class="text-secondary">@FormatTimestamp(expires)</td>
+                            <td><RdbBadge Text="@status" Variant="@(status == "valid" ? "online" : "offline")" /></td>
+                            <td>
+                                @if (tid is not null && long.TryParse(tid, out _))
+                                {
+                                    <button class="btn btn-sm btn-danger" @onclick="@(() => RevokeToken(tid))">Revoke</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            @if (_tokens.TryGetProperty("total", out var totalEl)
+                 && totalEl.ValueKind == System.Text.Json.JsonValueKind.Number)
+            {
+                <div style="display:flex; justify-content:space-between; align-items:center; padding: var(--space-3);
+                            border-top: 1px solid var(--border-color); margin-top: var(--space-3);">
+                    <span class="text-secondary">
+                        Showing @items.Count of @totalEl.GetInt32() tokens.
+                    </span>
+                    <div style="display:flex; gap: var(--space-2);">
+                        <button class="btn" disabled="@(_offset == 0)" @onclick="PrevPage">← Prev</button>
+                        <button class="btn" disabled="@(_offset + items.Count >= totalEl.GetInt32())"
+                                @onclick="NextPage">Next →</button>
+                    </div>
+                </div>
+            }
+        }
+    }
+</div>
+
+@code {
+    private const int PageSize = 25;
+
+    private string? _subject;
+    private bool _loading;
+    private int _offset;
+    private string? _error;
+    private System.Text.Json.JsonElement _tokens;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null;
+        try { _tokens = await Client.ListTokensAsync(subject: _subject, offset: _offset, count: PageSize); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task ApplyFilter()
+    {
+        _offset = 0;
+        await LoadAsync();
+    }
+
+    private async Task ClearFilter()
+    {
+        _subject = null;
+        _offset = 0;
+        await LoadAsync();
+    }
+
+    private async Task PrevPage()
+    {
+        _offset = Math.Max(0, _offset - PageSize);
+        await LoadAsync();
+    }
+
+    private async Task NextPage()
+    {
+        _offset += PageSize;
+        await LoadAsync();
+    }
+
+    private async Task RevokeToken(string tokenId)
+    {
+        try { await Client.RevokeTokenAdminAsync(tokenId); Toast.Show("Revoked.", "online"); await LoadAsync(); }
+        catch (Exception ex) { Toast.Show(ex.Message, "error"); }
+    }
+
+    private async Task Prune()
+    {
+        try
+        {
+            await Client.PruneTokensAsync();
+            Toast.Show("Pruned expired tokens.", "online");
+            await LoadAsync();
+        }
+        catch (Exception ex) { Toast.Show(ex.Message, "error"); }
+    }
+
+    private static string? JsonValueAsString(System.Text.Json.JsonElement obj, string property)
+    {
+        if (!obj.TryGetProperty(property, out var v)) return null;
+        return v.ValueKind switch
+        {
+            System.Text.Json.JsonValueKind.String => v.GetString(),
+            System.Text.Json.JsonValueKind.Number => v.GetRawText(),
+            System.Text.Json.JsonValueKind.True => "true",
+            System.Text.Json.JsonValueKind.False => "false",
+            System.Text.Json.JsonValueKind.Null or System.Text.Json.JsonValueKind.Undefined => null,
+            _ => v.GetRawText()
+        };
+    }
+
+    private static string FormatTimestamp(string raw)
+    {
+        if (string.IsNullOrEmpty(raw) || raw == "—") return raw;
+        return DateTimeOffset.TryParse(raw, out var dt)
+            ? dt.ToString("yyyy-MM-dd HH:mm")
+            : raw;
+    }
+}

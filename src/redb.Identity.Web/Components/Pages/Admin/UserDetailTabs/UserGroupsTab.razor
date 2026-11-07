@@ -1,0 +1,224 @@
+@inject IIdentityClient Client
+@inject ToastService Toast
+@using redb.Identity.Contracts.Groups
+
+@*
+    User > Groups tab — group memberships.
+
+    Mirrors the WSO2 IS 7.x "Groups" tab. Shows each group the user belongs
+    to plus the per-membership role (owner / admin / member / viewer), with
+    Add and Remove controls.
+
+    Underlying APIs:
+      GetUserGroupsAsync(userId)           — current memberships (JsonElement)
+      ListRootGroupsAsync                  — catalogue for the Add dropdown
+      AddGroupMemberAsync(groupId, …)      — Add
+      RemoveGroupMemberAsync(groupId, uid) — Remove
+*@
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Assigned groups</h3>
+    <p class="text-secondary" style="margin: 0 0 var(--space-4); font-size: var(--font-size-sm);">
+        Groups this user belongs to. Membership drives role-claim emission
+        (via claim mappers) and per-scope authorization gates
+        (<code>RedbIdentityOptions.ScopeRequiredGroups</code>) and now also
+        per-application sign-in gates (<code>ApplicationProps.AllowedGroups</code>).
+    </p>
+
+    @if (_loading)
+    {
+        <p class="text-secondary">Loading…</p>
+    }
+    else if (_error is not null)
+    {
+        <p class="text-error">@_error</p>
+    }
+    else if (_memberships.Count == 0)
+    {
+        <UiEmptyState Variant="inline"
+                      Title="Not a member of any group"
+                      Description="Pick a group below to add this user." />
+    }
+    else
+    {
+        <ul class="app-detail__assignment-list">
+            @foreach (var m in _memberships)
+            {
+                <li class="app-detail__assignment-row">
+                    <div class="app-detail__assignment-info">
+                        <strong>@m.GroupName</strong>
+                        @if (!string.IsNullOrEmpty(m.Role))
+                        {
+                            <p class="text-secondary">role: <code>@m.Role</code></p>
+                        }
+                    </div>
+                    <button class="btn btn-sm btn-danger"
+                            @onclick="@(() => RemoveAsync(m.GroupId))"
+                            disabled="@_mutating">
+                        Remove
+                    </button>
+                </li>
+            }
+        </ul>
+    }
+
+    @{
+        var memberOf = _memberships.Select(m => m.GroupId).ToHashSet();
+        var available = _catalogue.Where(g => !memberOf.Contains(g.Id)).ToList();
+    }
+    @if (available.Count > 0)
+    {
+        <div class="app-detail__assignment-add" style="margin-top: var(--space-4);">
+            <select class="app-detail__input"
+                    value="@_groupToAdd"
+                    @onchange="@(e => _groupToAdd = e.Value?.ToString() ?? string.Empty)">
+                <option value="">— pick a group to add —</option>
+                @foreach (var g in available)
+                {
+                    <option value="@g.Id">@g.Name</option>
+                }
+            </select>
+            <select class="app-detail__input"
+                    value="@_roleToAdd"
+                    @onchange="@(e => _roleToAdd = e.Value?.ToString() ?? "member")"
+                    style="max-width: 160px;">
+                <option value="member">member</option>
+                <option value="viewer">viewer</option>
+                <option value="admin">admin</option>
+                <option value="owner">owner</option>
+            </select>
+            <button class="btn btn-primary"
+                    @onclick="AddAsync"
+                    disabled="@(string.IsNullOrEmpty(_groupToAdd) || _mutating)">
+                Add
+            </button>
+        </div>
+    }
+    else if (_catalogue.Count == 0)
+    {
+        <p class="text-secondary" style="margin-top: var(--space-3); font-size: var(--font-size-sm);">
+            No groups exist yet. Create some on the
+            <NavLink href="/admin/groups">Groups</NavLink> page first.
+        </p>
+    }
+    else
+    {
+        <p class="text-secondary" style="margin-top: var(--space-3); font-size: var(--font-size-sm);">
+            User is already a member of every group.
+        </p>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public UserResponse User { get; set; } = default!;
+
+    private bool _loading = true;
+    private bool _mutating;
+    private string? _error;
+
+    private readonly List<Membership> _memberships = new();
+    private readonly List<GroupResponse> _catalogue = new();
+    private string _groupToAdd = "";
+    private string _roleToAdd = "member";
+
+    private sealed record Membership(long GroupId, string GroupName, string? Role);
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        _memberships.Clear();
+        _catalogue.Clear();
+        try
+        {
+            // Catalogue.
+            var groups = await Client.ListRootGroupsAsync(0, 200);
+            _catalogue.AddRange(groups);
+            var byId = _catalogue.ToDictionary(g => g.Id, g => g.Name ?? g.Id.ToString());
+
+            // Memberships — response shape:
+            //   { items: [ { groupId, role, ... }, ... ] }
+            //   or   [ { groupId, role, ... }, ... ]
+            var doc = await Client.GetUserGroupsAsync(User.Id);
+            void Visit(JsonElement el)
+            {
+                long? gid = null;
+                string? role = null;
+                if (el.TryGetProperty("groupId", out var g) && g.ValueKind == JsonValueKind.Number) gid = g.GetInt64();
+                if (el.TryGetProperty("role", out var r) && r.ValueKind == JsonValueKind.String) role = r.GetString();
+                if (gid.HasValue)
+                {
+                    var name = byId.TryGetValue(gid.Value, out var n) ? n : gid.Value.ToString();
+                    _memberships.Add(new Membership(gid.Value, name, role));
+                }
+            }
+            if (doc.ValueKind == JsonValueKind.Object &&
+                doc.TryGetProperty("items", out var arr) &&
+                arr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in arr.EnumerateArray()) Visit(el);
+            }
+            else if (doc.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in doc.EnumerateArray()) Visit(el);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task AddAsync()
+    {
+        if (string.IsNullOrEmpty(_groupToAdd) || _mutating) return;
+        if (!long.TryParse(_groupToAdd, out var gid)) return;
+        _mutating = true;
+        try
+        {
+            await Client.AddGroupMemberAsync(gid, new AddMemberRequest
+            {
+                UserId = User.Id,
+                Role = _roleToAdd,
+            });
+            Toast.Success("Group added");
+            _groupToAdd = "";
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _mutating = false;
+        }
+    }
+
+    private async Task RemoveAsync(long groupId)
+    {
+        if (_mutating) return;
+        _mutating = true;
+        try
+        {
+            await Client.RemoveGroupMemberAsync(groupId, User.Id);
+            Toast.Success("Group removed");
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _mutating = false;
+        }
+    }
+}

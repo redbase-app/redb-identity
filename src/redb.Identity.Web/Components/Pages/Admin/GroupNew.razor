@@ -1,0 +1,29 @@
+@page "/admin/groups/new"
+@attribute [Authorize]
+@inject ToastService Toast
+@inject NavigationManager Nav
+
+@*
+    New group — page host for the create wizard (Phase 3, pages-not-dialogs).
+    The wizard itself (GroupCreateWizard) used to float in a modal-backdrop over
+    /admin/groups; the review of this phase caught it as the last rich dialog
+    standing — ironically the very component the plan cited as the wizard pattern
+    to follow. Cancel goes back to the list, success deep-links into the group.
+*@
+
+<div style="margin-bottom: var(--space-3);">
+    <NavLink href="/admin/groups" class="btn btn-ghost" style="padding: 0; color: var(--accent-primary);">← Go back to Groups</NavLink>
+</div>
+
+<h1 style="margin: 0 0 var(--space-3) 0;">New group</h1>
+
+<GroupCreateWizard OnClose="@(() => Nav.NavigateTo("/admin/groups"))"
+                   OnCreated="@OnCreated" />
+
+@code {
+    private void OnCreated(GroupResponse g)
+    {
+        Toast.Success($"Group '{g.Name}' created");
+        Nav.NavigateTo($"/admin/groups/{g.Id}");
+    }
+}

@@ -1,0 +1,44 @@
+@page "/device/done"
+@attribute [Authorize]
+
+@*
+    Result page shown after the BFF has forwarded the user's Allow/Deny decision
+    to the host /connect/device/verify endpoint (RFC 8628 §3.3). The constrained
+    device will pick up the result on its next /connect/token polling cycle.
+*@
+
+<PageTitle>Device authorization — redb.Identity</PageTitle>
+
+<div class="login-backdrop">
+    <div class="login-card">
+        <div class="login-brand">
+            <RdbIcon Name="shield" Size="28" />
+            <span class="login-brand-name">redb.Identity</span>
+        </div>
+
+        @if (Action == "deny")
+        {
+            <h2 class="login-title">Device access denied</h2>
+            <p class="login-subtitle">
+                The other device will receive a denial on its next check-in.
+                You can safely close this window.
+            </p>
+        }
+        else
+        {
+            <h2 class="login-title">Device authorized</h2>
+            <p class="login-subtitle">
+                The other device will complete sign-in shortly.
+                You can safely close this window.
+            </p>
+        }
+
+        <p style="margin-top:var(--space-4); font-size:0.875rem;">
+            <a href="/">Return to start</a>
+        </p>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery] public string? Action { get; set; }
+}

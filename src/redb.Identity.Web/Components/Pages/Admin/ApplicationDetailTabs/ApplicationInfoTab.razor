@@ -1,0 +1,138 @@
+@inject Microsoft.Extensions.Options.IOptions<redb.Identity.Web.Configuration.IdentityWebOptions> IdentityOptions
+@inject IJSRuntime JS
+@inject ToastService Toast
+
+@*
+    ApplicationInfoTab — read-only metadata + Server Endpoints + audit link.
+
+    Three sections:
+      1. Server Endpoints (A.9) — every OIDC / OAuth / SCIM endpoint URL with a
+         copy button so the operator integrating this application doesn't have
+         to remember the path conventions. Mirrors WSO2 IS 7.x Info tab.
+      2. Identity — immutable fields (internal Id, ClientId, ConcurrencyToken)
+         that aren't useful on the editable tabs but matter for debugging.
+      3. Audit — deep-link to the audit log filtered to this application.
+*@
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Server endpoints</h3>
+    <p class="text-secondary" style="margin: 0 0 var(--space-4); font-size: var(--font-size-sm);">
+        URLs you will need to integrate this OIDC client. Click the copy icon
+        next to any endpoint to put it on the clipboard.
+    </p>
+    <dl class="app-detail__kv app-detail__endpoints">
+        @foreach (var ep in BuildEndpoints())
+        {
+            <dt>@ep.Label</dt>
+            <dd>
+                <div class="app-detail__input-cluster">
+                    <input type="text"
+                           readonly
+                           class="app-detail__input app-detail__input--mono app-detail__input--readonly"
+                           value="@ep.Url" />
+                    <button class="btn btn-sm btn-ghost"
+                            title="Copy"
+                            @onclick="@(() => CopyAsync(ep.Url))">
+                        <RdbIcon Name="copy" Size="14" />
+                    </button>
+                </div>
+            </dd>
+        }
+    </dl>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Identity</h3>
+    <dl class="app-detail__kv">
+        <dt>Internal ID</dt>
+        <dd><code>@App.Id</code></dd>
+
+        <dt>Client ID</dt>
+        <dd><code>@App.ClientId</code></dd>
+
+        <dt>
+            Concurrency token
+            <RdbIcon Name="info" Size="12" />
+        </dt>
+        <dd>
+            @if (!string.IsNullOrEmpty(App.ConcurrencyToken))
+            {
+                <code class="text-tertiary">@App.ConcurrencyToken</code>
+                <p class="text-secondary" style="margin: var(--space-2) 0 0; font-size: var(--font-size-xs);">
+                    Optimistic-locking marker (ETag equivalent). Every successful
+                    update rolls a new value. The admin UI sends the current value
+                    with every PATCH; if another admin changed the application
+                    meanwhile the server rejects with HTTP 409 Conflict instead
+                    of silently overwriting their work.
+                </p>
+            }
+            else
+            {
+                <span class="text-tertiary">—</span>
+            }
+        </dd>
+    </dl>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Audit</h3>
+    <p class="text-secondary">
+        Every administrative change to this application — create, update, secret
+        rotation, scope assignment, delete — emits an audit event. Filter the
+        admin audit log to this application's ID to see its full history.
+    </p>
+    <NavLink class="btn btn-secondary btn-sm" href="@($"/admin/audit?subject={App.Id}")">
+        <RdbIcon Name="clock" Size="14" />
+        <span>View audit log</span>
+    </NavLink>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public ApplicationResponse App { get; set; } = default!;
+
+    /// <summary>
+    /// A.9: derive the standard OIDC + OAuth + SCIM URL set from the configured
+    /// Authority. OpenIddict's paths are predictable so we don't have to fetch
+    /// /.well-known/openid-configuration here — we'd just be re-deriving the
+    /// same constants. If the issuer's URL is unset (admin running in a
+    /// degraded config), every endpoint shows as an empty input — better than
+    /// a 500 on the Info tab.
+    /// </summary>
+    private List<EndpointInfo> BuildEndpoints()
+    {
+        var authority = (IdentityOptions.Value.Authority ?? string.Empty).TrimEnd('/');
+        string Url(string path) => string.IsNullOrEmpty(authority) ? "" : authority + path;
+
+        return new List<EndpointInfo>
+        {
+            new("Issuer",            Url("")),
+            new("Discovery",         Url("/.well-known/openid-configuration")),
+            new("JWKS",              Url("/.well-known/jwks")),
+            new("Authorize",         Url("/connect/authorize")),
+            new("Token",             Url("/connect/token")),
+            new("UserInfo",          Url("/connect/userinfo")),
+            new("Introspection",     Url("/connect/introspect")),
+            new("Revocation",        Url("/connect/revoke")),
+            new("End session (logout)", Url("/connect/logout")),
+            new("Pushed Authorization (PAR)", Url("/connect/par")),
+            new("SCIM 2.0 Users",    Url("/scim2/Users")),
+            new("SCIM 2.0 Groups",   Url("/scim2/Groups")),
+        };
+    }
+
+    private async Task CopyAsync(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", value);
+            Toast.Success("Copied");
+        }
+        catch
+        {
+            Toast.Error("Copy to clipboard failed");
+        }
+    }
+
+    private sealed record EndpointInfo(string Label, string Url);
+}

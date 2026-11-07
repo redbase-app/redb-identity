@@ -1,0 +1,11 @@
+/* The .apps-list__* class set was reused by multiple admin pages (Users,
+   UserDetailTabs, Applications, …) but Blazor's CSS isolation kept them
+   scoped to whichever .razor.css file they were authored in — so the
+   styles applied to Applications.razor only and other pages fell back to
+   unstyled defaults.
+
+   Moved to wwwroot/css/app-list.css (registered globally in App.razor).
+   This file is left as an empty stub so the scoped-CSS bundle still has a
+   companion for Applications.razor (the build expects pairs).
+
+   See doc/FEATURE_GAPS_VS_WSO2_IS_7X.md for the full story. */

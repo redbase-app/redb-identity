@@ -1,0 +1,6 @@
+{
+  "Name": "redb.Identity.Contracts",
+  "Version": "1.0.0",
+  "EntryPoints": ["redb.Identity.Contracts.Module.dll"],
+  "Dependencies": []
+}

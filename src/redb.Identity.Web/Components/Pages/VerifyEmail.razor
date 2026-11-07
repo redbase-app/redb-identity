@@ -1,0 +1,91 @@
+@page "/verify-email"
+@attribute [AllowAnonymous]
+
+<PageTitle>Verify e-mail — redb.Identity</PageTitle>
+
+<div class="login-backdrop">
+    <div class="login-card">
+        <div class="login-brand">
+            <RdbIcon Name="shield" Size="28" />
+            <span class="login-brand-name">redb.Identity</span>
+        </div>
+
+        <h2 class="login-title">Verify your e-mail</h2>
+
+        @if (Confirmed is not null)
+        {
+            <p class="login-subtitle">
+                Your e-mail address has been verified. You can close this tab or
+                <a href="/">return to the home page</a>.
+            </p>
+            <div class="login-error" role="alert" aria-live="polite" style="background:#0f2a18;border-color:#1a5b32;">
+                <RdbIcon Name="check" Size="16" />
+                <span>E-mail verified successfully.</span>
+            </div>
+        }
+        else if (!string.IsNullOrEmpty(Token) && !string.IsNullOrEmpty(Jti))
+        {
+            <p class="login-subtitle">
+                Click the button below to confirm your e-mail address. The link is
+                single-use and expires after a short period.
+            </p>
+
+            @if (!string.IsNullOrEmpty(Error))
+            {
+                <div class="login-error" role="alert" aria-live="polite">
+                    <RdbIcon Name="alert-circle" Size="16" />
+                    <span>@ErrorMessage</span>
+                </div>
+            }
+
+            <form method="post" action="/api/auth/account/verify-email/confirm" class="login-form">
+                <AntiforgeryToken />
+                <input type="hidden" name="jti" value="@Jti" />
+                <input type="hidden" name="token" value="@Token" />
+
+                <div class="login-actions">
+                    <button type="submit" class="btn btn-primary login-btn">
+                        <RdbIcon Name="check" Size="16" />
+                        <span>Confirm e-mail</span>
+                    </button>
+                </div>
+            </form>
+        }
+        else
+        {
+            <p class="login-subtitle">
+                Open the verification link from the e-mail we sent you to confirm
+                your address.
+            </p>
+            @if (!string.IsNullOrEmpty(Error))
+            {
+                <div class="login-error" role="alert" aria-live="polite">
+                    <RdbIcon Name="alert-circle" Size="16" />
+                    <span>@ErrorMessage</span>
+                </div>
+            }
+        }
+
+        <div class="login-divider">or</div>
+        <div class="login-actions">
+            <a href="/login" class="btn">Back to sign-in</a>
+        </div>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] public HttpContext? HttpContext { get; set; }
+    [SupplyParameterFromQuery] public string? Jti { get; set; }
+    [SupplyParameterFromQuery] public string? Token { get; set; }
+    [SupplyParameterFromQuery] public string? Error { get; set; }
+    [SupplyParameterFromQuery] public string? Confirmed { get; set; }
+
+    // All failure modes collapse to "invalid_token" server-side; we still show a
+    // human-friendly message for the common operator-tunable causes.
+    private string ErrorMessage => Error switch
+    {
+        "missing_fields" => "The verification link is incomplete. Please use the link from your e-mail.",
+        "invalid_token" => "This verification link is no longer valid. Request a new one from your profile.",
+        _ => "We couldn't verify your e-mail. Please request a fresh verification link."
+    };
+}

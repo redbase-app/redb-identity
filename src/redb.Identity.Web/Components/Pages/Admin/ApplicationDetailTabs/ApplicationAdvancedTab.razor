@@ -1,0 +1,125 @@
+@inject IIdentityClient Client
+@inject ToastService Toast
+
+@*
+    ApplicationAdvancedTab — collects the WSO2 IS 7.x "Advanced" toggles we
+    chose to support (see doc/FEATURE_GAPS_VS_WSO2_IS_7X.md A.5 / A.10).
+    Currently exposes:
+      - Skip logout consent
+      - Mark as FIDO trusted app
+
+    App-Native Authentication, Client Attestation (Play Integrity / App
+    Attest), Platform Settings (Android package / Apple App ID) are out of
+    scope per the gap audit — deferred to a future mobile-focused batch.
+
+    The tab uses the same dirty-banner + Update pattern as Protocol tab.
+*@
+
+@if (_dirty)
+{
+    <div class="app-detail__dirty-banner">
+        <RdbIcon Name="alert-triangle" Size="14" />
+        <span>You have unsaved changes.</span>
+        <button class="btn btn-sm btn-ghost" @onclick="Reset" disabled="@_saving">Discard</button>
+    </div>
+}
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">Logout</h3>
+    <label class="app-detail__checkbox">
+        <input type="checkbox"
+               checked="@_skipLogoutConsent"
+               @onchange="@(e => { _skipLogoutConsent = (bool)(e.Value ?? false); _dirty = true; })" />
+        <span>Skip logout consent</span>
+    </label>
+    <span class="app-detail__field-hint" style="margin-top: var(--space-2);">
+        <RdbIcon Name="info" Size="12" />
+        When checked, RP-initiated logout proceeds silently without the
+        "Sign out of <em>app name</em>?" confirmation page — assuming the
+        request includes a valid <code>id_token_hint</code> and a registered
+        <code>post_logout_redirect_uri</code>. Useful for first-party trusted
+        apps; leave off for any application that could be embedded in an
+        untrusted context.
+    </span>
+</section>
+
+<section class="app-detail__section">
+    <h3 class="app-detail__section-title">FIDO / WebAuthn</h3>
+    <label class="app-detail__checkbox">
+        <input type="checkbox"
+               checked="@_isFidoTrusted"
+               @onchange="@(e => { _isFidoTrusted = (bool)(e.Value ?? false); _dirty = true; })" />
+        <span>Mark as a FIDO trusted application</span>
+    </label>
+    <span class="app-detail__field-hint" style="margin-top: var(--space-2);">
+        <RdbIcon Name="info" Size="12" />
+        Treat user passkeys registered against this application as
+        trusted for subsequent authentication. Skips the extra confirmation
+        step we run by default. Recommended for high-assurance first-party
+        apps that already verify the user out-of-band.
+    </span>
+</section>
+
+<div class="app-detail__submit-row">
+    <button class="btn btn-primary" @onclick="SaveAsync" disabled="@(!_dirty || _saving)">
+        @(_saving ? "Saving…" : "Update")
+    </button>
+    @if (_dirty)
+    {
+        <button class="btn btn-secondary" @onclick="Reset" disabled="@_saving">Discard</button>
+    }
+    @if (_error is not null)
+    {
+        <span class="text-error">@_error</span>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ApplicationResponse App { get; set; } = default!;
+    [Parameter] public EventCallback OnRefresh { get; set; }
+
+    private bool _skipLogoutConsent;
+    private bool _isFidoTrusted;
+    private bool _dirty;
+    private bool _saving;
+    private string? _error;
+
+    protected override void OnParametersSet() => Reset();
+
+    private void Reset()
+    {
+        _skipLogoutConsent = App.SkipLogoutConsent ?? false;
+        _isFidoTrusted = App.IsFidoTrusted ?? false;
+        _dirty = false;
+        _error = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!_dirty || _saving) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            await Client.UpdateApplicationAsync(App.Id, new UpdateApplicationRequest
+            {
+                Id = App.Id,
+                SkipLogoutConsent = _skipLogoutConsent,
+                IsFidoTrusted = _isFidoTrusted,
+                ConcurrencyToken = App.ConcurrencyToken,
+            });
+            Toast.Success("Advanced settings updated");
+            _dirty = false;
+            await OnRefresh.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

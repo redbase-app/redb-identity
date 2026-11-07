@@ -1,0 +1,72 @@
+@*
+    N8-3 (BFF UX): anonymous cookie-consent banner. Renders a dismissible info
+    strip at the bottom of the viewport until the user clicks "Got it", which
+    sets a 1-year first-party cookie (identity.web.cookie-consent=1) so we do
+    not re-prompt on every page load.
+
+    The component is statically rendered (no Blazor interactivity required) and
+    uses a tiny inline script to flip its visibility \u2014 this keeps the banner
+    flicker-free on first paint and avoids forcing a server-render round-trip
+    just to dismiss it.
+
+    Accessibility: role="region" + aria-label so screen readers can locate the
+    cookie notice; focusable Dismiss button as the only interactive element.
+*@
+
+<div id="rdb-cookie-banner"
+     class="rdb-cookie-banner"
+     role="region"
+     aria-label="Cookie consent notice"
+     hidden>
+    <div class="rdb-cookie-banner-text">
+        We use strictly-necessary cookies for sign-in, session security and
+        antiforgery protection. By continuing to use this site you accept these
+        cookies. No analytics or third-party tracking cookies are set.
+    </div>
+    <div class="rdb-cookie-banner-actions">
+        <button type="button"
+                id="rdb-cookie-banner-dismiss"
+                class="btn btn-primary">
+            Got it
+        </button>
+    </div>
+</div>
+
+<script>
+    (function () {
+        // First-party cookie name. Presence of a "1" value suppresses the banner.
+        var COOKIE = 'identity.web.cookie-consent';
+        function getCookie(name) {
+            var prefix = name + '=';
+            var parts = (document.cookie || '').split(';');
+            for (var i = 0; i < parts.length; i++) {
+                var c = parts[i].trim();
+                if (c.indexOf(prefix) === 0) return decodeURIComponent(c.substring(prefix.length));
+            }
+            return null;
+        }
+        function setCookie(name, value, days) {
+            var d = new Date();
+            d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
+            // SameSite=Lax so the cookie travels on normal top-level navigations
+            // (needed because the banner is dismissed on the same origin).
+            // Secure is added when served over https so we never leak it on http.
+            var secure = location.protocol === 'https:' ? '; Secure' : '';
+            document.cookie = name + '=' + encodeURIComponent(value)
+                + '; expires=' + d.toUTCString()
+                + '; path=/; SameSite=Lax' + secure;
+        }
+
+        var banner = document.getElementById('rdb-cookie-banner');
+        var btn = document.getElementById('rdb-cookie-banner-dismiss');
+        if (!banner || !btn) return;
+
+        if (getCookie(COOKIE) !== '1') {
+            banner.hidden = false;
+        }
+        btn.addEventListener('click', function () {
+            setCookie(COOKIE, '1', 365);
+            banner.hidden = true;
+        });
+    })();
+</script>

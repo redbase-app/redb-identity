@@ -1,0 +1,44 @@
+@*
+    N7-3 — Admin impersonation banner. Renders a prominent strip above the page
+    whenever the BFF has an active impersonation overlay cookie set for the current
+    admin. The "Stop" button posts to /api/auth/impersonate/stop and reloads.
+
+    Pure server-side render; the form carries the antiforgery token. Visibility is
+    bound to ImpersonationStateProtector.ReadCookie(HttpContext) so the banner
+    appears immediately after the start endpoint redirects and disappears as soon
+    as the cookie is cleared.
+*@
+@inject redb.Identity.Web.Auth.ImpersonationStateProtector Protector
+
+@if (_overlay is not null)
+{
+    <div class="rdb-impersonation-banner" role="region" aria-label="Impersonation session">
+        <div class="rdb-impersonation-banner-text">
+            <RdbIcon Name="alert-circle" Size="16" />
+            <span>
+                You are viewing as <strong>@_overlay.TargetLogin</strong>
+                (user&nbsp;#@_overlay.TargetUserId, started @_overlay.StartedAt.ToString("yyyy-MM-dd HH:mm 'UTC'")).
+                Actions on admin pages are scoped to this user; your own session is unaffected.
+            </span>
+        </div>
+        <form method="post" action="/api/auth/impersonate/stop" class="rdb-impersonation-banner-actions">
+            <AntiforgeryToken />
+            <button type="submit" class="btn btn-danger btn-sm">
+                <RdbIcon Name="x" Size="14" />
+                <span>Stop impersonating</span>
+            </button>
+        </form>
+    </div>
+}
+
+@code {
+    [CascadingParameter] public HttpContext? HttpContext { get; set; }
+
+    private redb.Identity.Web.Auth.ImpersonationOverlay? _overlay;
+
+    protected override void OnInitialized()
+    {
+        if (HttpContext is null) return;
+        _overlay = Protector.ReadCookie(HttpContext);
+    }
+}

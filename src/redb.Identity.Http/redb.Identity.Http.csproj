@@ -1,0 +1,69 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>redb.Identity.Http</AssemblyName>
+    <RootNamespace>redb.Identity.Http</RootNamespace>
+    <Description>HTTP / HTTPS facade for redb.Identity — OIDC discovery, token, authorize, userinfo, introspect, revoke, JWKS, PAR, DCR, SCIM, /me and management endpoints.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Phase 8: Http facade is project-reference-isolated from Core. Core/Http exchange
+      runs purely over `direct-vm://identity-*` brokered messages whose DTOs live in
+      `redb.Identity.Contracts`. See docs/PHASE-8-FACADE-ISOLATION-PLAN-RU.md.
+    -->
+    <ProjectReference Include="..\redb.Identity.Contracts\redb.Identity.Contracts.csproj" />
+    <!--
+      Management and self-service controllers live in their own package so a second transport
+      can serve the same surface without referencing this facade. SCIM stays here: RFC 7644 is
+      an HTTP protocol, and its base reads redbHttp.Url to build Location headers.
+    -->
+    <ProjectReference Include="..\redb.Identity.Management\redb.Identity.Management.csproj" />
+    <!--
+      Phase 9a/9b: Http facade gets its own redb-backed DataProtection key-ring via the
+      shared `redb.Identity.DataProtection` project. The XML repository is bridged to
+      the host's IServiceScopeFactory by `IdentityHttpModuleHost`, so the Http context
+      shares the cluster-wide key-ring with Core without referencing it.
+    -->
+    <ProjectReference Include="..\redb.Identity.DataProtection\redb.Identity.DataProtection.csproj" />
+    <PackageReference Include="redb.Core" />
+    <PackageReference Include="redb.Route.Http" />
+    <PackageReference Include="redb.Route.Controllers" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      OpenIddict.Abstractions is the lightweight contracts package needed by the
+      post-logout-redirect handler (`IOpenIddictApplicationManager`). Resolved per-exchange
+      from the host SP; we do not own the OpenIddict server stack here (Core does).
+    -->
+    <PackageReference Include="OpenIddict.Abstractions" />
+    <!-- Direct override of a transitive dependency: OpenIddict.Abstractions pulls an older
+         Microsoft.IdentityModel.* (8.19.2 for OpenIddict 7.7.2) than the one the Tsak worker and
+         redb.Identity.Core.Module run on. Without these references this module's .tpkg ships older
+         companions next to the host's. Keep them on the worker's version (Directory.Packages.props). -->
+    <PackageReference Include="Microsoft.IdentityModel.Abstractions" />
+    <PackageReference Include="Microsoft.IdentityModel.Logging" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" />
+    <!-- Phase 9b: AddDataProtection() lives in this package; needed by IdentityHttpModuleHost. -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="redb.Identity.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Module config template (Tsak Layer 4). Tsak loads this file by name
+      "{Namespace}.config.json" alongside the assembly (or from inside the .tpkg
+      package). Copying to output ensures it ships next to the DLL for both
+      bare-DLL hot-reload and .tpkg packaging.
+    -->
+    <None Update="redb.Identity.Http.config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
+

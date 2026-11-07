@@ -1,0 +1,104 @@
+{
+  "//": [
+    "redb.Identity.Http module configuration template (Tsak Layer 4: {Module}.config.json).",
+    "This file ships inside the .tpkg and provides the HTTP transport defaults for the",
+    "Identity HTTP facade. Phase 8: the facade runs in its OWN RouteContext",
+    "('identity.http') and exchanges with redb.Identity.Core ('identity') exclusively",
+    "through `direct-vm://identity-*` brokered messages whose DTOs live in",
+    "redb.Identity.Contracts. The two modules no longer share a context or DI.",
+    "",
+    "Override any value via the standard Tsak 5-layer pipeline:",
+    "  Layer 1 (host appsettings): Tsak:Contexts:default:IdentityTransport:*",
+    "  Layer 2 (per-context):      Tsak:Contexts:{contextName}:IdentityTransport:*",
+    "  Layer 3 (context.json):     same shape as below, merged before this file",
+    "  Layer 4 (THIS file):        defaults shipped with the .tpkg",
+    "  Layer 5 (Override, wins):   Tsak:Contexts:{contextName}:Override:IdentityTransport:*",
+    "",
+    "Environment-variable overrides use the standard .NET IConfiguration mapping, e.g.:",
+    "  Tsak__Contexts__identity__Override__IdentityTransport__Http__PublicPort=8443",
+    "  Tsak__Contexts__identity__Override__IdentityTransport__Http__CorsEnabled=true",
+    "",
+    "PRODUCTION CHECKLIST (per docs/IDENTITY_DEPLOYMENT.md):",
+    "  \u2022 Bind PublicPort behind a TLS-terminating reverse proxy (nginx/HAProxy/ALB).",
+    "  \u2022 Set ManagementPort to a separate value (e.g. 8081) and firewall it off from",
+    "    the public internet \u2014 the management API is admin-only and never exposes CORS.",
+    "  \u2022 Keep CorsRegisteredClientOriginsEnabled=true so onboarding new SPAs via the",
+    "    management API automatically grants them CORS access \u2014 no config redeploys.",
+    "  \u2022 Use AdditionalAllowedOrigins ONLY for dev/staging fallbacks that have no",
+    "    OAuth client of their own. NEVER set it to '*'."
+  ],
+
+  "ContextName": "identity.http",
+  "AutoStart": true,
+
+  "//RedbInstanceName": [
+    "Phase 9b: identifies the named IRedbService the HTTP facade uses to back the",
+    "shared cluster-wide DataProtection key-ring. MUST point at the SAME database as",
+    "redb.Identity.Core's RedbInstanceName so cookies issued by either context decrypt",
+    "with either. The HTTP facade has no project-reference on Core \u2014 the only thing it",
+    "shares with Core is the DP key-ring (rows in the PROPS store) plus the application",
+    "name 'redb.identity' set in IdentityHttpModuleHost.",
+    "Override path: Tsak__Contexts__identity.http__Override__RedbInstanceName=<other>."
+  ],
+  "RedbInstanceName": "identity-pg",
+
+  "//Redb": [
+    "Named IRedbService instances. Tsak's RegisterNamedRedbServices reads this section",
+    "after context.json/{Module}.config.json merge and registers each entry under",
+    "'redb-factory:{name}' in the route-context registry. The HTTP facade's child",
+    "container resolves the factory whose name matches RedbInstanceName above.",
+    "",
+    "PRODUCTION: keep ConnectionString out of source control \u2014 supply via Layer-5:",
+    "  Tsak__Contexts__identity.http__Override__Redb__identity-pg__ConnectionString=<dsn>",
+    "",
+    "DEPLOYMENT TIP: place a shared 'context.json' (Layer 3) in the same Libs/ folder as",
+    "redb.Identity.Core.tpkg + redb.Identity.Http.tpkg containing only the Redb section;",
+    "both .tpkg will pick it up via Tsak's per-folder context.json merge, eliminating",
+    "the duplicated block here."
+  ],
+  "Redb": {
+    "identity-pg": {
+      "Provider": "postgres",
+      "UsePro": true,
+      "ConnectionString": "Host=localhost;Port=5432;Username=postgres;Password=1;Database=redb;Pooling=true",
+      "EnsureCreated": true
+    }
+  },
+
+  "IdentityTransport": {
+    "Http": {
+      "//": [
+        "PublicPort       \u2014 OIDC protocol + discovery endpoints (token, userinfo, .well-known/*).",
+        "ManagementPort   \u2014 admin API (/api/v1/identity/*, /scim/*). Null = share PublicPort.",
+        "                   Production strongly recommends a separate, firewalled port.",
+        "CorsEnabled      \u2014 master switch. Required for SPA / native PKCE clients calling",
+        "                   token / userinfo / revocation from a browser context.",
+        "                   Discovery (/.well-known/*) always uses '*' when CorsEnabled=true;",
+        "                   browser-redirect endpoints (authorize, login, logout-form) and",
+        "                   the management API NEVER receive CORS headers regardless.",
+        "CorsRegisteredClientOriginsEnabled \u2014 when true (default), the resolver allows any",
+        "                   browser Origin matching a registered OAuth application's redirect",
+        "                   or post-logout URI. New SPAs onboarded via the management API",
+        "                   gain CORS access without any config change.",
+        "AdditionalAllowedOrigins \u2014 CSV of origins always allowed (dev/staging fallbacks).",
+        "                   Per-request matched and echoed as a single origin (browsers reject",
+        "                   CSV in Access-Control-Allow-Origin).",
+        "EnableDeviceCodeFlow \u2014 mounts /connect/deviceauthorization and /connect/device/verify.",
+        "                       Must also be enabled in Identity:EnableDeviceCodeFlow.",
+        "FederationCallbackPath \u2014 path used for IdP redirect-back when EnableFederation=true."
+      ],
+      "PublicPort": 8080,
+      "//ManagementPort": "Production: separate port for admin API, e.g. 8081 (firewalled).",
+      "ManagementPort": null,
+      "CorsEnabled": false,
+      "CorsRegisteredClientOriginsEnabled": true,
+      "//AdditionalAllowedOrigins": "CSV of origins (no trailing slash). Example: 'https://app.dev.local,https://staging.example.com'. NEVER use '*'.",
+      "AdditionalAllowedOrigins": null,
+      "EnableDeviceCodeFlow": true,
+      "FederationCallbackPath": "/connect/federation/callback"
+    },
+    "Features": {
+      "EnablePushedAuthorization": true
+    }
+  }
+}

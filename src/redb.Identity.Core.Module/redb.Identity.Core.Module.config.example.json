@@ -1,0 +1,296 @@
+{
+  "//": [
+    "redb.Identity.Core module configuration template (Tsak Layer 4: {Module}.config.json).",
+    "Override any value via the standard Tsak 5-layer pipeline:",
+    "  Layer 1 (host appsettings): Tsak:Contexts:default:Identity:*",
+    "  Layer 2 (per-context):      Tsak:Contexts:{contextName}:Identity:*",
+    "  Layer 3 (context.json):     same shape as below, merged before this file",
+    "  Layer 4 (THIS file):        defaults shipped with the .tpkg",
+    "  Layer 5 (Override, wins):   Tsak:Contexts:{contextName}:Override:Identity:*",
+    "Environment-variable overrides use the standard .NET IConfiguration mapping, e.g.:",
+    "  Tsak__Contexts__identity__Override__Identity__AccessTokenLifetime=01:00:00",
+    "  Tsak__Contexts__identity__Override__Identity__RateLimit__Enabled=true",
+    "",
+    "SECRETS — there is intentionally NO 'SecretsFilePath' option. Do NOT commit real",
+    "secrets to this file. All secret-bearing fields are designed to be supplied at",
+    "runtime via the Layer-5 Override channel (env-vars, Docker secrets, K8s secrets",
+    "mounted as env, or host appsettings outside source control). The fields that",
+    "qualify as secrets are:",
+    "  Identity:RecoveryCodePepper                                   (base64 random)",
+    "  Identity:DynamicRegistrationInitialAccessToken                (bearer token)",
+    "  Identity:FederationProviders[i]:ClientSecret                  (per provider)",
+    "  Identity:RateLimit:RedisConnectionString                      (if Redis backend)",
+    "  Identity:FederationState:RedisConnectionString                (if Redis backend)",
+    "  Redb:{instance}:ConnectionString                              (DB credentials)",
+    "Example env-var (Linux/Docker, double-underscore = section separator):",
+    "  Tsak__Contexts__identity__Override__Identity__RecoveryCodePepper=<base64>",
+    "  Tsak__Contexts__identity__Override__Identity__FederationProviders__0__ClientSecret=<value>",
+    "",
+    "Cryptographic keys (SigningCredentials/EncryptionCredentials) are NOT loaded from",
+    "JSON. Set AllowEphemeralKeys=true for development. For production they are loaded",
+    "from a redb-backed RSA key store (mechanism #2) — see the Identity bootstrap docs.",
+    "",
+    "OBSERVABILITY (F3) — the Identity routes emit OTEL spans + metrics on the security-",
+    "critical hot paths. Names are static (cardinality-safe) and surface in any OTEL or",
+    "Prometheus exporter the host wires up:",
+    "  identity.token-request    span + counter + latency histogram (token endpoint)",
+    "  identity.login            span + counter + latency histogram (credential check)",
+    "  identity.mfa-verify       span + counter + latency histogram (TOTP / OTP verify)",
+    "Plus the per-module health probe registered as 'module:identity' in Tsak's",
+    "/api/health/{startup,live,ready} endpoints (database + signing-key + DP-keyring).",
+    "Enable Tsak's Prometheus scrape endpoint via host appsettings:",
+    "  Tsak:Metrics:Prometheus:Enabled=true",
+    "  Tsak:Metrics:Prometheus:Path=/metrics"
+  ],
+
+  "ContextName": "identity",
+  "AutoStart": true,
+
+  "Redb": {
+    "identity-pg": {
+      "Provider": "postgres",
+      "UsePro": true,
+      "ConnectionString": "Host=localhost;Port=5432;Username=postgres;Password=1;Database=redb;Pooling=true",
+      "EnsureCreated": true
+    }
+  },
+
+  "Identity": {
+    "RedbInstanceName": "identity-pg",
+
+    "Issuer": "http://127.0.0.1:8080",
+    "AllowEphemeralKeys": true,
+
+    "AccessTokenLifetime": "01:00:00",
+    "RefreshTokenLifetime": "14.00:00:00",
+    "RefreshTokenReuseLeeway": "00:00:00",
+    "AuthorizationCodeLifetime": "00:05:00",
+    "IdentityTokenLifetime": "00:05:00",
+    "DisableAccessTokenEncryption": false,
+
+    "TokenThrottleMaxPerPeriod": 10,
+    "TokenThrottlePeriod": "00:00:01",
+    "TokenRetentionDays": 30,
+    "TokenCleanupInterval": "01:00:00",
+    "TokenCleanupBatchSize": 50,
+
+    "SessionRetentionDays": 14,
+    "SessionCleanupInterval": "01:00:00",
+    "SessionCookieLifetime": "08:00:00",
+
+    "ManagementScope": "identity:manage",
+    "AccountScope": "identity:account",
+
+    "EnableDynamicRegistration": false,
+    "DynamicRegistrationAllowedGrantTypes": [ "authorization_code", "refresh_token" ],
+    "DynamicRegistrationAllowedScopes": [ "openid", "profile", "email", "phone", "address", "offline_access", "groups", "roles" ],
+    "DynamicRegistrationInitialAccessToken": null,
+
+    "EnableDeviceCodeFlow": true,
+    "DeviceCodeLifetime": "00:10:00",
+    "DeviceCodePollingInterval": 5,
+
+    "EnablePushedAuthorization": true,
+    "RequirePushedAuthorizationRequests": false,
+    "PushedAuthorizationRequestLifetime": "00:01:30",
+
+    "Dpop": {
+      "Enabled": true,
+      "RequireForAccessTokens": false,
+      "AllowedSigningAlgorithms": [ "ES256", "ES384", "PS256", "RS256" ],
+      "IatToleranceSeconds": 60,
+      "RequireNonce": false
+    },
+
+    "Ldap": {
+      "//": [
+        "Variant B integration: LDAP external user provider, opt-in.",
+        "When Enabled=true, each entry in Providers[] is registered as an",
+        "IExternalUserProvider in the Identity child SP and consumed by LoginService.",
+        "The sync route (LdapSyncRouteBuilder) is NOT auto-started here — see",
+        "src/redb.Identity.Ldap/PACKAGING.md for the rationale and follow-up.",
+        "",
+        "BindPassword is a SECRET — supply via Layer-5 Override channel:",
+        "  Tsak__Contexts__identity__Override__Identity__Ldap__Providers__0__BindPassword=<value>",
+        "",
+        "Two presets are recognised by AttributeMap conventions (see LdapProviderOptions.ApplyPreset):",
+        "  • OpenLDAP        — UserFilter '(uid={0})',                       externalId=uid",
+        "  • ActiveDirectory — UserFilter '(&(objectClass=user)(sAMAccountName={0}))', externalId=sAMAccountName",
+        "Multiple providers are tried in Priority order (lower = first). Use Domains[] to route",
+        "user@example.com / EXAMPLE\\user to a specific provider based on the hint."
+      ],
+      "Enabled": false,
+      "Providers": [
+        {
+          "//": "Example placeholder — REMOVE or REPLACE before enabling.",
+          "ProviderName": "ldap-corp",
+          "Priority": 100,
+          "Server": "REPLACE_ME.example.com",
+          "Port": 389,
+          "UseSsl": false,
+          "UseStartTls": true,
+          "SkipCertificateValidation": false,
+          "BindDn": "cn=svc-identity,ou=service-accounts,dc=example,dc=com",
+          "BindPassword": null,
+          "OperationTimeoutSeconds": 10,
+          "ConnectTimeoutSeconds": 10,
+          "MaxConnections": 5,
+          "UserBaseDn": "ou=users,dc=example,dc=com",
+          "UserFilter": "(uid={0})",
+          "SearchScope": "Subtree",
+          "Domains": [ "example.com" ],
+          "CheckAccountStatus": false,
+          "AttributeMap": {
+            "externalId":  "uid",
+            "displayName": "cn",
+            "email":       "mail",
+            "phone":       "telephoneNumber",
+            "givenName":   "givenName",
+            "familyName":  "sn"
+          },
+          "AdditionalClaimsMap": {
+            "department": "departmentNumber",
+            "title":      "title"
+          }
+        }
+      ]
+    },
+
+    "EnablePasswordFlow": false,
+
+    "EnableTokenExchange": false,
+    "TokenExchangeAllowImpersonation": false,
+    "TokenExchangeMaxDelegationDepth": 5,
+
+    "LoginPath": "/login",
+    "ConsentPath": "/consent",
+    "MfaPath": "/mfa",
+    "MfaRecoveryPath": "/mfa/recovery",
+    "OtpCooldown": "00:01:00",
+    "OtpMaxPerHour": 5,
+    "MfaLockoutClockSkew": "00:00:05",
+
+    "RecoveryCodePepper": null,
+    "RecoveryCodePbkdf2Iterations": 600000,
+
+    "LoginTitle": "Sign In",
+    "LogoUrl": null,
+    "PrimaryColor": "#2563eb",
+    "PrimaryColorHover": "#1d4ed8",
+    "CustomCss": null,
+
+    "EnableScim": false,
+    "ScimScope": "scim",
+
+    "EnableFederation": false,
+    "FederationProviders": [
+      {
+        "//": "Example placeholder — remove or replace with real providers.",
+        "ProviderId": "google",
+        "DisplayName": "Google",
+        "Authority": "https://accounts.google.com",
+        "ClientId": "REPLACE_ME",
+        "ClientSecret": "REPLACE_ME",
+        "Scopes": [ "openid", "profile", "email" ],
+        "AutoProvision": true,
+        "Priority": 100
+      }
+    ],
+
+    "ReverseProxies": {
+      "//": [
+        "Secure-by-default: TrustForwardedFor=false ignores X-Forwarded-For entirely",
+        "and uses the socket IP as the client IP. Enable ONLY when behind a trusted",
+        "proxy whose IPs are listed below — otherwise per-IP rate limits can be spoofed.",
+        "",
+        "Format:",
+        "  KnownProxies  — exact IPv4/IPv6 addresses of trusted reverse proxies.",
+        "  KnownNetworks — CIDR ranges (string 'address/prefix'), e.g. '10.0.0.0/8'.",
+        "",
+        "Templates (REPLACE_ME — uncomment and adjust before enabling):",
+        "  \"KnownProxies\":  [ \"10.0.0.1\", \"203.0.113.7\" ],",
+        "  \"KnownNetworks\": [ \"10.0.0.0/8\", \"192.168.0.0/16\", \"fd00::/8\" ]"
+      ],
+      "TrustForwardedFor": false,
+      "KnownProxies": [],
+      "KnownNetworks": []
+    },
+
+    "RateLimit": {
+      "//": "C1: per-IP and per-(IP+username) throttling on /connect/token and /login.",
+      "Enabled": true,
+      "PerIpPerMinute": 30,
+      "PerIpUsernameFailures": 5,
+      "PerIpUsernameWindow": "00:15:00",
+      "DefaultRetryAfterSeconds": 60,
+      "Backend": "memory",
+      "RedisConnectionString": null,
+      "RedisKeyPrefix": "redb:identity:rl:"
+    },
+
+    "Validation": {
+      "//": [
+        "Server-side input-length limits applied by management & registration processors.",
+        "Regex overrides: leave null to use the source-generated defaults shown in comments.",
+        "NOTE: password length/policy lives in 'PasswordPolicy' below — Min/MaxPasswordLength",
+        "here remain only for legacy non-password fields (client_secret length sanity etc.)."
+      ],
+      "MaxIdentifierLength": 128,
+      "MaxDisplayNameLength": 256,
+      "MaxDescriptionLength": 1024,
+      "MinPasswordLength": 8,
+      "MaxPasswordLength": 512,
+      "IdentifierPattern": null,
+      "//IdentifierPatternDefault": "^[a-zA-Z0-9\\-_.]+$",
+      "EmailPattern": null,
+      "//EmailPatternDefault": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+      "PhonePattern": null,
+      "//PhonePatternDefault": "^\\+[1-9]\\d{1,14}$"
+    },
+
+    "PasswordPolicy": {
+      "//": [
+        "H10 — server-side password policy applied by:",
+        "  • POST   /api/v1/identity/users         (admin Create)",
+        "  • PUT    /api/v1/identity/users/{id}/password  (admin Change)",
+        "  • PUT    /me/password                    (self-service)",
+        "  • POST   /scim/v2/Users  + PATCH         (SCIM)",
+        "Defaults are STRICT (NIST SP 800-63B / OWASP ASVS 4.0.3 §2.1).",
+        "Each knob is overridable through the standard 5-layer Tsak pipeline, e.g.:",
+        "  Tsak__Contexts__identity__Override__Identity__PasswordPolicy__MinLength=14",
+        "Set HistoryCount=0 to disable history checks entirely.",
+        "Set MaxAge='00:00:00' to disable forced password expiration on login.",
+        "Set BreachCheckEnabled=true ONLY when a checker is registered (e.g. via the",
+        "redb.Identity.PasswordPolicy.Hibp companion package); otherwise the flag is a no-op."
+      ],
+      "MinLength": 12,
+      "MaxLength": 512,
+      "RequireDigit": true,
+      "RequireUppercase": true,
+      "RequireLowercase": true,
+      "RequireSpecial": false,
+      "SpecialChars": "!@#$%^&*()-_=+[]{}|;:,.<>?/`~\"'\\\\",
+      "HistoryCount": 5,
+      "MaxAge": "90.00:00:00",
+      "BreachCheckEnabled": false
+    },
+
+    "FederationState": {
+      "//": [
+        "C6 — hardening of the federation state parameter (encrypted with DataProtection).",
+        "StateMaxAge: TTL for the encrypted blob (HH:mm:ss). Issued-at timestamp is checked against this.",
+        "RequireOneTimeUse: reject replay of the same state blob (jti tracked in the nonce store).",
+        "RequireBrowserBinding: tie the state to a per-flow cookie (set on /challenge, verified on /callback).",
+        "Backend: 'memory' (default; per-process) or 'redis' (cluster-safe; required behind multiple instances).",
+        "RedisConnectionString: optional override; falls back to RateLimit.RedisConnectionString when null."
+      ],
+      "StateMaxAge": "00:05:00",
+      "RequireOneTimeUse": true,
+      "RequireBrowserBinding": false,
+      "BindingCookieName": "redb_fed_b",
+      "Backend": "memory",
+      "RedisConnectionString": null,
+      "RedisKeyPrefix": "redb:identity:fed:nonce:"
+    }
+  }
+}

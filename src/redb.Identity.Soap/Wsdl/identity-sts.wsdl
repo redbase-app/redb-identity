@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  WS-Trust 1.3 security token service for redb.Identity.
+
+  Four operations on one address, distinguished by the WS-Addressing Action, which is what the
+  specification says and what stub generators expect. The messages are the generic RST/RSTR pair: a
+  WS-Trust client builds the request body itself and does not need a schema for every field, so the
+  contract stays readable instead of restating the OASIS schema inline.
+
+  The soap:address below is rewritten to the caller's own URL when the consumer serves this document,
+  so the copy fetched from a running service always points at that service.
+-->
+<wsdl:definitions
+    name="RedbIdentitySecurityTokenService"
+    targetNamespace="urn:redb:identity:sts"
+    xmlns:tns="urn:redb:identity:sts"
+    xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+    xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:wst="http://docs.oasis-open.org/ws-sx/ws-trust/200512"
+    xmlns:wsp="http://www.w3.org/ns/ws-policy"
+    xmlns:wsam="http://www.w3.org/2007/05/addressing/metadata">
+
+  <wsdl:types>
+    <xsd:schema targetNamespace="urn:redb:identity:sts">
+      <xsd:import namespace="http://docs.oasis-open.org/ws-sx/ws-trust/200512"
+                  schemaLocation="http://docs.oasis-open.org/ws-sx/ws-trust/200512/ws-trust-1.3.xsd" />
+    </xsd:schema>
+  </wsdl:types>
+
+  <wsdl:message name="RequestSecurityTokenMsg">
+    <wsdl:part name="request" element="wst:RequestSecurityToken" />
+  </wsdl:message>
+
+  <wsdl:message name="RequestSecurityTokenResponseMsg">
+    <wsdl:part name="response" element="wst:RequestSecurityTokenResponseCollection" />
+  </wsdl:message>
+
+  <wsdl:message name="RequestSecurityTokenResponseSingleMsg">
+    <wsdl:part name="response" element="wst:RequestSecurityTokenResponse" />
+  </wsdl:message>
+
+  <wsdl:portType name="ISecurityTokenService">
+
+    <!-- Issue: a token for the caller, from the client credentials in the WS-Security header. -->
+    <wsdl:operation name="Issue">
+      <wsdl:input  message="tns:RequestSecurityTokenMsg"
+                   wsam:Action="http://docs.oasis-open.org/ws-sx/ws-trust/200512/RST/Issue" />
+      <wsdl:output message="tns:RequestSecurityTokenResponseMsg"
+                   wsam:Action="http://docs.oasis-open.org/ws-sx/ws-trust/200512/RSTRC/IssueFinal" />
+    </wsdl:operation>
+
+    <!-- Validate: is this token good. The answer is a status, not the introspection document. -->
+    <wsdl:operation name="Validate">
+      <wsdl:input  message="tns:RequestSecurityTokenMsg"
+                   wsam:Action="http://docs.oasis-open.org/ws-sx/ws-trust/200512/RST/Validate" />
+      <wsdl:output message="tns:RequestSecurityTokenResponseSingleMsg"
+                   wsam:Action="http://docs.oasis-open.org/ws-sx/ws-trust/200512/RSTR/ValidateFinal" />
+    </wsdl:operation>
+
+    <!-- Cancel: revocation. RFC 7009 makes a well-formed request always succeed. -->
+    <wsdl:operation name="Cancel">
+      <wsdl:input  message="tns:RequestSecurityTokenMsg"
+                   wsam:Action="http://docs.oasis-open.org/ws-sx/ws-trust/200512/RST/Cancel" />
+      <wsdl:output message="tns:RequestSecurityTokenResponseSingleMsg"
+                   wsam:Action="http://docs.oasis-open.org/ws-sx/ws-trust/200512/RSTR/CancelFinal" />
+    </wsdl:operation>
+
+    <!-- Renew: a fresh token from a refresh token carried in the RenewTarget. -->
+    <wsdl:operation name="Renew">
+      <wsdl:input  message="tns:RequestSecurityTokenMsg"
+                   wsam:Action="http://docs.oasis-open.org/ws-sx/ws-trust/200512/RST/Renew" />
+      <wsdl:output message="tns:RequestSecurityTokenResponseMsg"
+                   wsam:Action="http://docs.oasis-open.org/ws-sx/ws-trust/200512/RSTRC/RenewFinal" />
+    </wsdl:operation>
+
+  </wsdl:portType>
+
+  <wsdl:binding name="SecurityTokenServiceBinding" type="tns:ISecurityTokenService">
+    <soap:binding transport="http://schemas.xmlsoap.org/soap/http" style="document" />
+
+    <wsdl:operation name="Issue">
+      <soap:operation soapAction="http://docs.oasis-open.org/ws-sx/ws-trust/200512/RST/Issue" style="document" />
+      <wsdl:input><soap:body use="literal" /></wsdl:input>
+      <wsdl:output><soap:body use="literal" /></wsdl:output>
+    </wsdl:operation>
+
+    <wsdl:operation name="Validate">
+      <soap:operation soapAction="http://docs.oasis-open.org/ws-sx/ws-trust/200512/RST/Validate" style="document" />
+      <wsdl:input><soap:body use="literal" /></wsdl:input>
+      <wsdl:output><soap:body use="literal" /></wsdl:output>
+    </wsdl:operation>
+
+    <wsdl:operation name="Cancel">
+      <soap:operation soapAction="http://docs.oasis-open.org/ws-sx/ws-trust/200512/RST/Cancel" style="document" />
+      <wsdl:input><soap:body use="literal" /></wsdl:input>
+      <wsdl:output><soap:body use="literal" /></wsdl:output>
+    </wsdl:operation>
+
+    <wsdl:operation name="Renew">
+      <soap:operation soapAction="http://docs.oasis-open.org/ws-sx/ws-trust/200512/RST/Renew" style="document" />
+      <wsdl:input><soap:body use="literal" /></wsdl:input>
+      <wsdl:output><soap:body use="literal" /></wsdl:output>
+    </wsdl:operation>
+
+  </wsdl:binding>
+
+  <wsdl:service name="RedbIdentitySecurityTokenService">
+    <wsdl:port name="SecurityTokenServicePort" binding="tns:SecurityTokenServiceBinding">
+      <!-- Rewritten to the caller's URL when served from a running endpoint. -->
+      <soap:address location="https://localhost:5021/sts" />
+    </wsdl:port>
+  </wsdl:service>
+
+</wsdl:definitions>

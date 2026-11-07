@@ -1,0 +1,157 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+@*
+    UiTabBar — horizontal tab strip in the WSO2 IS 7.x style.
+
+    The component owns the active-tab state and synchronises it with the URL
+    fragment (#tab=…). Parents bind to ActiveTab and render their own content
+    body underneath, e.g.:
+
+        <UiTabBar @bind-ActiveTab="_tab" Tabs="_tabs" />
+        @switch (_tab)
+        {
+            case "general":   <ApplicationGeneralTab   App="@app" /> break;
+            case "protocol":  <ApplicationProtocolTab  App="@app" /> break;
+            …
+        }
+        @code {
+            private string _tab = "general";
+            private readonly UiTabBar.Tab[] _tabs = new[]
+            {
+                new UiTabBar.Tab("general",   "General"),
+                new UiTabBar.Tab("protocol",  "Protocol"),
+                new UiTabBar.Tab("attributes","User Attributes"),
+                …
+            };
+        }
+
+    Behaviours:
+        * First render → JS reads window.location.hash, sets the active tab if
+          the fragment carries one (deep-linking).
+        * Tab click → calls window.rdbTabBar.setTab(id) which replaceState's
+          the fragment without polluting history.
+        * Browser back / hashchange → JS pushes the new tab id back into
+          Blazor via OnHashChanged so the strip and the body stay in sync.
+
+    The strip rolls horizontally on narrow viewports; tab buttons never wrap.
+*@
+
+<nav class="ui-tab-bar" role="tablist" aria-label="@AriaLabel">
+    @foreach (var tab in Tabs)
+    {
+        var isActive = string.Equals(tab.Id, ActiveTab, StringComparison.Ordinal);
+        <button type="button"
+                role="tab"
+                class="ui-tab-bar__tab @(isActive ? "ui-tab-bar__tab--active" : "")"
+                aria-selected="@(isActive ? "true" : "false")"
+                disabled="@tab.Disabled"
+                @onclick="() => SelectAsync(tab.Id)">
+            @if (!string.IsNullOrEmpty(tab.Icon))
+            {
+                <RdbIcon Name="@tab.Icon" Size="14" />
+            }
+            <span>@tab.Label</span>
+            @if (tab.BadgeCount is { } count && count > 0)
+            {
+                <span class="ui-tab-bar__count">@count</span>
+            }
+        </button>
+    }
+</nav>
+
+@code {
+    /// <summary>
+    /// Tab descriptor. Id is the URL-fragment-safe identifier (lowercase, hyphens
+    /// only). Label is the visible text. Icon (optional) is an RdbIcon name.
+    /// Disabled (optional) renders the tab non-interactive. BadgeCount (optional)
+    /// shows a small numeric badge after the label.
+    /// </summary>
+    public sealed record Tab(
+        string Id,
+        string Label,
+        string? Icon = null,
+        bool Disabled = false,
+        int? BadgeCount = null);
+
+    /// <summary>
+    /// Ordered tab descriptors. Required.
+    /// </summary>
+    [Parameter, EditorRequired] public IReadOnlyList<Tab> Tabs { get; set; } = Array.Empty<Tab>();
+
+    /// <summary>
+    /// Currently selected tab id. Bind to a string state in the parent.
+    /// </summary>
+    [Parameter] public string ActiveTab { get; set; } = "";
+
+    /// <summary>
+    /// Notification when the user picks a different tab (or the URL fragment
+    /// changes). Used for two-way binding via @bind-ActiveTab.
+    /// </summary>
+    [Parameter] public EventCallback<string> ActiveTabChanged { get; set; }
+
+    /// <summary>
+    /// Accessible label for the &lt;nav&gt; landmark — defaults to "Tabs".
+    /// Use a more specific label when several tab-bars coexist on one page.
+    /// </summary>
+    [Parameter] public string AriaLabel { get; set; } = "Tabs";
+
+    private DotNetObjectReference<UiTabBar>? _selfRef;
+    private string? _subscriptionId;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        try
+        {
+            var hashTab = await JS.InvokeAsync<string?>("rdbTabBar.getTab");
+            if (!string.IsNullOrEmpty(hashTab) && Tabs.Any(t => t.Id == hashTab) && hashTab != ActiveTab)
+            {
+                ActiveTab = hashTab;
+                await ActiveTabChanged.InvokeAsync(hashTab);
+                StateHasChanged();
+            }
+
+            _selfRef = DotNetObjectReference.Create(this);
+            _subscriptionId = await JS.InvokeAsync<string>("rdbTabBar.subscribe", _selfRef);
+        }
+        catch
+        {
+            /* JS not loaded yet — caller will operate without URL deep-linking. */
+        }
+    }
+
+    /// <summary>
+    /// Called by JS when the URL hash changes (e.g. browser Back across tabs).
+    /// </summary>
+    [JSInvokable]
+    public async Task OnHashChanged(string? tab)
+    {
+        if (!string.IsNullOrEmpty(tab) && Tabs.Any(t => t.Id == tab) && tab != ActiveTab)
+        {
+            ActiveTab = tab;
+            await ActiveTabChanged.InvokeAsync(tab);
+            StateHasChanged();
+        }
+    }
+
+    private async Task SelectAsync(string tabId)
+    {
+        if (tabId == ActiveTab) return;
+        ActiveTab = tabId;
+        await ActiveTabChanged.InvokeAsync(tabId);
+        try { await JS.InvokeVoidAsync("rdbTabBar.setTab", tabId); }
+        catch { /* JS missing — best-effort, state still updated client-side. */ }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_subscriptionId is not null)
+        {
+            try { await JS.InvokeVoidAsync("rdbTabBar.unsubscribe", _subscriptionId); }
+            catch { /* circuit gone — nothing to clean. */ }
+        }
+        _selfRef?.Dispose();
+    }
+}
