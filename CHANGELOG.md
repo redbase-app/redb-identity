@@ -38,6 +38,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Pending changes live in `changelog/unreleased/` until the release; `pwsh scripts/changelog.ps1 -Preview` shows them.
 
+## [4.7.1] — 2026-11-11
+
+### Security
+
+- **System.Formats.Cbor is pinned to the patched 9.0.24.** The WebAuthn dependency brought in 9.0.0, which is affected by
+  CVE-2026-118747 (denial of service while parsing CBOR). The packages now name the patched version; the server
+  archives ship the .NET 10.0.15 runtime, which carries the ASP.NET Core fix for CVE-2026-114147. Packages: `redb.Identity.Core`.
+
+### Changed
+
+- **Built on redb 4.7.1, redb.Route 4.7.1 and redb.Tsak 4.7.1.** The images and archives take the fixes of those
+  releases, among them the SQL Server module version that made a start without schema rights fail.
+
+### Fixed
+
+- **On PostgreSQL the loser of a concurrent create is answered 409, not 500.** When two calls created the same
+  record at once (the bootstrap administrator's client, a federation provider), the second one hit the unique key
+  and was told `server_error`. It now gets `409 duplicate`, as on SQL Server and SQLite. Nothing was written twice. Packages: `redb.Identity.Core`.
+
 ## [4.7.0] — 2026-11-06
 
 ### Changed

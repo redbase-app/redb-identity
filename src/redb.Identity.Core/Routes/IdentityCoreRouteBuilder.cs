@@ -83,10 +83,11 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         // A unique-constraint violation collides on the third attempt exactly as it did on the first, so
         // RetryWhile keeps the retries for real outages. And it is a conflict, not an outage: answering
         // 503 tells the caller "the database is down, come back later" about something only they can fix
-        // and that will never fix itself. Processors that already catch this — applications, claim scopes,
-        // bootstrap, idempotency — never reach here; users, groups, roles and SCIM do, and used to be told
-        // the database was unavailable. A SCIM demo reusing one e-mail address was reported that way, and
-        // the hunt started there instead of ending there.
+        // and that will never fix itself. This handler sees the violations the driver raises itself: the
+        // _users table (login, UX_users_email), reached by users and SCIM. A SCIM demo reusing one e-mail
+        // address used to be told the database was unavailable, and the hunt started there instead of
+        // ending there. A violated [RedbUnique] key arrives as RedbUniqueViolationException and has its
+        // own handler below.
         OnException<DbException>()
             .MaximumRedeliveries(MaxDbRedeliveries)
             .RedeliveryDelay(TimeSpan.FromMilliseconds(200))
@@ -109,16 +110,24 @@ public class IdentityCoreRouteBuilder : RouteBuilder
 
                 if (IdentityProcessorHelpers.IsUniqueViolation(e.Exception))
                 {
-                    // Same vocabulary the management processors already use for a duplicate, so a caller
-                    // sees one answer for one situation regardless of which surface produced it.
-                    outMsg.Body = ErrorResponse("duplicate", "A record with these values already exists.");
-                    outMsg.Headers["redbHttp.ResponseCode"] = 409;
+                    SetDuplicate(outMsg);
                     return;
                 }
 
                 outMsg.Body = ErrorResponse("server_error", "Database temporarily unavailable.");
                 outMsg.Headers["redbHttp.ResponseCode"] = 503;
             });
+
+        // A violated [RedbUnique] key that the processor did not catch itself: the loser of a concurrent
+        // create, whose check before the insert saw nothing. The typed exception needs a handler of its
+        // own. It carries the driver exception as its cause, but the handler is chosen by the closest
+        // type over the whole chain: RedbUniqueViolationException is one step from Exception, while
+        // Npgsql's PostgresException is two steps from DbException, so on PostgreSQL the catch-all below
+        // won and the caller was told 500 about a conflict. Not retried: it collides again every time.
+        OnException<redb.Core.Exceptions.RedbUniqueViolationException>()
+            .Handled()
+            .LogStackTrace()
+            .Process(e => SetDuplicate(EnsureOut(e)));
 
         // Catch-all: unexpected errors → generic server_error, no internals leaked
         OnException<Exception>()
@@ -1305,6 +1314,17 @@ public class IdentityCoreRouteBuilder : RouteBuilder
             ["error"] = error,
             ["error_description"] = description
         };
+
+    /// <summary>
+    /// The answer to a unique-key violation that reached the builder-level handlers: 409 with the same
+    /// vocabulary the management processors use for a duplicate, so a caller sees one answer for one
+    /// situation regardless of which surface produced it.
+    /// </summary>
+    private static void SetDuplicate(IMessage outMsg)
+    {
+        outMsg.Body = ErrorResponse("duplicate", "A record with these values already exists.");
+        outMsg.Headers["redbHttp.ResponseCode"] = 409;
+    }
 
     private static bool IsOAuthError(Exception? ex)
         => ex?.Data.Contains("error") == true;

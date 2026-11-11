@@ -311,4 +311,4 @@ validation, not a replacement: an unlisted certificate is rejected even when its
 | `doc/gRPC/CHECKLIST.md` | verifiable state of each phase |
 | `doc/gRPC/OPEN_QUESTIONS.md` | decisions taken and their reasoning |
 | `redb.Identity.Contracts/Protos/identity.v1.proto` | the published contract |
-| `C:\Work\yaml\grpc\README.md` | the interop fixture: an independent `@grpc/grpc-js` client generated from that contract |
+| `GrpcIdentityInteropTests` | the interop check: an independent `@grpc/grpc-js` client in a container, generated from that contract |

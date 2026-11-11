@@ -22,8 +22,10 @@ internal static partial class IdentityProcessorHelpers
     ///   until the Route-side fix ships).</item>
     /// </list>
     /// A typed <c>RedbUniqueViolationException</c> also satisfies this predicate — the
-    /// driver exception rides its inner chain — so the route-level mapping covers both
-    /// worlds with one check.
+    /// driver exception rides its inner chain. That does not bring it to the route-level
+    /// <c>DbException</c> handler, though: the handler is chosen by the closest type over the
+    /// chain, and on PostgreSQL the typed exception lands in the catch-all. It has its own
+    /// handler in <c>IdentityCoreRouteBuilder</c>, with the same 409 answer.
     /// </summary>
     public static bool IsUniqueViolation(Exception? ex)
     {
