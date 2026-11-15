@@ -18,7 +18,7 @@ Two channels, either is fine:
 1. **GitHub private advisory** (preferred) —
    [Report a vulnerability](https://github.com/redbase-app/redb-identity/security/advisories/new).
    Anyone with a GitHub account can file one; it stays private between you and the maintainer.
-2. **Email** — **security@redbase.app**
+2. **Email** — **support@redbase.app**
 
 Please include:
 
