@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using redb.Core;
 using redb.Identity.Core.Configuration;
 
 namespace redb.Identity.Core.Security;
@@ -30,10 +31,25 @@ public sealed class DefaultPasswordPolicyValidator : IPasswordPolicyValidator
     }
 
     /// <inheritdoc />
-    public async ValueTask<PasswordValidationResult> ValidateAsync(
+    public ValueTask<PasswordValidationResult> ValidateAsync(
         string? password,
         long? userId = null,
         CancellationToken ct = default)
+        => ValidateCoreAsync(password, userId, redb: null, ct);
+
+    /// <inheritdoc />
+    public ValueTask<PasswordValidationResult> ValidateAsync(
+        string? password,
+        long? userId,
+        IRedbService redb,
+        CancellationToken ct = default)
+        => ValidateCoreAsync(password, userId, redb ?? throw new System.ArgumentNullException(nameof(redb)), ct);
+
+    private async ValueTask<PasswordValidationResult> ValidateCoreAsync(
+        string? password,
+        long? userId,
+        IRedbService? redb,
+        CancellationToken ct)
     {
         var errors = new List<string>();
 
@@ -79,8 +95,9 @@ public sealed class DefaultPasswordPolicyValidator : IPasswordPolicyValidator
         // ── Phase 2: history reuse ──
         if (_history is not null && _options.HistoryCount > 0 && userId.HasValue)
         {
-            var reused = await _history.IsRecentlyUsedAsync(
-                userId.Value, password, _options.HistoryCount, ct).ConfigureAwait(false);
+            var reused = redb is null
+                ? await _history.IsRecentlyUsedAsync(userId.Value, password, _options.HistoryCount, ct).ConfigureAwait(false)
+                : await _history.IsRecentlyUsedAsync(redb, userId.Value, password, _options.HistoryCount, ct).ConfigureAwait(false);
             if (reused)
                 errors.Add($"Password matches one of the last {_options.HistoryCount} passwords");
         }
@@ -109,6 +126,15 @@ public interface IPasswordHistoryStore
     /// <summary>Returns <c>true</c> if <paramref name="password"/> matches any of the
     /// last <paramref name="count"/> hashes recorded for <paramref name="userId"/>.</summary>
     Task<bool> IsRecentlyUsedAsync(long userId, string password, int count, CancellationToken ct);
+
+    /// <summary>
+    /// The same check through the caller's <paramref name="redb"/>: what a processor on a transacted route
+    /// calls, so the lookup runs on the route's connection and does not open a second one inside its
+    /// transaction (a second connection promotes it to a distributed transaction, which PostgreSQL refuses
+    /// unless max_prepared_transactions is set). A store without its own implementation keeps the check above.
+    /// </summary>
+    Task<bool> IsRecentlyUsedAsync(IRedbService redb, long userId, string password, int count, CancellationToken ct)
+        => IsRecentlyUsedAsync(userId, password, count, ct);
 
     /// <summary>Records a new password hash for the user and trims older entries beyond
     /// <paramref name="keep"/>.</summary>

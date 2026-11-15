@@ -603,7 +603,7 @@ internal sealed class ScimUserProcessor : IProcessor
         if (passwordChanged)
         {
             var pwErr = await IdentityProcessorHelpers.ValidatePasswordPolicyAsync(
-                exchange, _context, newPassword, coreUser.Id, "password", ct);
+                exchange, _context, redb, newPassword, coreUser.Id, "password", ct);
             if (pwErr != null) { SetScimError(exchange, 400, "invalidValue", pwErr); return; }
             await redb.UserProvider.SetPasswordAsync(coreUser, newPassword!);
             await IdentityProcessorHelpers.RecordPasswordHistoryAsync(

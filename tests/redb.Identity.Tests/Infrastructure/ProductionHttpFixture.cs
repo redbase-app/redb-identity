@@ -44,6 +44,8 @@ public sealed class ProductionHttpFixture : IAsyncLifetime
     private ServiceProvider _sp = null!;
     private RouteContext _ctx = null!;
 
+    /// <summary>The named redb instance the routes use, as a deployment's context.json names one.</summary>
+    public const string RouteRedbName = "identity-e2e";
     public const string TestClientId = "e2e-confidential";
     public const string TestClientSecret = "e2e-secret-value-1234";
     public const string TestPublicClientId = "e2e-public-pkce";
@@ -314,6 +316,12 @@ public sealed class ProductionHttpFixture : IAsyncLifetime
         // *** PRODUCTION bootstrap — real OpenIddict stores + pipeline ***
         services.AddRedbIdentityServer(identityOptions);
 
+        // The password history store refuses, inside a route transaction, the calls that open a connection of
+        // their own: a deployment promotes such a transaction to a distributed one, which stock PostgreSQL refuses.
+        services.AddSingleton<redb.Identity.Core.Security.PropsPasswordHistoryStore>();
+        services.AddSingleton<redb.Identity.Core.Security.IPasswordHistoryStore>(sp =>
+            new InRouteTransactionHistoryStoreGuard(sp.GetRequiredService<redb.Identity.Core.Security.PropsPasswordHistoryStore>()));
+
         // N-4 (Session C): capture transactional e-mails in memory so tests can assert
         // delivery + extract reset tokens. Registered AFTER AddRedbIdentityServer because
         // Core leaves IEmailNotificationChannel unbound by default (production hosts pick
@@ -398,6 +406,12 @@ public sealed class ProductionHttpFixture : IAsyncLifetime
         IProcessor? scimAuth = identityOptions.Features.EnableScim
             ? new ManagementBearerAuthProcessor(validationFactory, validationDispatcher, identityOptions.ScimScope)
             : null;
+
+        // A deployment names its redb instance (context.json RedbInstanceName), and only then do the mutating
+        // routes run in a route transaction (WithRedbTx). Without the name this host ran every route without one,
+        // so nothing here could show what happens inside it.
+        identityOptions.RedbInstanceName = RouteRedbName;
+        redb.Route.RedbCore.Extensions.RedbRouteExtensions.RegisterRedbService(_ctx, RouteRedbName, _sp.GetRequiredService<IRedbService>());
 
         _ctx.AddRoutes(new IdentityCoreRouteBuilder(_sp, Options.Create(identityOptions),
             Options.Create(AuditOptions()),

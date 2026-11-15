@@ -54,6 +54,32 @@ public class PasswordPolicyEnforcementTests
     }
 
     [Fact]
+    public async Task AdminResetAndAdminChange_CheckAndRecordTheHistory_OnTheRoutesConnection()
+    {
+        // Both run on the transacted manage-users route. Their history lookup and record used to open a
+        // connection of their own inside the route's transaction: in a deployment that promoted it to a
+        // distributed transaction, stock PostgreSQL refused it, and the caller got 400 "Id is required".
+        var (_, id, originalPwd) = await CreateUserAsync();
+        var reset = $"Str0ng!R{Guid.NewGuid():N}".Substring(0, 16);
+        var changed = $"Str0ng!C{Guid.NewGuid():N}".Substring(0, 16);
+        var before = InRouteTransactionHistoryStoreGuard.Violations.Count;
+
+        await AdminResetPasswordAsync(id, reset).Expect(HttpStatusCode.OK, "the admin reset must succeed");
+        await ChangePasswordAsync(id, reset, changed).Expect(HttpStatusCode.OK, "the admin change must succeed");
+
+        InRouteTransactionHistoryStoreGuard.Violations.Count.Should().Be(before,
+            "no history call may open its own connection inside the route transaction: {0}",
+            string.Join("; ", InRouteTransactionHistoryStoreGuard.Violations));
+
+        // The history was read and written on the route's connection: both earlier passwords are refused now.
+        var back = await AdminResetPasswordAsync(id, reset);
+        back.IsSuccessStatusCode.Should().BeFalse("the reset password is in the history; body={0}", await back.Content.ReadAsStringAsync());
+        (await back.Content.ReadAsStringAsync()).Should().Contain("last", "the refusal names the history window");
+        var original = await AdminResetPasswordAsync(id, originalPwd);
+        original.IsSuccessStatusCode.Should().BeFalse("the original password is in the history too");
+    }
+
+    [Fact]
     public async Task ChangePassword_BeyondHistoryWindow_Allowed()
     {
         // Default HistoryCount = 5 → after 6 distinct rotations, the original drops off
@@ -230,6 +256,16 @@ public class PasswordPolicyEnforcementTests
                 return ExtractId(user);
         }
         return 0;
+    }
+
+    private async Task<HttpResponseMessage> AdminResetPasswordAsync(long userId, string newPwd)
+    {
+        var req = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/identity/users/{userId}/admin-reset-password")
+        {
+            Content = JsonContent.Create(new { id = userId, newPassword = newPwd })
+        };
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _fx.ManagementToken);
+        return await _http.SendAsync(req);
     }
 
     private async Task<HttpResponseMessage> ChangePasswordAsync(long userId, string oldPwd, string newPwd)

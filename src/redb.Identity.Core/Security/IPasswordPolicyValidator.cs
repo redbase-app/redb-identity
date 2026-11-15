@@ -1,5 +1,6 @@
 using System.Threading;
 using System.Threading.Tasks;
+using redb.Core;
 
 namespace redb.Identity.Core.Security;
 
@@ -22,6 +23,19 @@ public interface IPasswordPolicyValidator
         string? password,
         long? userId = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// The same validation with the database reads (the history lookup) through <paramref name="redb"/>: what a
+    /// processor on a transacted route calls with the exchange's <see cref="IRedbService"/>, so no second
+    /// connection opens inside the route's transaction. A validator without its own implementation validates
+    /// as above.
+    /// </summary>
+    ValueTask<PasswordValidationResult> ValidateAsync(
+        string? password,
+        long? userId,
+        IRedbService redb,
+        CancellationToken ct = default)
+        => ValidateAsync(password, userId, ct);
 }
 
 /// <summary>

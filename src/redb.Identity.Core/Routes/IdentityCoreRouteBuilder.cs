@@ -93,6 +93,10 @@ public class IdentityCoreRouteBuilder : RouteBuilder
             .RedeliveryDelay(TimeSpan.FromMilliseconds(200))
             .UseExponentialBackOff()
             .BackOffMultiplier(2.0)
+            // A retry starts the route over, and by then the body is what the steps before the failure left in it:
+            // on a transacted route that fails at commit, the processor's own answer. Replayed as the request, it
+            // came back as a validation error ("Id is required") for an outage. The retry gets the request again.
+            .UseOriginalBody()
             // The bound is carried INSIDE the predicate, and that is not a duplicate of the line above.
             // RetryWhile does not narrow MaximumRedeliveries — it REPLACES it: OnExceptionProcessor
             // takes the predicate instead of the count check, inside a `while (true)` with no outer

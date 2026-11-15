@@ -44,7 +44,26 @@ public sealed class PropsPasswordHistoryStore : IPasswordHistoryStore
         await using var scope = _scopeFactory.CreateAsyncScope();
         var redb = scope.ServiceProvider.GetRequiredService<IRedbService>();
         var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
+        return await IsRecentlyUsedCoreAsync(redb, hasher, userId, password, count).ConfigureAwait(false);
+    }
 
+    /// <inheritdoc />
+    public async Task<bool> IsRecentlyUsedAsync(IRedbService redb, long userId, string password, int count, CancellationToken ct)
+    {
+        System.ArgumentNullException.ThrowIfNull(redb);
+        if (userId <= 0 || count <= 0 || string.IsNullOrEmpty(password))
+            return false;
+
+        // The scope only lends the hasher (a singleton): no IRedbService is resolved from it, so no
+        // connection opens besides the caller's.
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
+        return await IsRecentlyUsedCoreAsync(redb, hasher, userId, password, count).ConfigureAwait(false);
+    }
+
+    private static async Task<bool> IsRecentlyUsedCoreAsync(
+        IRedbService redb, IPasswordHasher hasher, long userId, string password, int count)
+    {
         // Pull the most recent N history rows for the user; ordering by CreatedAt desc.
         // Argon2id verify is O(~100ms each), so we cap the work by `count` upstream.
         var rows = await redb.Query<PasswordHistoryProps>()

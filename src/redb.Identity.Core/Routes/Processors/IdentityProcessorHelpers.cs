@@ -120,9 +120,25 @@ internal static partial class IdentityProcessorHelpers
     /// success or a single-line joined error message suitable for
     /// <c>error_description</c> fields.
     /// </summary>
+    public static ValueTask<string?> ValidatePasswordPolicyAsync(
+        IExchange exchange,
+        IRouteContext context,
+        string? password,
+        long? userId,
+        string fieldName = "Password",
+        CancellationToken ct = default)
+        => ValidatePasswordPolicyAsync(exchange, context, redb: null, password, userId, fieldName, ct);
+
+    /// <summary>
+    /// The same gate for a processor on a transacted route: the history lookup runs through
+    /// <paramref name="redb"/>, the exchange's <see cref="IRedbService"/>, instead of a scope of the store's own.
+    /// A second connection inside the route's transaction promotes it to a distributed one, which PostgreSQL
+    /// refuses unless max_prepared_transactions is set (doc/PERF_RULES.md rules 1, 5, 6).
+    /// </summary>
     public static async ValueTask<string?> ValidatePasswordPolicyAsync(
         IExchange exchange,
         IRouteContext context,
+        IRedbService? redb,
         string? password,
         long? userId,
         string fieldName = "Password",
@@ -142,7 +158,9 @@ internal static partial class IdentityProcessorHelpers
         if (validator is null)
             return ValidatePassword(password, fieldName);
 
-        var result = await validator.ValidateAsync(password, userId, ct).ConfigureAwait(false);
+        var result = redb is null
+            ? await validator.ValidateAsync(password, userId, ct).ConfigureAwait(false)
+            : await validator.ValidateAsync(password, userId, redb, ct).ConfigureAwait(false);
         return result.IsValid ? null : result.ToErrorMessage();
     }
 

@@ -476,7 +476,7 @@ internal sealed class UserManagementProcessor : IProcessor
         }
 
         var err = await IdentityProcessorHelpers.ValidatePasswordPolicyAsync(
-            exchange, _context, request.NewPassword, request.Id, "NewPassword", ct);
+            exchange, _context, redb, request.NewPassword, request.Id, "NewPassword", ct);
         if (err != null) { SetError(exchange, "validation_error", err); return; }
 
         if (request.OldPassword == request.NewPassword)
@@ -500,9 +500,11 @@ internal sealed class UserManagementProcessor : IProcessor
             return;
         }
 
-        // H10 — record the new password in history (post-success).
+        // H10 — record the new password in history (post-success), through this exchange's IRedbService: the
+        // route is transacted, and a store opening a connection of its own would promote the transaction to a
+        // distributed one, which PostgreSQL refuses unless max_prepared_transactions is set.
         await IdentityProcessorHelpers.RecordPasswordHistoryAsync(
-            exchange, _context, coreUser.Id, request.NewPassword, ct);
+            exchange, _context, redb, coreUser.Id, request.NewPassword, ct);
 
         // C7 (OWASP Session Management): when a user's password changes, every session
         // that was authenticated with the old password must be invalidated. This also
@@ -541,7 +543,7 @@ internal sealed class UserManagementProcessor : IProcessor
         }
 
         var err = await IdentityProcessorHelpers.ValidatePasswordPolicyAsync(
-            exchange, _context, request.NewPassword, request.Id, "NewPassword", ct);
+            exchange, _context, redb, request.NewPassword, request.Id, "NewPassword", ct);
         if (err != null) { SetError(exchange, "validation_error", err); return; }
 
         var coreUser = await redb.UserProvider.GetUserByIdAsync(request.Id);
@@ -559,9 +561,10 @@ internal sealed class UserManagementProcessor : IProcessor
             return;
         }
 
-        // H10 — record the new password in history (post-success).
+        // H10 — record the new password in history (post-success), through this exchange's IRedbService, as in
+        // ChangePassword.
         await IdentityProcessorHelpers.RecordPasswordHistoryAsync(
-            exchange, _context, coreUser.Id, request.NewPassword, ct);
+            exchange, _context, redb, coreUser.Id, request.NewPassword, ct);
 
         // Same session-revocation semantics as user-initiated change-password
         // (C7 / OWASP Session Management) — every existing session must die so

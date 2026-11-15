@@ -38,6 +38,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Pending changes live in `changelog/unreleased/` until the release; `pwsh scripts/changelog.ps1 -Preview` shows them.
 
+## [4.7.3] — 2026-11-14
+
+### Changed
+
+- **Released alone on redb 4.7.2, redb.Route 4.7.2 and redb.Tsak 4.7.2.** The images sit on the Tsak 4.7.2 bases.
+  The redb-identity-app template still defaults to 4.7.2: set IDENTITY_VERSION=4.7.3 and build the web part with
+  --build-arg IDENTITY_IMAGE=ghcr.io/redbase-app/redb-identity-full:4.7.3.
+
+### Fixed
+
+- **On PostgreSQL, the admin password reset and the admin password change work again.** With the default
+  max_prepared_transactions = 0 they were rolled back and the caller got 400 "Id is required". The password
+  history is now read and written on the route's own connection. Packages: `redb.Identity.Core`.
+
 ## [4.7.2] — 2026-11-13
 
 ### Changed
