@@ -10,8 +10,11 @@ using redb.Identity.Contracts.Registration;
 using redb.Identity.Core.Configuration;
 using redb.Identity.Core.Models;
 using redb.Identity.Core.Routes.Processors;
+using redb.Identity.Http.Processors;
 using redb.Identity.Tests.Infrastructure;
 using redb.Route.Abstractions;
+using redb.Route.Core;
+using redb.Route.Http;
 using Xunit;
 
 namespace redb.Identity.Tests.Security;
@@ -160,5 +163,129 @@ public class AnonymousDcrAdminScopeTests
         await CreateProcessor(Permissive(InitialAccessToken)).Process(exchange);
 
         ErrorBody(exchange)["error"]!.ToString().Should().Be("invalid_token");
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("", null)]
+    [InlineData("", "")]
+    [InlineData(" ", " ")]
+    [InlineData("\t", "")]
+    [InlineData(" ", " ")]
+    public async Task A_blank_initial_access_token_is_not_configured_and_the_floor_applies(string? configured, string? presented)
+    {
+        SetupManager();
+        var exchange = Registration("identity:users:write", bearer: presented);
+
+        await CreateProcessor(Permissive(configured)).Process(exchange);
+
+        ErrorBody(exchange)["error"]!.ToString().Should().Be("invalid_client_metadata",
+            "a blank initial access token is no token: registration is open and administrative scopes are refused");
+        ErrorBody(exchange)["error_description"]!.ToString().Should().Contain("require an authenticated registration");
+        await _manager.DidNotReceive().CreateAsync(Arg.Any<object>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _manager.DidNotReceive().CreateAsync(Arg.Any<object>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task A_blank_initial_access_token_still_serves_ordinary_clients(string configured)
+    {
+        SetupManager();
+        var exchange = Registration("openid profile", bearer: configured);
+
+        await CreateProcessor(Permissive(configured)).Process(exchange);
+
+        (exchange.Out!.Body as IDictionary<string, object?>)?.ContainsKey("error").Should().NotBe(true,
+            "a blank token means open registration, and open registration serves self-service scopes");
+    }
+
+    /// <summary>
+    /// The same over the wire, for every HTTP version a TLS host serves: the HTTP facade's bearer extraction and
+    /// this processor behind a Kestrel endpoint, the initial access token configured as an empty string, and a
+    /// request whose Authorization header carries "Bearer " with nothing after it.
+    /// </summary>
+    [Theory]
+    [InlineData("1.1")]
+    [InlineData("2.0")]
+    public async Task Over_tls_a_blank_initial_access_token_refuses_administrative_scopes(string version)
+    {
+        SetupManager();
+        var processor = CreateProcessor(Permissive(""));
+        var port = FreePort();
+        var (certPath, certPassword) = SelfSignedPfx();
+        try
+        {
+            await using var context = new RouteContext();
+            context.AddComponent(new HttpsComponent { ServerManager = new SharedHttpServerManager(new HttpHostingOptions()) });
+            context.AddRoutes(new RegisterRoute(
+                $"https:POST:127.0.0.1:{port}/connect/register?inOut=true&ssl=true"
+                + $"&sslCertPath={Uri.EscapeDataString(certPath)}&sslCertPassword={Uri.EscapeDataString(certPassword)}",
+                processor));
+            await context.Start();
+
+            using var handler = new SocketsHttpHandler
+            {
+                SslOptions = { RemoteCertificateValidationCallback = (_, _, _, _) => true },
+            };
+            using var http = new HttpClient(handler);
+            using var request = new HttpRequestMessage(System.Net.Http.HttpMethod.Post, $"https://127.0.0.1:{port}/connect/register")
+            {
+                Version = Version.Parse(version),
+                VersionPolicy = HttpVersionPolicy.RequestVersionExact,
+                Content = new StringContent(
+                    """{"client_name":"blank-token","grant_types":["client_credentials"],"scope":"identity:users:write"}""",
+                    System.Text.Encoding.UTF8, "application/json"),
+            };
+            request.Headers.TryAddWithoutValidation("Authorization", "Bearer ");
+
+            using var response = await http.SendAsync(request);
+            var body = await response.Content.ReadAsStringAsync();
+
+            response.Version.Should().Be(Version.Parse(version), "the request must really travel over HTTP/" + version);
+            response.StatusCode.Should().Be(System.Net.HttpStatusCode.BadRequest, body);
+            body.Should().Contain("invalid_client_metadata").And.Contain("require an authenticated registration",
+                "the refusal must come from the floor for anonymous registrants, not from another check");
+            await _manager.DidNotReceive().CreateAsync(Arg.Any<object>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+            await _manager.DidNotReceive().CreateAsync(Arg.Any<object>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            File.Delete(certPath);
+        }
+    }
+
+    private sealed class RegisterRoute(string uri, IProcessor processor) : RouteBuilder
+    {
+        protected override void Configure()
+        {
+            From(uri)
+                .RouteId("test-blank-token-register")
+                .Process(HttpIdentityProcessors.ExtractBearerToken)
+                .Process(processor)
+                .Process(HttpIdentityProcessors.SerializeJsonResponse);
+        }
+    }
+
+    private static int FreePort()
+    {
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
+    }
+
+    private static (string Path, string Password) SelfSignedPfx()
+    {
+        using var rsa = System.Security.Cryptography.RSA.Create(2048);
+        var certificateRequest = new System.Security.Cryptography.X509Certificates.CertificateRequest(
+            "CN=localhost", rsa, System.Security.Cryptography.HashAlgorithmName.SHA256,
+            System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+        using var certificate = certificateRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddHours(1));
+        const string password = "blank-token-test";
+        var path = Path.Combine(Path.GetTempPath(), $"redb-identity-dcr-{Guid.NewGuid():N}.pfx");
+        File.WriteAllBytes(path, certificate.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pfx, password));
+        return (path, password);
     }
 }

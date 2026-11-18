@@ -46,11 +46,22 @@ internal sealed class DynamicRegistrationProcessor : IProcessor
         _logger = loggerFactory?.CreateLogger("DynamicRegistrationProcessor");
     }
 
+    /// <summary>
+    /// The initial access token this deployment requires, or <c>null</c> when none is configured. An empty or
+    /// whitespace value is not a token: it counts as not configured, so registration is open and the floor for
+    /// anonymous registrants below applies, whatever a request carries in its Authorization header.
+    /// </summary>
+    private string? ConfiguredInitialAccessToken =>
+        string.IsNullOrWhiteSpace(_options.DynamicRegistrationInitialAccessToken)
+            ? null
+            : _options.DynamicRegistrationInitialAccessToken;
+
     public async Task Process(IExchange exchange, CancellationToken ct = default)
     {
         var swTotal = Stopwatch.StartNew();
         // Validate initial access token if configured (RFC 7591 §1.2)
-        if (_options.DynamicRegistrationInitialAccessToken is { } expectedToken)
+        var expectedToken = ConfiguredInitialAccessToken;
+        if (expectedToken is not null)
         {
             // access_token header is set by ExtractBearerToken (already stripped "Bearer " prefix)
             var tokenValue = exchange.In.GetHeader<string>("access_token");
@@ -137,13 +148,14 @@ internal sealed class DynamicRegistrationProcessor : IProcessor
         //
         // So the floor is below policy: while registration is open, a scope this deployment counts
         // as administrative is refused no matter what the allow-list says. An operator who wants
-        // administrative clients registered dynamically sets DynamicRegistrationInitialAccessToken
+        // administrative clients registered dynamically sets DynamicRegistrationInitialAccessToken to a
+        // non-blank value
         // - then every registration carries a credential the deployment issued, and the allow-list
         // governs as before. Which scopes count is Identity:AdminScopeEntitlement, the same
         // definition the issuance gate uses, including any the operator added; its Enabled switch
         // is not consulted, because that switch exists to recover a locked-out administrator and
         // must not quietly reopen anonymous registration of administrative clients.
-        if (_options.DynamicRegistrationInitialAccessToken is null)
+        if (expectedToken is null)
         {
             var administrative = requestedScopes.Where(_options.AdminScopeEntitlement.IsGated).ToArray();
             if (administrative.Length > 0)

@@ -271,6 +271,33 @@ public sealed class ValidateRequestObjectHandlerTests
         ctx.Error.Should().Be("invalid_request_object");
     }
 
+    /// <summary>
+    /// The values the images ship (Identity:Jar in identity.core: no private network targets, https only): a
+    /// request_uri over plain http or to a private address is refused before any socket opens.
+    /// </summary>
+    [Theory]
+    [InlineData("http://203.0.113.10/ro")]
+    [InlineData("https://10.0.0.5/ro")]
+    [InlineData("http://192.168.1.20/ro")]
+    public async Task Request_uri_is_refused_with_the_image_values(string requestUri)
+    {
+        var options = new RedbIdentityOptions { Issuer = new Uri(Issuer) };
+        options.Features.EnableJar = true;
+        options.Jar.RequestUriAllowPrivateNetworkTargets = false;
+        options.Jar.RequestUriRequireHttps = true;
+        var factory = Substitute.For<IHttpClientFactory>();
+        factory.CreateClient(Arg.Any<string>()).Returns(_ => throw new InvalidOperationException("no fetch expected"));
+        var handler = new ValidateRequestObjectHandler(Substitute.For<IOpenIddictApplicationManager>(),
+            Substitute.For<IClientKeyResolver>(), factory, Options.Create(options), NullLogger<ValidateRequestObjectHandler>.Instance);
+
+        var ctx = Context(requestObject: null, requestUri: requestUri);
+        await handler.HandleAsync(ctx);
+
+        ctx.IsRejected.Should().BeTrue();
+        ctx.Error.Should().Be("invalid_request_object");
+        factory.DidNotReceive().CreateClient(Arg.Any<string>());
+    }
+
     /// <summary>A fetched request object is validated exactly like an inline one.</summary>
     [Fact]
     public async Task Fetched_request_uri_is_validated_like_inline()

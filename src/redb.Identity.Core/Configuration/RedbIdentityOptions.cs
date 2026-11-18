@@ -316,8 +316,10 @@ public class RedbIdentityOptions
 
     /// <summary>
     /// Optional initial access token (RFC 7591 §1.2). When set, the <c>POST /connect/register</c>
-    /// request must include <c>Authorization: Bearer {token}</c>. When null, the endpoint is open
-    /// (rate-limited only).
+    /// request must include <c>Authorization: Bearer {token}</c>. When null, empty or whitespace, no token
+    /// is configured: the endpoint is open (rate-limited only) and an anonymous registrant is refused
+    /// every administrative scope (see <see cref="AdminScopeEntitlement"/>), whatever
+    /// <see cref="DynamicRegistrationAllowedScopes"/> lists.
     /// </summary>
     public string? DynamicRegistrationInitialAccessToken { get; set; }
 

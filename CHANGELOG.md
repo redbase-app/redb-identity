@@ -38,6 +38,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Pending changes live in `changelog/unreleased/` until the release; `pwsh scripts/changelog.ps1 -Preview` shows them.
 
+## [4.7.4] — 2026-11-18
+
+### Security
+
+- **A blank `DynamicRegistrationInitialAccessToken` now counts as not configured.** An empty or whitespace value
+  means open registration, so an anonymous registrant is refused the administrative scopes (`identity:*` other than
+  `identity:account`, and `scim`) whatever `DynamicRegistrationAllowedScopes` lists. Check your configuration: to
+  require a token for registration set a non-blank value; to turn registration off set `EnableDynamicRegistration` to false. Packages: `redb.Identity.Core`. Upgrade: [UPGRADING.md](UPGRADING.md#dynamic-client-registration-check-the-initial-access-token).
+
+### Changed
+
+- **Released alone on redb 4.7.2, redb.Route 4.7.2 and redb.Tsak 4.7.2.** The images sit on the Tsak 4.7.2 bases.
+  The redb-identity-app template still defaults to 4.7.2: set IDENTITY_VERSION=4.7.4 and build the web part with
+  --build-arg IDENTITY_IMAGE=ghcr.io/redbase-app/redb-identity-full:4.7.4.
+- **Two defaults of the images change.** Dynamic client registration is off: if you register clients through
+  `POST /connect/register`, turn it on with `EnableDynamicRegistration` in both `identity.core` and `identity.http` and set
+  `DynamicRegistrationInitialAccessToken`. A JAR `request_uri` is fetched only over https and not from private network
+  addresses: for a client that hosts request objects on such an address, set `Identity:Jar:RequestUriAllowPrivateNetworkTargets`
+  and `Identity:Jar:RequestUriRequireHttps` in `identity.core` back. Upgrade: [UPGRADING.md](UPGRADING.md#image-defaults-from-474).
+
 ## [4.7.3] — 2026-11-14
 
 ### Changed

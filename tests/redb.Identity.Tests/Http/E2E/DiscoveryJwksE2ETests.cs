@@ -111,6 +111,20 @@ public class DiscoveryJwksE2ETests
     }
 
     [Fact]
+    public async Task Registration_endpoints_answer_404_when_registration_is_disabled()
+    {
+        // Registration off in identity.core and identity.http (the defaults of this fixture): neither the
+        // registration route nor the client configuration route is registered, so the host answers 404.
+        using var register = await _http.PostAsync("/connect/register", new StringContent(
+            """{"client_name":"disabled","grant_types":["authorization_code"],"redirect_uris":["https://app.example/cb"]}""",
+            System.Text.Encoding.UTF8, "application/json"));
+        register.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        using var manage = await _http.GetAsync("/connect/register/some-client");
+        manage.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
     public async Task Discovery_DoesNotContainDeviceAuthorizationEndpoint_WhenDisabled()
     {
         var json = await GetDiscovery();

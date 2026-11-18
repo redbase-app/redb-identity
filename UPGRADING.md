@@ -3,6 +3,40 @@
 What to check and change when moving to a new version. Each section lists the changes that need action;
 [CHANGELOG.md](CHANGELOG.md) has the full list of what changed.
 
+## 4.7.4
+
+### Dynamic client registration: check the initial access token
+
+A `DynamicRegistrationInitialAccessToken` that is empty or whitespace now counts as not configured: registration
+is open and an anonymous registrant is refused the administrative scopes. Decide which of the two you want and set
+it explicitly. With the images, environment variables do it without rebuilding:
+
+- registration off:
+
+      Tsak__Contexts__identity.core__Override__Identity__Features__EnableDynamicRegistration=false
+      Tsak__Contexts__identity.http__Override__IdentityTransport__Features__EnableDynamicRegistration=false
+
+- registration only with a token the deployment issued (a long random value):
+
+      Tsak__Contexts__identity.core__Override__Identity__DynamicRegistrationInitialAccessToken=<random value>
+
+Then review the registered applications for `client_credentials` clients nobody created on purpose.
+
+### Image defaults from 4.7.4
+
+The images and archives start with dynamic client registration off. To turn it on, set both switches and give it an
+initial access token (a long random value), so that registration is not open:
+
+    Tsak__Contexts__identity.core__Override__Identity__Features__EnableDynamicRegistration=true
+    Tsak__Contexts__identity.http__Override__IdentityTransport__Features__EnableDynamicRegistration=true
+    Tsak__Contexts__identity.core__Override__Identity__DynamicRegistrationInitialAccessToken=<long random value>
+
+A JAR `request_uri` is fetched only over https and not from private network addresses. For a client that hosts its
+request objects over http or on a private address:
+
+    Tsak__Contexts__identity.core__Override__Identity__Jar__RequestUriAllowPrivateNetworkTargets=true
+    Tsak__Contexts__identity.core__Override__Identity__Jar__RequestUriRequireHttps=false
+
 ## 4.6.2
 
 ### DPoP-bound access tokens at userinfo and the management API
