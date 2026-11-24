@@ -154,4 +154,46 @@ public sealed class MfaIdorTests
         ex.Out!.Headers["redbHttp.ResponseCode"].Should().Be(403);
         ex.IsStopped.Should().BeTrue();
     }
+
+    // ── The granular scopes of the surface, as the MFA route wires them ──
+
+    private static RequireSelfOrAdminProcessor CreateMfaSurfaceSut() =>
+        new(AdminScope, AccountScope, surface: new RequireSelfOrAdminProcessor.SurfaceScopes(
+            "identity:mfa:write", "identity:mfa:read", new HashSet<string>(StringComparer.Ordinal) { "status" }));
+
+    [Theory]
+    [InlineData("identity:mfa:write", "setup", true)]
+    [InlineData("identity:mfa:write", "disable", true)]
+    [InlineData("identity:mfa:write", "status", true)]
+    [InlineData("identity:mfa:read", "status", true)]
+    [InlineData("identity:mfa:read", "setup", false)]
+    [InlineData("identity:mfa:read", "confirm", false)]
+    [InlineData("identity:mfa:read", "disable", false)]
+    [InlineData("identity:mfa:read", "regenerate-recovery", false)]
+    [InlineData("identity:mfa:read", null, false)]
+    [InlineData("identity:users:write", "status", false)]
+    [InlineData("identity:users:write", "setup", false)]
+    public async Task Surface_scopes_admit_another_user_by_operation(string scope, string? operation, bool admitted)
+    {
+        var sut = CreateMfaSurfaceSut();
+        var ex = BuildExchange(bodyUserId: 99, callerUserId: null, scopes: new[] { scope });
+        if (operation is not null) ex.In.Headers["operation"] = operation;
+
+        await sut.Process(ex);
+
+        ex.IsStopped.Should().Be(!admitted);
+        if (!admitted) ex.Out!.Headers["redbHttp.ResponseCode"].Should().Be(403);
+    }
+
+    [Fact]
+    public async Task Without_the_surface_the_granular_write_scope_is_refused()
+    {
+        var sut = CreateSut();
+        var ex = BuildExchange(bodyUserId: 99, callerUserId: null, scopes: new[] { "identity:mfa:write" });
+        ex.In.Headers["operation"] = "setup";
+
+        await sut.Process(ex);
+
+        ex.IsStopped.Should().BeTrue("a guard built without surface scopes keeps admitting only the master scope");
+    }
 }

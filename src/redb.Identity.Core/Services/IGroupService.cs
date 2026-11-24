@@ -92,6 +92,14 @@ public interface IGroupService
 
     Task<bool> IsMemberAsync(long groupId, long userId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Whether the user has a membership record in exactly this group, expired or not. This is the
+    /// record <see cref="UpdateMemberRoleAsync"/> and <see cref="RemoveMemberAsync"/> act on, and not
+    /// the question <see cref="IsMemberAsync"/> answers: that one leaves an expired membership out and
+    /// counts a membership inherited from an ancestor group in.
+    /// </summary>
+    Task<bool> HasMembershipRecordAsync(long groupId, long userId, CancellationToken ct = default);
+
     // ── Role resolution ─────────────────────────────────────────
 
     /// <summary>

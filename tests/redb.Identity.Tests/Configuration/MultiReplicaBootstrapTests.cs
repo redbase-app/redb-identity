@@ -115,7 +115,7 @@ public sealed class MultiReplicaBootstrapTests
         new ConfigurationBuilder()
             .AddJsonFile("appsettings.json")
             .Build()
-            .GetConnectionString("Postgres")
+            .GetPostgresConnectionString()
             ?? throw new InvalidOperationException("ConnectionStrings:Postgres not found");
 
     private static ServiceProvider BuildReplicaSp(string cs)

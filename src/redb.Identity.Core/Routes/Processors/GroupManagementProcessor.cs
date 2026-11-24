@@ -130,6 +130,7 @@ internal sealed class GroupManagementProcessor : IProcessor
         var groupType = dict.GetValueOrDefault("groupType")?.ToString();
         var description = dict.GetValueOrDefault("description")?.ToString();
 
+        if (!await ExistsAsync(svc, exchange, parentId, "Parent group", ct)) return;
         var group = await svc.CreateChildGroupAsync(parentId, name, groupType, description, ct);
         SetResult(exchange, MapGroup(group));
         exchange.Properties["identity-event-type"] = IdentityAuditEventIds.GroupCreated;
@@ -145,6 +146,7 @@ internal sealed class GroupManagementProcessor : IProcessor
         var groupType = dict.GetValueOrDefault("groupType")?.ToString();
         var description = dict.GetValueOrDefault("description")?.ToString();
 
+        if (!await ExistsAsync(svc, exchange, id, "Group", ct)) return;
         await svc.UpdateGroupAsync(id, name, groupType, description, ct);
         SetResult(exchange, new { success = true, groupId = id });
         exchange.Properties["identity-event-type"] = IdentityAuditEventIds.GroupUpdated;
@@ -170,6 +172,8 @@ internal sealed class GroupManagementProcessor : IProcessor
         var newParentId = IdentityProcessorHelpers.ExtractLong(dict, "newParentGroupId")
             ?? throw new InvalidOperationException("newParentGroupId is required");
 
+        if (!await ExistsAsync(svc, exchange, id, "Group", ct)) return;
+        if (!await ExistsAsync(svc, exchange, newParentId, "Target parent group", ct)) return;
         await svc.MoveGroupAsync(id, newParentId, ct);
         SetResult(exchange, new { success = true, groupId = id, newParentGroupId = newParentId });
         exchange.Properties["identity-event-type"] = IdentityAuditEventIds.GroupMoved;
@@ -185,6 +189,7 @@ internal sealed class GroupManagementProcessor : IProcessor
             && int.TryParse(md.ToString(), out var d))
             maxDepth = d;
 
+        if (!await ExistsAsync(svc, exchange, id, "Group", ct)) return;
         var tree = await svc.LoadTreeAsync(id, maxDepth, ct);
         SetResult(exchange, MapTreeNode(tree));
     }
@@ -192,6 +197,7 @@ internal sealed class GroupManagementProcessor : IProcessor
     private static async Task Path(IGroupService svc, IExchange exchange, CancellationToken ct)
     {
         var id = IdentityProcessorHelpers.ExtractRequiredLong(exchange, "groupId");
+        if (!await ExistsAsync(svc, exchange, id, "Group", ct)) return;
         var path = await svc.GetPathToRootAsync(id, ct);
         SetResult(exchange, path.Select(g => MapGroup(g)).ToList());
     }
@@ -219,6 +225,7 @@ internal sealed class GroupManagementProcessor : IProcessor
             && DateTimeOffset.TryParse(ea.ToString(), out var parsed))
             expiresAt = parsed;
 
+        if (!await ExistsAsync(svc, exchange, groupId, "Group", ct)) return;
         var member = await svc.AddMemberAsync(groupId, userId, role, expiresAt, ct);
         SetResult(exchange, new { success = true, membershipId = member.id, groupId, userId, role });
         exchange.Properties["identity-event-type"] = IdentityAuditEventIds.MemberAdded;
@@ -235,6 +242,8 @@ internal sealed class GroupManagementProcessor : IProcessor
         var role = dict.GetValueOrDefault("role")?.ToString()
             ?? throw new InvalidOperationException("role is required");
 
+        if (!await MembershipExistsAsync(svc, exchange, groupId, userId, ct)) return;
+
         await svc.UpdateMemberRoleAsync(groupId, userId, role, ct);
         SetResult(exchange, new { success = true, groupId, userId, role });
         exchange.Properties["identity-event-type"] = IdentityAuditEventIds.MemberUpdated;
@@ -248,6 +257,8 @@ internal sealed class GroupManagementProcessor : IProcessor
             ?? IdentityProcessorHelpers.ExtractRequiredLong(exchange, "groupId");
         var userId = IdentityProcessorHelpers.ExtractLong(dict, "userId")
             ?? throw new InvalidOperationException("userId is required");
+
+        if (!await MembershipExistsAsync(svc, exchange, groupId, userId, ct)) return;
 
         await svc.RemoveMemberAsync(groupId, userId, ct);
         SetResult(exchange, new { success = true, groupId, userId });
@@ -265,6 +276,7 @@ internal sealed class GroupManagementProcessor : IProcessor
     private static async Task Children(IGroupService svc, IExchange exchange, CancellationToken ct)
     {
         var groupId = IdentityProcessorHelpers.ExtractRequiredLong(exchange, "groupId");
+        if (!await ExistsAsync(svc, exchange, groupId, "Group", ct)) return;
         var children = await svc.GetChildGroupsAsync(groupId, ct);
         SetResult(exchange, children.Select(g => MapGroup(g)).ToList());
     }
@@ -286,6 +298,34 @@ internal sealed class GroupManagementProcessor : IProcessor
     private static Dictionary<string, object?> RequireBody(IExchange exchange)
         => exchange.In.Body as Dictionary<string, object?>
             ?? throw new InvalidOperationException("Body is required");
+
+    /// <summary>
+    /// Answers "not found" for a group that does not exist and says whether the operation may go on.
+    /// The group service reports a missing group with an InvalidOperationException; left to reach the
+    /// route it was answered as a server error, about a record the caller merely named wrongly.
+    /// </summary>
+    private static async Task<bool> ExistsAsync(
+        IGroupService svc, IExchange exchange, long groupId, string what, CancellationToken ct)
+    {
+        if (await svc.GetGroupAsync(groupId, ct) is not null) return true;
+        SetError(exchange, "not_found", $"{what} {groupId} not found");
+        return false;
+    }
+
+    /// <summary>
+    /// Answers "not found" when the user has no membership record in the group (which covers a group
+    /// that does not exist) and says whether the operation may go on. The question is the record the
+    /// update and the removal act on, expired or not, and not <c>IsMemberAsync</c>: that one would
+    /// refuse an expired membership, which must stay removable, and accept one inherited from an
+    /// ancestor group, for which there is no record here to change.
+    /// </summary>
+    private static async Task<bool> MembershipExistsAsync(
+        IGroupService svc, IExchange exchange, long groupId, long userId, CancellationToken ct)
+    {
+        if (await svc.HasMembershipRecordAsync(groupId, userId, ct)) return true;
+        SetError(exchange, "not_found", $"User {userId} has no membership in group {groupId}");
+        return false;
+    }
 
     private static void SetResult(IExchange exchange, object body)
     {

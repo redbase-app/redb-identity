@@ -93,7 +93,7 @@ public class RouteRegistrationTests
         // + 1 F5 transport-neutral authorization check (identity-authz-check), unconditional:
         //   a facade calling an address that is not registered would fail open.
         //   Total: 49 + 1 = 50.
-        _builder.Definitions.Should().HaveCount(50);
+        _builder.Definitions.Should().HaveCount(51); // +1: identity-idempotency-cleanup
     }
 
     [Fact]
@@ -222,7 +222,7 @@ public class RouteRegistrationTests
         var builder = new IdentityCoreRouteBuilder(sp, sp.GetRequiredService<IOptions<RedbIdentityOptions>>());
         ((IRouteBuilder)builder).Configure(null!);
 
-        builder.Definitions.Should().HaveCount(53);
+        builder.Definitions.Should().HaveCount(54); // +1: identity-idempotency-cleanup
         var ids = builder.Definitions.Select(d => d.GetRouteId()).ToList();
         ids.Should().Contain("identity-me-webauthn");
         ids.Should().Contain("identity-mfa-webauthn");
@@ -269,7 +269,7 @@ public class RouteRegistrationTests
         ((IRouteBuilder)builder).Configure(null!);
 
         // Default 49 + 1 PAR route = 50.
-        builder.Definitions.Should().HaveCount(51);
+        builder.Definitions.Should().HaveCount(52); // +1: identity-idempotency-cleanup
         var ids = builder.Definitions.Select(d => d.GetRouteId()).ToList();
         ids.Should().Contain("identity-par");
     }
@@ -316,7 +316,7 @@ public class RouteRegistrationTests
         ((IRouteBuilder)builder).Configure(null!);
 
         // Default 50 + 2 SCIM (Users + Groups) + 1 SCIM Bulk = 53.
-        builder.Definitions.Should().HaveCount(53);
+        builder.Definitions.Should().HaveCount(54); // +1: identity-idempotency-cleanup
         var ids = builder.Definitions.Select(d => d.GetRouteId()).ToList();
         ids.Should().Contain(IdentityEndpoints.RouteIds.ScimUsers);
         ids.Should().Contain(IdentityEndpoints.RouteIds.ScimGroups);
@@ -361,7 +361,7 @@ public class RouteRegistrationTests
         ((IRouteBuilder)builder).Configure(null!);
 
         // Default 49 + 2 SCIM (Users + Groups), bulk omitted = 51.
-        builder.Definitions.Should().HaveCount(52);
+        builder.Definitions.Should().HaveCount(53); // +1: identity-idempotency-cleanup
         var ids = builder.Definitions.Select(d => d.GetRouteId()).ToList();
         ids.Should().NotContain(IdentityEndpoints.RouteIds.ScimBulk);
     }

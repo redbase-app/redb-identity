@@ -50,7 +50,7 @@ public class ClaimMappersIntegrationTests : IAsyncLifetime
         DbProviderFactories.RegisterFactory("Npgsql", NpgsqlFactory.Instance);
 
         var config = new ConfigurationBuilder().AddJsonFile("appsettings.json").Build();
-        var cs = config.GetConnectionString("Postgres") ?? PgConnString;
+        var cs = config.GetPostgresConnectionString() ?? PgConnString;
 
         var services = new ServiceCollection();
         services.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));

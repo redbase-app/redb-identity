@@ -143,7 +143,20 @@ internal sealed class WebhookDeliveryProcessor : IProcessor
             try
             {
                 var message = BuildMessage(sub, evt, bodyBytes, deliveryId, timestamp, signature, attempt);
-                await GetProducer().SendAsync(sub.Url, message).ConfigureAwait(false);
+
+                // The subscription's own timeout bounds each attempt. Without it the wait was whatever
+                // the transport's producer defaults to (30 s for http), not the value the operator set
+                // and the management API shows. A subscriber that answers later is a failed attempt.
+                using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(sub.TimeoutMs));
+                var exchange = new Exchange(message);
+                try
+                {
+                    await GetProducer().SendAsync(sub.Url, exchange, timeout.Token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    await exchange.DisposeAsync().ConfigureAwait(false);
+                }
 
                 _logger.LogDebug(
                     "WebhookDelivery: {EventType} → {Url} attempt {Attempt}/{Max} delivered (delivery={Delivery})",

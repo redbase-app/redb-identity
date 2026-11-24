@@ -106,17 +106,19 @@ public class ExtractClientCredentialsTests
     }
 
     [Fact]
-    public async Task InvalidBase64_DoesNotThrow()
+    public async Task InvalidBase64_RejectsWithInvalidClient()
     {
         var (context, _) = SetupToken(authorizationHeader: "Basic !!!not-base64!!!");
         await new ExtractClientCredentialsHandler().HandleAsync(context);
 
-        // Should silently ignore invalid Base64
+        // The client attempted header authentication: a failed one, not a missing client_id (RFC 6749 5.2).
+        context.IsRejected.Should().BeTrue();
+        context.Error.Should().Be(OpenIddictConstants.Errors.InvalidClient);
         context.Request!.ClientId.Should().BeNull();
     }
 
     [Fact]
-    public async Task BasicAuth_NoColon_DoesNotSetCredentials()
+    public async Task BasicAuth_NoColon_RejectsWithInvalidClient()
     {
         var credentials = Convert.ToBase64String(
             System.Text.Encoding.UTF8.GetBytes("no-colon-here"));
@@ -124,6 +126,8 @@ public class ExtractClientCredentialsTests
         var (context, _) = SetupToken(authorizationHeader: $"Basic {credentials}");
         await new ExtractClientCredentialsHandler().HandleAsync(context);
 
+        context.IsRejected.Should().BeTrue();
+        context.Error.Should().Be(OpenIddictConstants.Errors.InvalidClient);
         context.Request!.ClientId.Should().BeNull();
     }
 

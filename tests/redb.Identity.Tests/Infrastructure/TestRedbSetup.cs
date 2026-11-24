@@ -164,6 +164,17 @@ public static class TestRedbSetup
                 ? fallback
                 : "Host=localhost;Port=5432;Username=postgres;Password=1;Database=redb;Pooling=true;Maximum Pool Size=100;Include Error Detail=true";
 
+    /// <summary>
+    /// The Postgres connection string of the run, for every place that needs it: the fixtures that
+    /// hand it to <see cref="AddRedbForTests"/> and the tests that open their own connection. One
+    /// resolution (<see cref="ResolvePostgresConnectionString"/>: <c>REDB_POSTGRES_CS</c>, then
+    /// <c>appsettings.json</c>, then the local default), so a test's own connection reaches the same
+    /// database the server under test writes to, not whatever listens on the port named in the file.
+    /// </summary>
+    public static string GetPostgresConnectionString(this Microsoft.Extensions.Configuration.IConfiguration configuration) =>
+        ResolvePostgresConnectionString(
+            Microsoft.Extensions.Configuration.ConfigurationExtensions.GetConnectionString(configuration, "Postgres") ?? string.Empty);
+
     public static string ResolveMsSqlConnectionString() =>
         Environment.GetEnvironmentVariable("REDB_MSSQL_CS")?.Trim() is { Length: > 0 } cs
             ? cs

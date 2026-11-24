@@ -31,21 +31,47 @@ namespace redb.Identity.Core.Routes.Processors;
 /// (<see cref="RequireManagementContextProcessor"/>) refuses such exchanges first; this processor
 /// refuses them too, so the rule holds even if it is ever placed on a route without the gate.
 /// </para>
+/// <para>
+/// <b>The granular scopes of the surface admit as admin too.</b> With <see cref="SurfaceScopes"/> given, a token
+/// carrying the surface's write scope (for MFA <c>identity:mfa:write</c>) may target any user with any operation,
+/// and one carrying its read scope (<c>identity:mfa:read</c>) may target any user with a read operation (the
+/// <c>operation</c> header is one of <see cref="SurfaceScopes.ReadOperations"/>). That is the rule the scope
+/// table of <see cref="AuthorizationCheckProcessor"/> applies to every management surface; before, this gate
+/// admitted only the master scope, and the granular MFA scopes passed the table only to be refused here.
+/// </para>
 /// </summary>
 internal sealed class RequireSelfOrAdminProcessor : IProcessor
 {
+    /// <summary>
+    /// The granular scopes of the surface this processor guards: <paramref name="WriteScope"/> admits every
+    /// operation, <paramref name="ReadScope"/> the operations named in <paramref name="ReadOperations"/>.
+    /// </summary>
+    public sealed record SurfaceScopes(string WriteScope, string ReadScope, IReadOnlySet<string> ReadOperations);
+
     private readonly string _adminScope;
     private readonly string _accountScope;
+    private readonly SurfaceScopes? _surface;
     private readonly ILogger _logger;
 
     public RequireSelfOrAdminProcessor(
         string adminScope,
         string accountScope,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        SurfaceScopes? surface = null)
     {
         _adminScope = adminScope ?? throw new ArgumentNullException(nameof(adminScope));
         _accountScope = accountScope ?? throw new ArgumentNullException(nameof(accountScope));
+        _surface = surface;
         _logger = logger ?? NullLogger.Instance;
+    }
+
+    private bool HasSurfaceAdmin(IExchange exchange, string[] scopes)
+    {
+        if (_surface is null) return false;
+        if (Array.IndexOf(scopes, _surface.WriteScope) >= 0) return true;
+        if (Array.IndexOf(scopes, _surface.ReadScope) < 0) return false;
+        var operation = exchange.In.GetHeader<string>("operation");
+        return operation is not null && _surface.ReadOperations.Contains(operation);
     }
 
     public Task Process(IExchange exchange, CancellationToken ct = default)
@@ -61,7 +87,8 @@ internal sealed class RequireSelfOrAdminProcessor : IProcessor
             return Task.CompletedTask;
         }
 
-        var hasAdmin = scopes.Any(s => string.Equals(s, _adminScope, StringComparison.Ordinal));
+        var hasAdmin = scopes.Any(s => string.Equals(s, _adminScope, StringComparison.Ordinal))
+                       || HasSurfaceAdmin(exchange, scopes);
         if (hasAdmin)
             return Task.CompletedTask; // admin may target any user
 

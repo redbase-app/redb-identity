@@ -6,10 +6,10 @@ namespace redb.Identity.Core.Models;
 /// E2 — PROPS record for cached responses of <c>Idempotency-Key</c>-bearing requests.
 /// <para>
 /// Lookup is keyed by the indexed <c>name</c> column (composite
-/// <c>idem:{scope}:{operation}:{caller}:{key}</c>). The TTL is encoded as the standard
-/// <c>date_complete</c> field so <see cref="redb.Core.Services.IBackgroundDeletionService"/>
-/// can reap expired entries with the same machinery used for token cleanup — no per-record
-/// lookup is needed at request time, the cache simply respects <c>date_complete</c>.
+/// <c>idem:{scope}:{operation}:{caller}:{key}</c>). The TTL is the standard
+/// <c>date_complete</c> field: the cache ignores a record past it, and
+/// <see cref="Routes.Processors.IdempotencyRecordCleanupProcessor"/> deletes such records on its timer
+/// (<see cref="Configuration.RedbIdentityOptions.IdempotencyCleanupInterval"/>).
 /// </para>
 /// </summary>
 [RedbScheme("identity.idempotency_record")]
@@ -49,7 +49,14 @@ public class IdempotencyRecordProps
     /// JSON-serialized response body captured at completion. May be <c>null</c> when the
     /// original response had no body (e.g. 204 No Content). Stored verbatim — replay
     /// deserializes it back to a <see cref="System.Text.Json.JsonElement"/> so the HTTP
-    /// serializer round-trips an identical wire payload.
+    /// serializer round-trips an identical wire payload. Always <c>null</c> when <see cref="SecretWithheld"/> is set.
     /// </summary>
     public string? ResponseBody { get; set; }
+
+    /// <summary>
+    /// The answer carried a one-time secret (an operation listed in
+    /// <c>IdempotencySecretOperations</c>), so it was not stored. A replay does not run the operation again and
+    /// answers that the secret is not shown again.
+    /// </summary>
+    public bool SecretWithheld { get; set; }
 }

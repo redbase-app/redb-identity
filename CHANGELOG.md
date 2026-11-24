@@ -38,6 +38,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Pending changes live in `changelog/unreleased/` until the release; `pwsh scripts/changelog.ps1 -Preview` shows them.
 
+## [4.7.5] — 2026-11-24
+
+### Security
+
+- **Dynamic client registration no longer answers from the Idempotency-Key cache.** A second caller that sent the same
+  `Idempotency-Key` to `POST /connect/register` received the first registration's answer, its `client_secret`
+  included. A repeated registration now registers another client. Packages: `redb.Identity.Core`.
+- **The Idempotency-Key cache no longer keeps a secret, and a repeat no longer shows it again.** Webhook create and
+  rotate-secret, client secret rotation, MFA enrollment and recovery codes were cached with their answer, secret
+  included; a repeat now gets `{"replayed":true,"secretWithheld":true,...}`. Earlier records go with the cleanup once
+  they expire; to remove them at once, see the upgrade notes. Packages: `redb.Identity.Core`. Upgrade: [UPGRADING.md](UPGRADING.md#idempotency-records-keep-no-secrets).
+
+### Changed
+
+- **Identity 4.7.5 runs on redb 4.7.5, which stores `TimeSpan` and `TimeOnly` as ticks.** Identity's own data holds no
+  such values, so an existing Identity database needs no conversion before the first start. Every node and image that
+  shares the database still moves to 4.7.5 together; there is no way back except a backup. Packages: `redb.Identity.Core`.
+
+### Fixed
+
+- **Changing the role of, or removing, a user who is not a member of the group answers `404`, not `500`.** The same
+  holds when the group itself does not exist. `PUT` and `DELETE /groups/{id}/members/{userId}` answered
+  `server_error` for such a request. Packages: `redb.Identity.Core`.
+- **A management request for a role or a group that does not exist answers `404`, not `500`.** Updating a role, and
+  updating, moving, adding a child or a member to, or reading the tree, path or children of a group with an unknown
+  id answered `server_error`. They now answer `404 not_found`, like the other management endpoints. Packages: `redb.Identity.Core`.
+- **A SCIM user create refused by a unique key answers with the SCIM error document and names the right attribute.**
+  On SQLite the loser of two concurrent `POST /scim/v2/Users` could get `409` with the management error body instead
+  of the SCIM error with `scimType: "uniqueness"` (RFC 7644 3.12). And a create whose e-mail was taken was told that
+  its `userName` already exists; the detail now names the e-mail. Packages: `redb.Identity.Core`.
+- **An audit event whose row could not be written is counted.** A failed insert into `identity_audit_log` was only
+  logged, so a gap in the audit trail showed up nowhere an operator alerts on. The meter `RedbIdentity` now has the
+  counter `identity.audit.write_failures` (tag `event_type`); the event itself still goes on to webhooks and targets. Packages: `redb.Identity.Core`.
+- **The metric `identity.unique_violation` now counts.** It was defined and documented but nothing ever added to
+  it. A unique-key violation that the server answers with the general `409 duplicate` is now counted, tagged
+  `scheme` and `column` with what collided when the database says so (`unknown` otherwise). Packages: `redb.Identity.Core`.
+- **A webhook delivery now waits for the subscriber no longer than the subscription's `timeoutMs`.** The value was
+  stored and returned by the management API but not applied: every attempt waited up to the transport's own
+  default, 30 seconds over http. A subscriber that answers later than `timeoutMs` (default 5000) is now a failed
+  attempt and is retried by the subscription's `maxAttempts` and `retryBackoffMs`. Packages: `redb.Identity.Core`.
+- **Updating a webhook subscription with `PUT /api/v1/identity/webhooks/{id}` works.** Every such request was refused
+  with `400 validation_error` ("Body must be an UpdateWebhookSubscriptionRequest"); a subscription could only be
+  deleted and created again. The fields sent are changed now, the others are left as they were. Packages: `redb.Identity.Core`.
+- **An unreadable HTTP Basic client credential on the token endpoint gets 401 `invalid_client` instead of a 500.** A
+  Basic value that is not base64 used to be answered with 500 and the text "An unexpected error occurred while
+  processing the request". It is now answered with 401 `invalid_client`, also on introspection and revocation. Packages: `redb.Identity.Core`, `redb.Identity.Http`.
+- **A failed notification mail no longer writes the recipient address to the error log.** The log line names the
+  template and the mail endpoint; the address, which is personal data, is left out. Packages: `redb.Identity.Core`.
+- **Expired idempotency records are deleted.** They were ignored by the cache but stayed in the database; the hourly
+  timer route `identity-idempotency-cleanup` now deletes them in batches (`Identity:IdempotencyCleanupInterval`,
+  `Identity:IdempotencyCleanupBatchSize`). Packages: `redb.Identity.Core`, `redb.Identity.Contracts`.
+- **The admin MFA endpoints accept the granular MFA scopes.** A token with `identity:mfa:write` may run every
+  operation under `/api/v1/identity/mfa` for any user, one with `identity:mfa:read` may read a user's MFA status.
+  Before, these endpoints admitted only `identity:manage`. Review which clients hold `identity:mfa:write`: it now
+  lets them set up, reset and disable another user's second factor. Packages: `redb.Identity.Core`.
+- **`MfaWebAuthnRegistered` and `MfaWebAuthnRevoked` reach the audit from self-service.** Registering or deleting a
+  WebAuthn credential through `/api/v1/identity/me/webauthn` recorded only the generic `MfaSelfService:webauthn:*`
+  event; it now records the specific one. Packages: `redb.Identity.Core`.
+- **`/connect/revocation` answers an error with 400, or 401 for `invalid_client`, instead of 200.** It used to send
+  status 200 with the error in the body, so a client that checks only the status took a refused request for a
+  revocation; such a client now sees the failure. A valid or unknown token is still answered with 200. Packages: `redb.Identity.Http`.
+- **The `demos/grpc-viewer` sample builds again.** `dotnet run` in that folder failed with MSB6004 (`protoc` not
+  found under an empty tools path) on every platform: the sample named its target framework in a way that made the
+  restore skip the build files of `Grpc.Tools`. Only the sample's project file changed.
+
 ## [4.7.4] — 2026-11-18
 
 ### Security

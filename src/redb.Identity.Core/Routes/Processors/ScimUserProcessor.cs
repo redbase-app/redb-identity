@@ -291,11 +291,18 @@ internal sealed class ScimUserProcessor : IProcessor
             SetScimError(exchange, 409, "uniqueness", $"userName '{scimUser.UserName}' already exists");
             return;
         }
-        catch (Exception ex) when (ex.Message.Contains("duplicate") || ex.Message.Contains("unique")
-                                   || ex.Message.Contains("_users__login_key")
-                                   || ex.Message.Contains("already exists"))
+        catch (Exception ex) when (IdentityProcessorHelpers.IsUniqueViolation(ex))
         {
-            SetScimError(exchange, 409, "uniqueness", $"userName '{scimUser.UserName}' already exists");
+            // The loser of a concurrent create is refused by the database, and each provider words
+            // that in its own way (SQLite: "UNIQUE constraint failed", which a case-sensitive search
+            // for "unique" missed). Left uncaught, the builder-level handler answered 409 with the
+            // management error document, not the SCIM one a SCIM client parses (RFC 7644 3.12).
+            // The detail names the attribute that collided: _users has two unique keys, and naming
+            // userName when the e-mail was taken sends an operator after the wrong field.
+            SetScimError(exchange, 409, "uniqueness",
+                IdentityProcessorHelpers.IsEmailUniqueViolation(ex)
+                    ? $"email '{primaryEmail}' already exists"
+                    : $"userName '{scimUser.UserName}' already exists");
             return;
         }
 

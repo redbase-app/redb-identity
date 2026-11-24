@@ -391,6 +391,12 @@ public sealed class GroupService : IGroupService
         return await EnrichWithGroupInfo(memberships).ConfigureAwait(false);
     }
 
+    public async Task<bool> HasMembershipRecordAsync(long groupId, long userId, CancellationToken ct = default)
+        => await _redb.Query<GroupMemberProps>()
+            .WhereRedb(o => o.Key == userId && o.ParentId == groupId)
+            .FirstOrDefaultAsync()
+            .ConfigureAwait(false) is not null;
+
     public async Task<bool> IsMemberAsync(long groupId, long userId, CancellationToken ct = default)
     {
         // Check direct membership first

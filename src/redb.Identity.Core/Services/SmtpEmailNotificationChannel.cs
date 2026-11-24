@@ -86,9 +86,11 @@ public sealed class SmtpEmailNotificationChannel : IEmailNotificationChannel, ID
             // Mirrors PasswordForgotProcessor's expectation that channel implementations
             // surface fatal issues but absorb transient ones. We log + rethrow so the
             // processor can keep the anti-enumeration contract (it catches and degrades).
+            // The recipient address is left out: it is personal data, and the template and the
+            // endpoint are what an operator needs to find a failing mail route.
             _logger.LogError(ex,
-                "SmtpEmailNotificationChannel: send via {Endpoint} failed for {To} / {TemplateId}",
-                IdentityEndpoints.EmailSend, to, templateId);
+                "SmtpEmailNotificationChannel: send via {Endpoint} failed for template {TemplateId}",
+                IdentityEndpoints.EmailSend, templateId);
             throw;
         }
     }

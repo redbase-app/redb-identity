@@ -3,6 +3,39 @@
 What to check and change when moving to a new version. Each section lists the changes that need action;
 [CHANGELOG.md](CHANGELOG.md) has the full list of what changed.
 
+## 4.7.5
+
+### Idempotency records keep no secrets
+
+An answer that carries a secret shown once is no longer kept in the `Idempotency-Key` cache: webhook create and
+rotate-secret, client secret rotation, MFA enrollment and recovery codes. A repeat with the same key is not carried
+out again and answers `{"replayed":true,"secretWithheld":true,...}` with the status of the first answer. A client that
+lost the first answer rotates the secret again. Dynamic client registration (`/connect/register`) no longer takes part
+in the cache: a repeated registration registers another client.
+
+Records stored by an earlier version keep the full answer, secret included, and earlier versions never deleted
+expired records. After the upgrade the cleanup (`identity-idempotency-cleanup`, hourly) deletes every expired
+record at its first run. A record still inside its time to live (`Identity:Idempotency:Ttl`, 24 hours by default)
+that was stored with a secret replays it to a repeat with its key until it expires, and goes at the next run after.
+
+Action: none is required. To have the records of these operations gone at once, delete them right after the
+upgrade; a repeat of such a request in the following 24 hours then runs the operation again. The same statements
+work on PostgreSQL, SQL Server and SQLite (in `sqlcmd`, run `SET QUOTED_IDENTIFIER ON;` first):
+
+```sql
+DELETE FROM _values WHERE _id_object IN (
+  SELECT o._id FROM _objects o JOIN _schemes s ON s._id = o._id_scheme
+  WHERE s._name = 'identity.idempotency_record'
+    AND (o._name LIKE 'idem:manage-webhooks:%' OR o._name LIKE 'idem:manage-apps:%'
+         OR o._name LIKE 'idem:mfa-manage:%' OR o._name LIKE 'idem:dynamic-register:%'));
+DELETE FROM _objects
+WHERE _id_scheme = (SELECT _id FROM _schemes WHERE _name = 'identity.idempotency_record')
+  AND (_name LIKE 'idem:manage-webhooks:%' OR _name LIKE 'idem:manage-apps:%'
+       OR _name LIKE 'idem:mfa-manage:%' OR _name LIKE 'idem:dynamic-register:%');
+```
+
+Nothing else changes: the other records keep replaying whole.
+
 ## 4.7.4
 
 ### Dynamic client registration: check the initial access token

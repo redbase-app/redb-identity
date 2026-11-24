@@ -188,6 +188,10 @@ public static class IdentityAuditEventIds
     /// <summary>W6-0: cleanup route purged expired entries from the revoked-sids list.</summary>
     public const string RevokedSidsPruned = "RevokedSidsPruned";
     public const string MfaOtpPruned = "MfaOtpPruned";
+    /// <summary>The cleanup removed idempotency records whose time to live had ended.</summary>
+    public const string IdempotencyRecordsPruned = "IdempotencyRecordsPruned";
+    /// <summary>A dry run of <see cref="IdempotencyRecordsPruned"/> counted the expired records (no mutation).</summary>
+    public const string IdempotencyRecordsPrunePreviewed = "IdempotencyRecordsPrunePreviewed";
     public const string TokenCleanupRan = "TokenCleanupRan";
     public const string TokensPruned = "TokensPruned";
     public const string TokensRevokedByUser = "TokensRevokedByUser";

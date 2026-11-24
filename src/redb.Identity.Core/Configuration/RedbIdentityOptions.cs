@@ -120,6 +120,20 @@ public class RedbIdentityOptions
     public TimeSpan RevokedSidsCleanupInterval { get; set; } = TimeSpan.FromHours(1);
 
     /// <summary>
+    /// Interval between cleanup runs that delete idempotency records whose time to live
+    /// (<see cref="IdempotencyOptions.Ttl"/>) has ended. Set to <see cref="TimeSpan.Zero"/> or
+    /// <c>Timeout.InfiniteTimeSpan</c> to disable. Clustered: runs on the route-leader node only.
+    /// Default: 1 hour.
+    /// </summary>
+    public TimeSpan IdempotencyCleanupInterval { get; set; } = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// Records deleted per batch by the idempotency record cleanup. A run deletes batch after batch until no
+    /// expired record is left. Default: 500.
+    /// </summary>
+    public int IdempotencyCleanupBatchSize { get; set; } = 500;
+
+    /// <summary>
     /// Interval at which each replica reloads the DataProtection XML key-ring snapshot
     /// (<see cref="DataProtection.RedbXmlRepository"/>) from PROPS storage. Runs per-node
     /// (NOT cluster-leader-only) so every replica picks up keys rotated by other nodes,

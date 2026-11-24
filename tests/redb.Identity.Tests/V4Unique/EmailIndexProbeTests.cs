@@ -27,7 +27,7 @@ public sealed class EmailIndexProbeTests
     public async Task Listener_CreatesEmailIndex_OrTellsWhy()
     {
         var config = new ConfigurationBuilder().AddJsonFile("appsettings.json").Build();
-        var pgCs = config.GetConnectionString("Postgres") ?? "";
+        var pgCs = config.GetPostgresConnectionString() ?? "";
 
         var sc = new ServiceCollection();
         sc.AddLogging(b => b.SetMinimumLevel(LogLevel.Debug).AddProvider(new XunitLoggerProvider(_out)));

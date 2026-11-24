@@ -219,7 +219,7 @@ public sealed class ProductionHttpFixture : IAsyncLifetime
             .AddJsonFile("appsettings.json")
             .Build();
 
-        var cs = config.GetConnectionString("Postgres")
+        var cs = config.GetPostgresConnectionString()
                  ?? throw new InvalidOperationException("ConnectionStrings:Postgres not found");
 
         var services = new ServiceCollection();
@@ -400,7 +400,9 @@ public sealed class ProductionHttpFixture : IAsyncLifetime
         var validationDispatcher = _sp.GetRequiredService<IOpenIddictValidationDispatcher>();
         var managementAuth = new ManagementBearerAuthProcessor(
             validationFactory, validationDispatcher,
-            new[] { identityOptions.ManagementScope, identityOptions.AccountScope },
+            // The same set InitRoute builds for a deployment: the master scope, self-service and every granular
+            // admin scope; the scope table decides per path what a granular token reaches.
+            new[] { identityOptions.ManagementScope, identityOptions.AccountScope }.Concat(IdentityScopes.GranularAdmin).ToArray(),
             anonymousPathPrefixes: new[] { "/api/v1/identity/password/", "/api/v1/identity/account/" });
 
         IProcessor? scimAuth = identityOptions.Features.EnableScim
@@ -436,6 +438,12 @@ public sealed class ProductionHttpFixture : IAsyncLifetime
         // because earlier runs persisted the table; SQLite gets a fresh temp
         // file per call and sees "no such table: identity_audit_log".
         _ctx.AddLifecycleListener(new redb.Identity.Core.Module.IdentityAuditLogTableInitListener(_sp));
+
+        // The same goes for UX_users_email, the unique index that makes concurrent registrations of
+        // one e-mail lose with 409: a deployment gets it from InitRoute.main, this context does not
+        // call it. Without the listener the index existed only where an earlier run had left it, and
+        // on a fresh database every concurrent registration of one address succeeded.
+        _ctx.AddLifecycleListener(new redb.Identity.Core.Module.IdentityUniqueIndexesInitListener(_sp));
 
         await _ctx.Start();
 

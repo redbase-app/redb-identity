@@ -33,7 +33,7 @@ public sealed class FileKeyRingImportTests : IAsyncLifetime
     public Task InitializeAsync()
     {
         var config = new ConfigurationBuilder().AddJsonFile("appsettings.json").Build();
-        _pgCs = config.GetConnectionString("Postgres")
+        _pgCs = config.GetPostgresConnectionString()
             ?? throw new InvalidOperationException("ConnectionStrings:Postgres not found");
         Directory.CreateDirectory(_fileRing);
         return Task.CompletedTask;

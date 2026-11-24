@@ -116,7 +116,9 @@ internal sealed class IdempotencyProcessor : IProcessor
             if (hit is null) return;
 
             exchange.Out ??= new redb.Route.Core.Message();
-            exchange.Out.Body = DeserializeBody(hit.Props.ResponseBody);
+            exchange.Out.Body = hit.Props.SecretWithheld
+                ? IdempotencySecretOperations.WithheldReplayBody()
+                : DeserializeBody(hit.Props.ResponseBody);
             exchange.Out.Headers["redbHttp.ResponseCode"] = hit.Props.StatusCode;
             exchange.Out.Headers["Idempotency-Replayed"] = "true";
             exchange.Properties[IdempotencyProperties.CacheHit] = true;
@@ -249,6 +251,10 @@ internal sealed class IdempotencyCaptureProcessor : IProcessor
 
             var scope = exchange.Properties.TryGetValue(IdempotencyProperties.Scope, out var sc) ? sc as string : null;
 
+            // An answer with a one-time secret is recorded without its body: the record still stops a repeat from
+            // running the operation again, and the repeat is told the secret is not shown again.
+            var secretWithheld = IdempotencySecretOperations.Carries(scope, operation);
+
             var record = new RedbObject<IdempotencyRecordProps>
             {
                 name = name,                // readable composite, exactly as before
@@ -262,7 +268,8 @@ internal sealed class IdempotencyCaptureProcessor : IProcessor
                     CallerSubject = caller,
                     IdempotencyKey = key,
                     StatusCode = status,
-                    ResponseBody = SerializeBody(responseSource.Body),
+                    ResponseBody = secretWithheld ? null : SerializeBody(responseSource.Body),
+                    SecretWithheld = secretWithheld,
                 }
             };
 

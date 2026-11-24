@@ -3,7 +3,10 @@
 > **A transport-agnostic OAuth 2.1 / OpenID Connect server for the redb ecosystem.**
 > Built on [OpenIddict](https://documentation.openiddict.com/) and [redb.Route](https://github.com/redbase-app/redb-route). Every endpoint is a `direct-vm://` route — call it over HTTP, gRPC, RabbitMQ, SignalR, or **straight from another in-process module with zero network overhead**. Ships as `.tpkg` packages for [redb.Tsak](https://github.com/redbase-app/redb-tsak). REDB-backed, cluster-ready, standards-compliant.
 
+Documentation and articles: <https://redbase.app>
+
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-blue)](https://github.com/redbase-app/redb-identity/blob/main/LICENSE)
+[![Website](https://img.shields.io/badge/docs-redbase.app-orange)](https://redbase.app)
 [![.NET](https://img.shields.io/badge/.NET-8%20%7C%209%20%7C%2010-purple)](https://dotnet.microsoft.com)
 [![Providers](https://img.shields.io/badge/storage-PostgreSQL%20%7C%20MSSQL%20%7C%20SQLite-336791)](#provider-matrix-zero-code-changes-between-rows)
 [![NuGet: redb.Identity.Core](https://img.shields.io/nuget/v/redb.Identity.Core?label=nuget%3A%20Core&color=004880)](https://www.nuget.org/packages/redb.Identity.Core)
@@ -274,6 +277,54 @@ public class CheckoutRoutes : RouteBuilder
 ```
 
 No HTTP listener. No TLS handshake. No JSON over the loopback. The exchange flows straight from your route into the Identity processor and back, in the same thread, with the same `IExchange` instance. Total cost: a method call plus the existing OpenIddict pipeline work.
+
+#### Calling the management routes from your module
+
+The management routes (`IdentityEndpoints.ManageUsers`, `ManageGroups`, `ManageApps` and the other `identity-manage-*`
+routes, MFA, SCIM) never trust the transport: `direct-vm` is shared by every module in the worker, so an exchange
+that reaches them without a management context is refused with `403 not_authorized`. Your module establishes that
+context the way the HTTP and gRPC facades do, in four steps on the same exchange:
+
+1. **A token of your own client.** Create a confidential client for the module (console or management API) with
+   the `client_credentials` grant and only the granular scopes it needs, for example `identity:users:read`. Take a
+   token from `IdentityEndpoints.Token` and reuse it until it expires.
+2. **Authentication.** Put the token in `Authorization: Bearer` and send the exchange through
+   `IdentityEndpoints.AuthManagement`. It validates the token and leaves the management context
+   (`identity:management-scopes`, `identity:management-subject`) on the exchange, or stops it with `401`.
+3. **Authorization.** Set `identity:authz-resource` to the resource the HTTP API names (`/api/v1/identity/users`,
+   `/api/v1/identity/groups`, ...) and `identity:authz-action` to `read` or `write`, and send the exchange through
+   `IdentityEndpoints.AuthzCheck`. It checks the token's scopes against the same table the facades use, or stops the
+   exchange with `403 insufficient_scope`. Skipping this step lets any token with a management scope reach every
+   operation.
+4. **The operation.** Set the `operation` header and the request body (the DTOs of `redb.Identity.Contracts`) and
+   send the exchange to the management route.
+
+```csharp
+From("direct:orders-find-user")
+    .Process(async (e, ct) =>
+    {
+        e.In.Headers["Authorization"] = $"Bearer {await _serviceToken.GetAsync(ct)}";   // step 1, cached
+    })
+    .To(IdentityEndpoints.AuthManagement)                                               // step 2
+    .Process((e, _) =>
+    {
+        e.Properties["identity:authz-resource"] = "/api/v1/identity/users";
+        e.Properties["identity:authz-action"] = "read";
+        return Task.CompletedTask;
+    })
+    .To(IdentityEndpoints.AuthzCheck)                                                    // step 3
+    .Process((e, _) =>
+    {
+        e.In.Headers["operation"] = "read";
+        e.In.Body = new Dictionary<string, object?> { ["id"] = e.In.GetHeader<long>("userId") };
+        return Task.CompletedTask;
+    })
+    .To(IdentityEndpoints.ManageUsers);                                                  // step 4
+```
+
+A refusal at step 2 or 3 stops the exchange, so the route does not reach the management route. Use the module's own
+client, not the Web console's `identity-backchannel` service account: that one shares its secret with the console and
+holds `identity:manage`, the whole management surface.
 
 ### 2. Facades are pure transport adapters — pick the ones you need
 
@@ -711,7 +762,7 @@ breakdown: **[`OPENID_CERTIFICATION.md`](OPENID_CERTIFICATION.md)**.
 | Brute-force defense | Per-IP rate limits, per-`(IP+user)` failure ceiling with security-channel logger. |
 | Trusted proxies | `X-Forwarded-For` sanitized BEFORE rate-limit / lockout sees it. |
 | **SSRF guard on outbound fetches** | `OutboundUrlGuard` refuses loopback, **RFC 1918** private ranges, link-local (including the `169.254.169.254` cloud metadata address) and **RFC 6598** CGNAT space. It gates the only two URLs a client can make the server fetch: `jwks_uri` (`ClientKeyResolver`) and JAR `request_uri` (`ValidateRequestObjectHandler`). Private targets are reachable only by explicit opt-in (`ClientKeysOptions`), for single-network test hosts. Pinned by `OutboundUrlGuardTests`. |
-| Idempotency | Cache placed AFTER authorization — revoked tokens can't unlock cached responses. |
+| Idempotency | Cache placed AFTER authorization — revoked tokens can't unlock cached responses. Expired records are deleted hourly (`identity-idempotency-cleanup`). |
 | Self-vs-admin | `RequireSelfOrAdminProcessor` on every `/me/*` route. |
 | Constant-time comparisons | All secret comparisons. |
 | **Facade pages: framing, CSRF, consent binding** | Every response through the facade's serializer carries `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy` — the same set the web console's `SecurityHeadersMiddleware` emits. Form POSTs (`/login`, `/consent`, `/mfa`, `/mfa/recovery`) refuse a foreign `Origin`/`Referer` with 403 before reading the body (`AntiForgeryProcessors`; origin-less callers — the console's BFF, demos, API clients — pass). The consent page renders only from a server-signed ticket (`/consent?ct=…`, minted by the authorize endpoint — app name and scopes never come from the URL, so a crafted link cannot dress an attacker's client in a familiar name), and the decision is bound to the session cookie: no session → 401, a ticket minted for another user → 403, the form carries no `user_id`. Pinned by `FullStackFacadeFormHardeningTests`. |
@@ -764,7 +815,7 @@ None are blockers for the core IS profile; PRs welcome:
 | **Custom claims / per-tenant extensions** | `Dictionary<string,string>? CustomClaims` on `UserProps` — each key becomes a queryable, indexed props row | `jsonb`/`nvarchar(max)` blob; you write your own GIN / computed-column indexes |
 | **Multi-provider federation links** | `Dictionary<string, ExternalIdentity>` on User — native props rows, hot reverse-lookup via `value_string = "{provider}:{sub}"` | One-to-many join table, scaffolding per provider |
 | **Hot + cold attribute split** | Hot keys (login, password, status) stay in the relational `_users` table; cold OIDC profile lives in props rows linked by `RedbObject.key = _users._id`. No over-indexed wide rows, no JSON-blob lookups | Either everything in one wide table, or normalised into 8 satellite tables |
-| **Multi-tenant data isolation** | `context.GetRedbService("identity")` — named instance can target a separate DB / schema / connection or share one with your business module | Single `DbContext`; isolation requires separate ASP.NET apps |
+| **Multi-tenant data isolation** | a named redb instance (`Identity:RedbInstanceName`; the images ship `identity-sqlite`, with `identity-pg` and `identity-mssql` predefined) that can target a separate database or the one of your business module | Single `DbContext`; isolation requires separate ASP.NET apps |
 | **Caching tier** | `Global*Cache` in `redb.Core` makes scheme + struct lookups O(1) in-process | Bring your own (`IDistributedCache` plumbing) |
 
 ### Provider matrix (zero code changes between rows)
@@ -835,7 +886,7 @@ To add a property to your User — a `LoyaltyTier`, a `ManagerSubject`, a `Depar
 
 - **Schema sync.** `IdentitySchemaInitListener` walks `[RedbScheme]`-marked types in loaded assemblies on `InitializeAsync()` and reconciles the redb scheme metadata.
 - **TOCTOU-safe unique indexes.** `IdentityUniqueIndexesInitListener` applies partial unique indexes that the cleanup races depend on (ClientId, ScopeName, MFA-per-user, idempotency keys, federated `{providerId}:{sub}`).
-- **Per-context isolation.** Identity always resolves a **named** redb instance (`"identity"`) — it can coexist with other modules' redb usage in the same Tsak worker without sharing connections, transactions, or caches. Or, point it at a dedicated DB and your business data never sees an OAuth row.
+- **Per-context isolation.** Identity always resolves a **named** redb instance (`Identity:RedbInstanceName`; `identity-sqlite` in the images, `identity-pg` and `identity-mssql` predefined) — it can coexist with other modules' redb usage in the same Tsak worker without sharing connections, transactions, or caches. A call into Identity from inside your own transaction therefore runs on a second connection: call Identity outside the transaction. Or, point it at a dedicated DB and your business data never sees an OAuth row.
 
 ---
 
@@ -880,6 +931,7 @@ Defined in [IdentityMetrics.cs](src/redb.Identity.Core/Metrics/IdentityMetrics.c
 | `identity.rate_limit.rejections` | Counter | `endpoint`, `key_dimension` | Throttled requests (per-IP / per-client / per-user) |
 | `identity.password.verify.duration` | Histogram (ms) | `algorithm` | Hash-verify wall-clock (BCrypt / PBKDF2 / Argon2) — catches CPU regressions |
 | `identity.unique_violation` | Counter | `scheme`, `column` | DB unique-index hits (TOCTOU guard fired) |
+| `identity.audit.write_failures` | Counter | `event_type` | Audit events whose row could not be written; a gap in the audit trail |
 
 ### Security log channel
 
@@ -915,7 +967,7 @@ Surface under Tsak's aggregated `/api/health/{startup,live,ready}`. Defined in [
 | Recovery codes | One-shot — marked consumed in the same transaction as session creation |
 | Role scopes | A scope attached to a role is an entitlement, never an addition: it reaches a token only when the client requests it and holds the `scp:` permission, and a gated scope (`AdminScopeEntitlement`: `identity:*`, `scim`, `GatedScopes`) stays only for users whose roles carry it. An administrator signing in to some other application gives it no management scope. Pinned by `RoleScopeAugmentationTests` |
 | Self vs admin | `RequireSelfOrAdminProcessor` on every `/me/*` route — a token with `identity:account` can never mutate another user's MFA, password, sessions, or consents |
-| Idempotency | Cache placed AFTER authorization so a revoked token cannot unlock cached responses |
+| Idempotency | Cache placed AFTER authorization so a revoked token cannot unlock cached responses; expired records are deleted hourly |
 | Trusted proxies | `TrustedProxyResolverProcessor` — `redbHttp.RemoteAddress` is sanitized BEFORE any rate-limit / lockout sees it |
 | Password history | Configurable depth, rejects reuse |
 | Federation | OIDC + GitHub, secrets server-side, never returned over the wire |
@@ -937,7 +989,7 @@ Surface under Tsak's aggregated `/api/health/{startup,live,ready}`. Defined in [
 | `federation` | 9 | `FederationChallengeInitiated`, `FederationStateValidationFailed`, `FederatedUserLoggedIn`, `FederatedIdentityLinked` / `Unlinked`, `FederatedEmailConflict`, `FederationProvider*` |
 | `mfa` | 10 | `MfaEnrolled`, `MfaDisabled`, `MfaChallengeIssued`, `MfaVerifyFailed`, `MfaRecoveryCodeUsed` / `CodesDownloaded`, `MfaWebAuthnRegistered` / `Asserted` / `Revoked` / `SignCounterAnomaly` |
 | `scim` | 9 | `ScimUserCreated` / `Replaced` / `Patched` / `Deleted`, `ScimGroupCreated` / `Replaced` / `Patched` / `Deleted`, `ScimBulkProcessed` |
-| `system` | 11 | `SessionRevoked` / `AllSessionsRevoked` / `SessionsPruned`, `SidRevoked` / `RevokedSidsPruned`, `MfaOtpPruned`, `TokenCleanupRan` / `TokensPruned`, `TokensRevokedByUser`, plus the dry-run markers `AllSessionsRevocationPreviewed` / `TokensPrunePreviewed` |
+| `system` | 13 | `SessionRevoked` / `AllSessionsRevoked` / `SessionsPruned`, `SidRevoked` / `RevokedSidsPruned`, `MfaOtpPruned`, `IdempotencyRecordsPruned`, `TokenCleanupRan` / `TokensPruned`, `TokensRevokedByUser`, plus the dry-run markers `AllSessionsRevocationPreviewed` / `TokensPrunePreviewed` / `IdempotencyRecordsPrunePreviewed` |
 
 > Notable security events to wire into your SIEM first: `LoginFailed`, `MfaVerifyFailed`, `MfaWebAuthnSignCounterAnomaly`, `DpopReplayDetected`, `FederationStateValidationFailed`, `FederatedEmailConflict`, `ClientSecretRotated`, `AllSessionsRevoked`, `AllConsentsRevoked`.
 

@@ -51,6 +51,8 @@ public class AuditSqlIntegrationTests : IAsyncLifetime
         + "&param.user_agent=${header.user_agent}"
         + "&param.details=${header.details}";
 
+    // The database the audit table is created in, written to and read back from: the configured one.
+    private string _cs = PgConnString;
     private ServiceProvider _sp = null!;
     private RouteContext _ctx = null!;
     private ProducerTemplate _producer = null!;
@@ -63,7 +65,7 @@ public class AuditSqlIntegrationTests : IAsyncLifetime
             .AddJsonFile("appsettings.json")
             .Build();
 
-        var cs = config.GetConnectionString("Postgres") ?? PgConnString;
+        var cs = _cs = config.GetPostgresConnectionString() ?? PgConnString;
 
         var services = new ServiceCollection();
         services.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
@@ -184,7 +186,7 @@ DELETE FROM identity_audit_log;";
 
     private async Task<List<Dictionary<string, object?>>> QueryAuditRows(string? eventType = null)
     {
-        await using var conn = new NpgsqlConnection(PgConnString);
+        await using var conn = new NpgsqlConnection(_cs);
         await conn.OpenAsync();
 
         var sql = "SELECT event_id, event_type, \"timestamp\", user_id, client_id, ip_address, user_agent, details::text FROM identity_audit_log";
@@ -335,7 +337,7 @@ DELETE FROM identity_audit_log;";
     public async Task MultipleEvents_AllWritten()
     {
         // Clean slate for this test
-        await using (var conn = new NpgsqlConnection(PgConnString))
+        await using (var conn = new NpgsqlConnection(_cs))
         {
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();

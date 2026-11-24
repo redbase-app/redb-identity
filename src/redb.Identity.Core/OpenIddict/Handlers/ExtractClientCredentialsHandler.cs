@@ -11,12 +11,12 @@ namespace redb.Identity.Core.OpenIddict.Handlers;
 /// </summary>
 internal static class BasicAuthHelper
 {
-    internal static void Apply(OpenIddictServerTransaction transaction, OpenIddictRequest? request)
+    internal static void Apply(BaseValidatingContext context, OpenIddictRequest? request)
     {
         if (request is null)
             return;
 
-        var exchange = transaction.GetRouteExchange();
+        var exchange = context.Transaction.GetRouteExchange();
         if (exchange is null)
             return;
 
@@ -29,20 +29,30 @@ internal static class BasicAuthHelper
 
         var encoded = auth["Basic ".Length..].Trim();
 
+        // The client attempted authentication through the header, so a value that cannot be read (not base64, or
+        // no client_id:client_secret pair) is a failed client authentication, answered with invalid_client
+        // (RFC 6749 section 5.2), not a missing client_id.
+        string? decoded;
         try
         {
-            var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
-            var colonIdx = decoded.IndexOf(':');
-            if (colonIdx > 0)
-            {
-                request.ClientId = Uri.UnescapeDataString(decoded[..colonIdx]);
-                request.ClientSecret = Uri.UnescapeDataString(decoded[(colonIdx + 1)..]);
-            }
+            decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
         }
         catch (FormatException)
         {
-            // Invalid Base64 — ignore; validation will catch missing credentials
+            decoded = null;
         }
+
+        var colonIdx = decoded?.IndexOf(':') ?? -1;
+        if (decoded is null || colonIdx <= 0)
+        {
+            context.Reject(
+                error: OpenIddictConstants.Errors.InvalidClient,
+                description: "The Authorization header does not carry readable Basic client credentials.");
+            return;
+        }
+
+        request.ClientId = Uri.UnescapeDataString(decoded[..colonIdx]);
+        request.ClientSecret = Uri.UnescapeDataString(decoded[(colonIdx + 1)..]);
     }
 }
 
@@ -60,7 +70,7 @@ internal sealed class ExtractClientCredentialsHandler
 
     public ValueTask HandleAsync(ExtractTokenRequestContext context)
     {
-        BasicAuthHelper.Apply(context.Transaction, context.Request);
+        BasicAuthHelper.Apply(context, context.Request);
         return default;
     }
 }
@@ -80,7 +90,7 @@ internal sealed class ExtractIntrospectionClientCredentialsHandler
 
     public ValueTask HandleAsync(ExtractIntrospectionRequestContext context)
     {
-        BasicAuthHelper.Apply(context.Transaction, context.Request);
+        BasicAuthHelper.Apply(context, context.Request);
         return default;
     }
 }
@@ -100,7 +110,7 @@ internal sealed class ExtractRevocationClientCredentialsHandler
 
     public ValueTask HandleAsync(ExtractRevocationRequestContext context)
     {
-        BasicAuthHelper.Apply(context.Transaction, context.Request);
+        BasicAuthHelper.Apply(context, context.Request);
         return default;
     }
 }

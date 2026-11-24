@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using redb.Core;
 using redb.Identity.Contracts.Routes;
+using redb.Identity.Core.Module;
 using redb.Route.Abstractions;
 using redb.Route.RedbCore.Extensions;
 
@@ -25,7 +26,7 @@ namespace redb.Identity.Core.Routes.Processors;
 /// </para>
 ///
 /// <para>
-/// Failures are swallowed and logged: audit persistence must never kill the
+/// Failures are swallowed, logged and counted (<c>identity.audit.write_failures</c>): audit persistence must never kill the
 /// originating mutation.
 /// </para>
 /// </summary>
@@ -104,6 +105,11 @@ internal sealed class AuditRelationalSinkProcessor : IProcessor
         catch (Exception ex)
         {
             _logger.LogError(ex, "AuditRelationalSinkProcessor failed to persist {EventType}", eventType);
+
+            // The event goes on, and the missing row must be visible as more than a log line: a
+            // gap in the audit trail is something an operator alerts on.
+            _context.GetIdentityServiceOrDefault<Metrics.IdentityMetrics>(exchange)?.AuditWriteFailures.Add(
+                1, new KeyValuePair<string, object?>("event_type", eventType));
         }
     }
 

@@ -90,7 +90,7 @@ public class LdapIntegrationTests : IAsyncLifetime
         result.ExternalId.Should().Be("alice");
         result.DisplayName.Should().Be("alice"); // cn=alice in seed data
         result.Email.Should().Be("alice@redb.test");
-        result.Phone.Should().Be("+1-555-0101");
+        result.Phone.Should().Be("+7-495-001-0001"); // telephoneNumber of alice in seed data
         result.FamilyName.Should().Be("Wonderland"); // sn
     }
 

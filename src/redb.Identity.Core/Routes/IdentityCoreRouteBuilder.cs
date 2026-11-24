@@ -72,6 +72,7 @@ public class IdentityCoreRouteBuilder : RouteBuilder
     {
         var handler = _sp.GetRequiredService<RedbRouteOpenIddictServerHandler>();
         var timeProvider = _sp.GetService<TimeProvider>() ?? TimeProvider.System;
+        var uniqueViolationMetrics = _sp.GetService<redb.Identity.Core.Metrics.IdentityMetrics>();
 
         // ── Builder-level error handling ──
 
@@ -114,7 +115,7 @@ public class IdentityCoreRouteBuilder : RouteBuilder
 
                 if (IdentityProcessorHelpers.IsUniqueViolation(e.Exception))
                 {
-                    SetDuplicate(outMsg);
+                    AnswerDuplicate(e, uniqueViolationMetrics);
                     return;
                 }
 
@@ -131,7 +132,7 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         OnException<redb.Core.Exceptions.RedbUniqueViolationException>()
             .Handled()
             .LogStackTrace()
-            .Process(e => SetDuplicate(EnsureOut(e)));
+            .Process(e => AnswerDuplicate(e, uniqueViolationMetrics));
 
         // Catch-all: unexpected errors → generic server_error, no internals leaked
         OnException<Exception>()
@@ -328,8 +329,10 @@ public class IdentityCoreRouteBuilder : RouteBuilder
                 .WireTap(IdentityEndpoints.Events);
         }
 
-        // Dynamic Client Registration (RFC 7591). E2: Idempotency-Key cache placed BEFORE
-        // Throttle so replays do not consume IP quota. NOTE on tx: DynamicRegistrationProcessor
+        // Dynamic Client Registration (RFC 7591). No Idempotency-Key cache: a registrant has no caller identity of its
+        // own to key a replay by (the initial access token is one shared value, open registration has none), so a
+        // cached answer, client_secret included, would go to whoever repeats the key; a repeated registration
+        // registers again. NOTE on tx: DynamicRegistrationProcessor
         // ONLY calls _context.GetIdentityService<IOpenIddictApplicationManager>() — the
         // application persist + secret-hash both flow through OpenIddict's DI-scoped
         // RedbApplicationStore (a different IRedbService, different SqliteRedbConnection)
@@ -339,11 +342,8 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         // SQLITE_BUSY (the failure mode the diag run captured). Removed.
         if (_options.Features.EnableDynamicRegistration)
         {
-            var dynRegRoute = From(IdentityEndpoints.DynamicRegister)
-                .RouteId(IdentityEndpoints.RouteIds.DynamicRegister);
-            var dynRegPre = BuildIdempotencyPre("dynamic-register");
-            if (dynRegPre is not null) dynRegRoute = dynRegRoute.Process(dynRegPre);
-            dynRegRoute = dynRegRoute
+            From(IdentityEndpoints.DynamicRegister)
+                .RouteId(IdentityEndpoints.RouteIds.DynamicRegister)
                 .Throttle(
                     e => e.In.GetHeader<string>("redbHttp.RemoteAddress") ?? "anonymous",
                     _options.DynamicRegistrationThrottleMaxPerPeriod,
@@ -353,10 +353,8 @@ public class IdentityCoreRouteBuilder : RouteBuilder
                     Context!,
                     _sp.GetRequiredService<IOptions<RedbIdentityOptions>>(),
                     timeProvider: null,
-                    loggerFactory: _sp.GetService<ILoggerFactory>()));
-            var dynRegPost = BuildIdempotencyPost();
-            if (dynRegPost is not null) dynRegRoute = dynRegRoute.Process(dynRegPost);
-            dynRegRoute.WireTap(IdentityEndpoints.Events);
+                    loggerFactory: _sp.GetService<ILoggerFactory>()))
+                .WireTap(IdentityEndpoints.Events);
 
             // Z2 (RFC 7592): Client configuration endpoint. Read/Update/Delete gated by the
             // registration_access_token issued at DCR time. ClientRegistrationManagementProcessor
@@ -488,10 +486,16 @@ public class IdentityCoreRouteBuilder : RouteBuilder
         // route entrance and by this processor itself — direct-vm is a transport, not a trust level.
         // E2: Idempotency-Key cache placed AFTER mfaSelfOrAdmin so authorization is always
         // re-checked on replays (a revoked token must not unlock cached responses).
+        // The granular MFA scopes admit as admin, as the scope table promises: identity:mfa:write for every
+        // operation, identity:mfa:read for status.
         var mfaSelfOrAdmin = new RequireSelfOrAdminProcessor(
             _options.ManagementScope,
             _options.AccountScope,
-            securityLogger);
+            securityLogger,
+            new RequireSelfOrAdminProcessor.SurfaceScopes(
+                redb.Identity.Contracts.Configuration.IdentityScopes.MfaWrite,
+                redb.Identity.Contracts.Configuration.IdentityScopes.MfaRead,
+                new HashSet<string>(StringComparer.Ordinal) { "status" }));
 
         // MfaManage (setup / confirm / disable): NOT route-transacted. Each operation is a single
         // MFA-object mutation through MfaSetupProcessor — one write, atomic on its own — so there is
@@ -1041,6 +1045,27 @@ public class IdentityCoreRouteBuilder : RouteBuilder
                 .WireTap(IdentityEndpoints.Events);
         }
 
+        // ── Idempotency record cleanup timer ──
+
+        // 18d. Periodic deletion of idempotency records past their time to live. The cache ignores them already;
+        // without this timer they would stay in the database for good.
+        var idempotencyCleanupInterval = _options.IdempotencyCleanupInterval;
+        if (_options.Idempotency.Enabled
+            && idempotencyCleanupInterval > TimeSpan.Zero && idempotencyCleanupInterval != Timeout.InfiniteTimeSpan)
+        {
+            var idempotencyCleanupProcessor = new IdempotencyRecordCleanupProcessor(
+                Context!, _sp.GetRequiredService<IOptions<RedbIdentityOptions>>(),
+                _redbName, backgroundDeletion, timeProvider);
+
+            From(TimerDsl.Every("idempotency-cleanup")
+                    .Period((int)idempotencyCleanupInterval.TotalMilliseconds)
+                    .Delay(105_000))
+                .RouteId("identity-idempotency-cleanup")
+                .Cluster(true) // A5: leader-only when Tsak.Cluster.Enabled=true; silently ignored in standalone
+                .Process(idempotencyCleanupProcessor)
+                .WireTap(IdentityEndpoints.Events);
+        }
+
         // ── MFA OTP cleanup timer (B3) ──
 
         // 18b. Periodic cleanup of expired MfaOtpProps rows (SMS/Email OTP server-side store).
@@ -1324,8 +1349,11 @@ public class IdentityCoreRouteBuilder : RouteBuilder
     /// vocabulary the management processors use for a duplicate, so a caller sees one answer for one
     /// situation regardless of which surface produced it.
     /// </summary>
-    private static void SetDuplicate(IMessage outMsg)
+    internal static void AnswerDuplicate(IExchange exchange, redb.Identity.Core.Metrics.IdentityMetrics? metrics)
     {
+        IdentityProcessorHelpers.CountUniqueViolation(metrics, exchange.Exception);
+
+        var outMsg = EnsureOut(exchange);
         outMsg.Body = ErrorResponse("duplicate", "A record with these values already exists.");
         outMsg.Headers["redbHttp.ResponseCode"] = 409;
     }

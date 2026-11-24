@@ -461,6 +461,9 @@ public class HttpFacadeRouteBuilder : RouteBuilder
             .Process(HttpIdentityProcessors.MapHttpToIdentityHeaders)
             .Process(HttpIdentityProcessors.MapFormToBody)
             .To(IdentityEndpoints.Revoke)
+            // RFC 7009 section 2.2.1: an error answers as RFC 6749 section 5.2 says (400, 401 for invalid_client);
+            // 200 is for the token itself, valid or not.
+            .Process(HttpIdentityProcessors.MapRevocationErrorToHttpStatus)
             .Process(HttpIdentityProcessors.SerializeJsonResponse)
             .Process(HttpIdentityProcessors.AddNoStoreCacheHeaders); // RFC 7009 / 6749 §5.1
 

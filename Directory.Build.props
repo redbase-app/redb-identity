@@ -12,14 +12,14 @@
     -->
     <NoWarn>$(NoWarn);1591</NoWarn>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>4.7.4</Version>
-    <PackageVersion>4.7.4</PackageVersion>
+    <Version>4.7.5</Version>
+    <PackageVersion>4.7.5</PackageVersion>
     <Authors>RedBase</Authors>
     <Company>RedBase</Company>
     <Product>redb.Identity</Product>
     <Description>Transport-agnostic OAuth 2.1 / OpenID Connect server for the redb ecosystem, built on OpenIddict and redb.Route.</Description>
     <Copyright>Copyright (c) 2024-2026 RedBase</Copyright>
-    <PackageProjectUrl>https://github.com/redbase-app/redb-identity</PackageProjectUrl>
+    <PackageProjectUrl>https://redbase.app</PackageProjectUrl>
     <RepositoryUrl>https://github.com/redbase-app/redb-identity</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

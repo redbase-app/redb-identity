@@ -2,7 +2,6 @@ using AwesomeAssertions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
-using Microsoft.Extensions.Configuration;
 using redb.Identity.Grpc.Management.V1;
 using redb.Identity.Tests.Infrastructure;
 using Xunit;
@@ -54,16 +53,11 @@ public class GrpcManagementFailClosedTests : IClassFixture<GrpcManagementWithout
         }
         catch (RpcException) { /* the refusal is expected; the row check below is the proof */ }
 
-        var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
-            .AddJsonFile("appsettings.json").Build();
-        await using var conn = new Npgsql.NpgsqlConnection(config.GetConnectionString("Postgres"));
-        await conn.OpenAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "select count(*) from _users where _login = @l";
-        cmd.Parameters.AddWithValue("l", login);
-        var rows = Convert.ToInt64(await cmd.ExecuteScalarAsync());
+        // Through the fixture's own redb, so the row is looked for in the database the server writes
+        // to, whichever provider the run uses.
+        var created = await _fixture.Redb.UserProvider.GetUserByLoginAsync(login);
 
-        rows.Should().Be(0,
+        created.Should().BeNull(
             "an admin create must not persist anything when authentication could not run");
 
         var request = new ManagementRequest

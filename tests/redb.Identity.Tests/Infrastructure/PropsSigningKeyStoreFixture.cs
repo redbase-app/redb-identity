@@ -48,7 +48,7 @@ public sealed class PropsSigningKeyStoreFixture : IAsyncLifetime
     public async Task InitializeAsync()
     {
         var config = new ConfigurationBuilder().AddJsonFile("appsettings.json").Build();
-        var cs = config.GetConnectionString("Postgres")
+        var cs = config.GetPostgresConnectionString()
                  ?? throw new InvalidOperationException("ConnectionStrings:Postgres not found");
 
         var services = new ServiceCollection();

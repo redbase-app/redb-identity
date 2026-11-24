@@ -77,6 +77,7 @@ public sealed class ClusteredRouteMarkingTests
     [InlineData("identity-session-cleanup")]
     [InlineData("identity-mfa-otp-cleanup")]
     [InlineData("identity-revoked-sids-cleanup")]
+    [InlineData("identity-idempotency-cleanup")]
     public void CleanupRoute_IsMarkedClustered(string routeId)
     {
         var route = _builder.Definitions.FirstOrDefault(d => d.GetRouteId() == routeId);
@@ -108,7 +109,8 @@ public sealed class ClusteredRouteMarkingTests
             id => id == "identity-token-cleanup"
                 || id == "identity-session-cleanup"
                 || id == "identity-mfa-otp-cleanup"
-                || id == "identity-revoked-sids-cleanup",
+                || id == "identity-revoked-sids-cleanup"
+                || id == "identity-idempotency-cleanup",
             "only periodic cleanup routes may be marked Clustered; request-handling routes " +
             "must run on every replica. Offending routes: [{0}]",
             string.Join(", ", clusteredIds));

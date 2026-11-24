@@ -40,7 +40,7 @@ public class MultiReplicaKeyRingTests : IAsyncLifetime
         var config = new ConfigurationBuilder()
             .AddJsonFile("appsettings.json")
             .Build();
-        var pgCs = config.GetConnectionString("Postgres")
+        var pgCs = config.GetPostgresConnectionString()
             ?? throw new InvalidOperationException("ConnectionStrings:Postgres not found");
 
         // When running under SQLite (the default test provider) we need BOTH

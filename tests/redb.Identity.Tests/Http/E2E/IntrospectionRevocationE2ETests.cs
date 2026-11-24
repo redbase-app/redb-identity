@@ -197,7 +197,7 @@ public class IntrospectionRevocationE2ETests
     }
 
     [Fact]
-    public async Task Revoke_MissingTokenParam_ReturnsError()
+    public async Task Revoke_MissingTokenParam_Answers400_BecauseRevocationErrorsFollowRfc6749()
     {
         var content = new FormUrlEncodedContent(new Dictionary<string, string>
         {
@@ -208,7 +208,8 @@ public class IntrospectionRevocationE2ETests
 
         var resp = await _http.PostAsync("/connect/revocation", content);
 
-        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        // RFC 7009 2.2.1: an error answers as RFC 6749 5.2 says; 200 is only for the token itself, valid or not.
+        resp.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         var json = await ParseJson(resp);
         json.GetProperty("error").GetString().Should().Be("invalid_request");
     }

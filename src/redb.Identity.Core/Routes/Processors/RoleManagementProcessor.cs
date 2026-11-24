@@ -173,6 +173,14 @@ internal sealed class RoleManagementProcessor : IProcessor
         string? displayName = dict?.TryGetValue("displayName", out var dn) == true ? dn?.ToString() : null;
         string? description = dict?.TryGetValue("description", out var dd) == true ? dd?.ToString() : null;
 
+        // A role that does not exist is "not found"; the service would throw for it and the route
+        // would answer a server error.
+        if (await svc.GetRoleAsync(id.Value, ct).ConfigureAwait(false) is null)
+        {
+            SetError(exchange, "not_found", $"Role {id.Value} not found.");
+            return;
+        }
+
         await svc.UpdateRoleAsync(id.Value, displayName, description, ct).ConfigureAwait(false);
         exchange.Out ??= new redb.Route.Core.Message();
         exchange.Out.Body = new { success = true };

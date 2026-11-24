@@ -120,11 +120,26 @@ internal sealed class WebhookManagementProcessor : IProcessor
     {
         var id = ExtractLongFromBody(exchange, "id");
         if (id is null) { SetError(exchange, "validation_error", "id is required"); return; }
-        if (exchange.In.Body is not UpdateWebhookSubscriptionRequest request)
+        // The management controller forwards the update as a dictionary (the id from the path next to
+        // the fields of the body); the fields are read from it. Requiring a typed request here refused
+        // every update that came over HTTP.
+        if (exchange.In.Body is not Dictionary<string, object?> fields)
         {
-            SetError(exchange, "validation_error", "Body must be an UpdateWebhookSubscriptionRequest");
+            SetError(exchange, "validation_error", "Body is required");
             return;
         }
+        var request = new UpdateWebhookSubscriptionRequest
+        {
+            DisplayName = fields.GetValueOrDefault("displayName") as string,
+            Description = fields.GetValueOrDefault("description") as string,
+            Url = fields.GetValueOrDefault("url") as string,
+            EventTypeFilter = fields.GetValueOrDefault("eventTypeFilter") as string,
+            Enabled = fields.GetValueOrDefault("enabled") as bool?,
+            TimeoutMs = fields.GetValueOrDefault("timeoutMs") as int?,
+            MaxAttempts = fields.GetValueOrDefault("maxAttempts") as int?,
+            RetryBackoffMs = fields.GetValueOrDefault("retryBackoffMs") as int?,
+            ExtraHeaders = fields.GetValueOrDefault("extraHeaders") as Dictionary<string, string>,
+        };
 
         try
         {

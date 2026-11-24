@@ -62,4 +62,59 @@ internal static partial class IdentityProcessorHelpers
 
         return false;
     }
+
+    /// <summary>
+    /// Returns <c>true</c> when a unique violation on the <c>_users</c> table is the one of the
+    /// e-mail index rather than of the login. PostgreSQL and SQL Server name the index
+    /// (<c>UX_users_email</c>) in the driver message; SQLite names the column
+    /// (<c>_users._email</c>). Meaningful only after <see cref="IsUniqueViolation"/> said yes.
+    /// </summary>
+    public static bool IsEmailUniqueViolation(Exception? ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            var msg = e.Message;
+            if (msg is not null
+                && (msg.Contains("UX_users_email", StringComparison.OrdinalIgnoreCase)
+                    || msg.Contains("_users._email", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Adds one to <c>identity.unique_violation</c> for a violation that is being turned into an
+    /// answer, tagged with what collided when the exception says so: scheme and property of a typed
+    /// <c>RedbUniqueViolationException</c>, <c>_users</c> / <c>_email</c> for the e-mail index of the
+    /// users table, <c>unknown</c> otherwise (a driver violation that names neither).
+    /// </summary>
+    public static void CountUniqueViolation(Metrics.IdentityMetrics? metrics, Exception? ex)
+    {
+        if (metrics is null) return;
+
+        var scheme = "unknown";
+        var column = "unknown";
+
+        redb.Core.Exceptions.RedbUniqueViolationException? typed = null;
+        for (var e = ex; e is not null && typed is null; e = e.InnerException)
+            typed = e as redb.Core.Exceptions.RedbUniqueViolationException;
+
+        if (typed is not null)
+        {
+            scheme = typed.SchemeName ?? scheme;
+            column = typed.PropertyName ?? column;
+        }
+        else if (IsEmailUniqueViolation(ex))
+        {
+            scheme = "_users";
+            column = "_email";
+        }
+
+        metrics.UniqueViolations.Add(1,
+            new KeyValuePair<string, object?>("scheme", scheme),
+            new KeyValuePair<string, object?>("column", column));
+    }
 }

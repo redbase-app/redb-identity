@@ -66,6 +66,11 @@ public sealed class IdentityMetrics : IDisposable
             "identity.unique_violation",
             unit: "{violation}",
             description: "DB unique-index violations surfaced to callers (TOCTOU guard). Tag: scheme, column.");
+
+        AuditWriteFailures = _meter.CreateCounter<long>(
+            "identity.audit.write_failures",
+            unit: "{failure}",
+            description: "Audit events whose row could not be written to identity_audit_log; the event itself went on. Tag: event_type.");
     }
 
     public Counter<long> LoginAttempts { get; }
@@ -77,6 +82,7 @@ public sealed class IdentityMetrics : IDisposable
     public Counter<long> RateLimitRejections { get; }
     public Histogram<double> PasswordVerifyDuration { get; }
     public Counter<long> UniqueViolations { get; }
+    public Counter<long> AuditWriteFailures { get; }
 
     public void Dispose() => _meter.Dispose();
 }

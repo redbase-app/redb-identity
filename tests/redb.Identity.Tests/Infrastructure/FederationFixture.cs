@@ -53,7 +53,7 @@ public sealed class FederationFixture : IAsyncLifetime
             .AddJsonFile("appsettings.json")
             .Build();
 
-        var cs = config.GetConnectionString("Postgres")
+        var cs = config.GetPostgresConnectionString()
                  ?? throw new InvalidOperationException("ConnectionStrings:Postgres not found");
 
         var services = new ServiceCollection();

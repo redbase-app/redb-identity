@@ -80,7 +80,10 @@ internal sealed class MeWebAuthnProcessor : IProcessor
                 break;
         }
 
-        if (exchange.Out!.Body is Dictionary<string, object?> dict && !dict.ContainsKey("error"))
+        // The generic self-service event only when the operation recorded none of its own: register-complete and
+        // credential-delete write MfaWebAuthnRegistered / MfaWebAuthnRevoked, which must reach the audit as they are.
+        if (exchange.Out!.Body is Dictionary<string, object?> dict && !dict.ContainsKey("error")
+            && !exchange.Properties.ContainsKey("identity-event-type"))
         {
             exchange.Properties["identity-event-type"] = $"MfaSelfService:webauthn:{operation}";
             exchange.Properties["identity-event-data"] = new { UserId = callerId.Value, Operation = operation };

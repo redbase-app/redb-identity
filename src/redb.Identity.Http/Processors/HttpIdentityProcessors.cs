@@ -84,13 +84,29 @@ internal static class HttpIdentityProcessors
     /// 2. Form-encoded body → client_id + client_secret headers (if not already set)
     /// Also propagates Content-Type for downstream processors.
     /// </summary>
+    private static bool TryDecodeBase64(string value, out byte[] bytes)
+    {
+        try
+        {
+            bytes = Convert.FromBase64String(value);
+            return true;
+        }
+        catch (FormatException)
+        {
+            bytes = Array.Empty<byte>();
+            return false;
+        }
+    }
+
     internal static Task MapHttpToIdentityHeaders(IExchange e, CancellationToken ct)
     {
         var authHeader = e.In.GetHeader<string>(HttpHeaders.Authorization);
-        if (authHeader?.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase) == true)
+        // A Basic value that is not base64 maps no credentials: the request goes on without them, and the
+        // endpoint answers the unreadable header with invalid_client instead of this step failing with a 500.
+        if (authHeader?.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase) == true
+            && TryDecodeBase64(authHeader[6..].Trim(), out var credentials))
         {
-            var decoded = Encoding.UTF8.GetString(
-                Convert.FromBase64String(authHeader[6..]));
+            var decoded = Encoding.UTF8.GetString(credentials);
             var parts = decoded.Split(':', 2);
             e.In.Headers["client_id"] = Uri.UnescapeDataString(parts[0]);
             if (parts.Length > 1)
@@ -317,6 +333,26 @@ internal static class HttpIdentityProcessors
         // processors inherit it. SerializeJsonResponse will propagate it to Out.
         e.In.Headers[HttpHeaders.ResponseCode] = statusCode;
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Revocation status (RFC 7009): an error answers as <see cref="MapOAuthErrorToHttpStatus"/> maps it
+    /// (section 2.2.1), except <c>invalid_token</c>: a token the server does not know or no longer honours is
+    /// answered with 200 (section 2.2), since there is nothing left to revoke.
+    /// </summary>
+    internal static async Task MapRevocationErrorToHttpStatus(IExchange e, CancellationToken ct)
+    {
+        await MapOAuthErrorToHttpStatus(e, ct).ConfigureAwait(false);
+
+        var body = e.HasOut ? e.Out!.Body : e.In.Body;
+        var error = body switch
+        {
+            IDictionary<string, object?> dictN when dictN.TryGetValue("error", out var errN) => errN as string,
+            IDictionary<string, object> dictV when dictV.TryGetValue("error", out var errV) => errV as string,
+            _ => null
+        };
+        if (error == "invalid_token")
+            e.In.Headers[HttpHeaders.ResponseCode] = 200;
     }
 
     /// <summary>
