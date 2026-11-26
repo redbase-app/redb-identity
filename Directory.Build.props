@@ -12,8 +12,8 @@
     -->
     <NoWarn>$(NoWarn);1591</NoWarn>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>4.7.5</Version>
-    <PackageVersion>4.7.5</PackageVersion>
+    <Version>4.7.6</Version>
+    <PackageVersion>4.7.6</PackageVersion>
     <Authors>RedBase</Authors>
     <Company>RedBase</Company>
     <Product>redb.Identity</Product>

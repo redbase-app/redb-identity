@@ -1034,35 +1034,40 @@ pwsh -File .\run_all.ps1 -StopOnFail     # bail out on the first failing demo
 ```csharp
 services.AddIdentityClient(options =>
 {
-    options.BaseUrl = "https://identity.local";
-    options.AccessTokenProvider = new ClientCredentialsAccessTokenProvider(
-        clientId: "my-svc",
-        clientSecret: builder.Configuration["IdentitySvcSecret"]!,
-        scopes: ["identity:manage"]);
+    options.BaseUrl = new Uri("https://id.example.org");     // the management API (/api/v1/identity/*)
+    options.ClientId = "my-svc";
+    options.ClientSecret = builder.Configuration["IdentitySvcSecret"]!;
+    options.Scopes = ["identity:manage"];
 });
+services.AddClientCredentialsTokenProvider();
 
 public class UserSync(IIdentityClient identity)
 {
+    private DateTimeOffset? _cursor;
+
     public async Task RunAsync(CancellationToken ct)
     {
-        var page = await identity.Users.ListAsync(new UsersListRequest { Limit = 100 }, ct);
-        foreach (var u in page.Items)
-            await PersistAsync(u, ct);
+        var page = await identity.ListUsersAsync(offset: 0, count: 100, ct: ct);
+        foreach (var user in page.Items)
+            Console.WriteLine(user.Login);
 
-        // Backchannel revocations — pull deltas since the last cursor
-        var since = await identity.RevokedSids.GetSinceAsync(_cursor, ct);
-        foreach (var entry in since.Entries) _cache.Apply(entry);
+        // Backchannel revocations: pull the entries since the last cursor
+        var since = await identity.GetRevokedSidsSinceAsync(_cursor, ct);
+        foreach (var entry in since.Entries)
+            Console.WriteLine(entry.Sid);
         _cursor = since.NextCursor;
     }
 }
 ```
 
+On 4.7 the client builds the token and the other protocol addresses from `BaseUrl`, so `BaseUrl` must be the
+address that also serves `/connect/*` and `/.well-known/*`: do not point it at a separate management port.
+
 Partial classes group endpoints by area: `Users`, `Groups`, `Applications`, `Scopes`, `ClaimMappers`, `Federation`, `Sessions`, `Tokens`, `Mfa`, `Audit`, `Account`, `Token`, `Scim`, `Info`, `RevokedSids`.
 
-Two access-token providers ship:
-
-- `ClientCredentialsAccessTokenProvider` — for daemons / CLIs / hosted services
-- `HttpContextAccessTokenProvider` — for BFF replay of an end-user's bearer
+The client sends the token of the registered `IAccessTokenProvider`. `AddClientCredentialsTokenProvider()` registers
+`ClientCredentialsAccessTokenProvider`, for daemons, CLIs and hosted services; a host that acts for a signed-in user
+registers its own provider (the console of the `full` and `web` images replays the user's bearer).
 
 Every HTTP error is normalized to RFC 7807 `ProblemDetails` and surfaced as `ApiException`.
 

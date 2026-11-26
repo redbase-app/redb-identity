@@ -96,13 +96,20 @@ start, or change the `identity-web` client in the management API.
 
 If you front the BFF with your own reverse proxy, preserve these headers:
 
-- `Host`: both BFF and server compute the OIDC issuer from it. Rewriting it
-  breaks token issuer validation.
-- `X-Forwarded-Proto`: the BFF sets cookies with `Secure` only when the
-  request scheme is `https`. A missing header behind a TLS-terminating proxy
-  silently disables the `Secure` flag.
+- `Host`: neither the BFF nor the server computes the OIDC issuer from it. The server takes the issuer from its
+  configuration (`Identity:Issuer`), and the BFF learns it from the server's discovery document. Keep `Host` all
+  the same: the server's login, MFA and consent forms accept a post whose origin
+  matches its `IdentityTransport:Issuer` or the `Host` it was addressed to.
+- `X-Forwarded-Proto`: the BFF reads it only with `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`. Without that
+  switch, behind a TLS-terminating proxy, its redirects to its own login page point at `http://`. Its session
+  cookie is `Secure` either way.
 - For `/_blazor`, set `Upgrade: $http_upgrade` and `Connection: upgrade`, and
   raise the proxy read timeout: the Blazor Server circuit is a long-lived WebSocket.
+- The session cookie is about 10 KB in chunks: raise the proxy's header buffers for responses and requests
+  (nginx: `proxy_buffer_size` and `large_client_header_buffers`), or the sign-in answers 502 and signed-in
+  requests answer 400.
+
+The full setup with an nginx example is in the image's `DOCKER.md`, section "Behind a reverse proxy".
 
 ---
 
